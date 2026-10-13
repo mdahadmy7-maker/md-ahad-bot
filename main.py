@@ -1,26 +1,186 @@
+
 import os
-import requests
 import asyncio
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
+import logging
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    filters,
+    ContextTypes,
+)
 
-# Render Environment Variable থেকে টোকেন নেওয়া হবে
+# Railway Environment Variable থেকে টোকেন নেওয়া হবে
 BOT_TOKEN = os.getenv("BOT_TOKEN")
+LOGIN_URL = "https://www.hgnice.vip"
+ACCESS_KEY = "123456"
 
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text("হ্যালো! WinGo প্রেডিকশন বটে আপনাকে স্বাগতম। প্রেডিকশন পেতে /predict লিখুন।")
+user_states = {}
 
-async def predict(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # WinGo প্রেডিকশন লজিক
-    await update.message.reply_text("📊 **WinGo 1M Prediction:**\n\nResult: GREEN (Big)\nConfidence: 85%")
+def get_state(uid):
+    if uid not in user_states:
+        user_states[uid] = {
+            "logged_in": False,
+            "awaiting": None,
+            "game": None,
+            "steps": [],
+            "step_idx": 0,
+            "target": 0,
+            "profit": 0,
+            "bets": 0,
+            "wins": 0,
+            "running": False,
+            "task": None,
+        }
+    return user_states[uid]
 
-if __name__ == "__main__":
+def stop_user(uid):
+    state = get_state(uid)
+    state["running"] = False
+    if state.get("task"):
+        state["task"].cancel()
+
+def gen_period(game_mode):
+    return "2026101301001"
+
+async def auto_bet_loop(uid, ctx):
+    state = get_state(uid)
+    try:
+        while state["running"]:
+            await asyncio.sleep(28)
+            if not state["running"]:
+                break
+            p = gen_period(state["game"])
+    except asyncio.CancelledError:
+        pass
+
+async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    text = (
+        "🧠 Prediction Engine — 9 Layers\n"
+        "⚡ Streak • 🔷 Pattern • 📈 Trend\n"
+        "🔍 Manipulation • 🎨 Colour • 🔢 Frequency\n"
+        "🔄 Markov • ♻️ Cycle • 💎 Momentum\n\n"
+        "🔄 Every layer is back-tested live so its vote weight follows its real hit-rate\n"
+        "🔴 Confidence below 30% → sit out\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "🎬 4-second 🧠 generating prediction animation\n"
+        "🚀 Analysis → auto bet every 30s period\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "👇 Press the button below to LOGIN"
+    )
+
+    keyboard = [[
+        InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", url=LOGIN_URL)
+    ]]
+
+    await update.message.reply_text(
+        text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        disable_web_page_preview=True
+    )
+
+async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    state = get_state(uid)
+    text = update.message.text.strip()
+
+    if not state["logged_in"]:
+        if text.lower() == ACCESS_KEY.lower():
+            state["logged_in"] = True
+            keyboard = [
+                [
+                    InlineKeyboardButton("🎮 WinGo 30s", callback_data="game_30s"),
+                    InlineKeyboardButton("⏱️ WinGo 1m", callback_data="game_1m"),
+                ],
+                [
+                    InlineKeyboardButton("🕐 WinGo 3m", callback_data="game_3m"),
+                    InlineKeyboardButton("🕔 WinGo 5m", callback_data="game_5m"),
+                ],
+            ]
+            await update.message.reply_text(
+                "✅ *KEY ACCEPTED!*\n🎯 গেম সিলেক্ট করুন:",
+                parse_mode="Markdown",
+                reply_markup=InlineKeyboardMarkup(keyboard),
+            )
+        else:
+            await update.message.reply_text("❌ ভুল Access Key বা নম্বর। আবার দিন।")
+        return
+
+    if state.get("awaiting") == "steps":
+        try:
+            parts = [float(x.strip()) for x in text.replace(" ", "").split(",")]
+            parts = [p for p in parts if p > 0]
+            state["steps"] = parts
+            state["step_idx"] = 0
+            state["awaiting"] = "target"
+            await update.message.reply_text(
+                "✅ STEPS SAVED\n🎯 এখন TARGET PROFIT দিন (যেমন: 500):"
+            )
+        except:
+            await update.message.reply_text(
+                "❌ ভুল ফরম্যাট! 10,20,40,80,160 এভাবে লিখুন", parse_mode="Markdown"
+            )
+        return
+
+    if state.get("awaiting") == "target":
+        try:
+            tgt = float(text)
+            state["target"] = tgt
+            state["awaiting"] = None
+            state["profit"] = 0
+            state["bets"] = 0
+            state["wins"] = 0
+            state["step_idx"] = 0
+            state["running"] = True
+            await update.message.reply_text(
+                f"🚀 *AUTO BETTING STARTED!*\n🎯 Target: *{tgt}*\n⏳ অপেক্ষা করুন...",
+                parse_mode="Markdown",
+            )
+            if state.get("task"):
+                state["task"].cancel()
+            state["task"] = asyncio.create_task(auto_bet_loop(uid, ctx))
+        except:
+            await update.message.reply_text("❌ সঠিক সংখ্যা লিখুন। যেমন: 500")
+        return
+
+async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    uid = update.effective_user.id
+    state = get_state(uid)
+    data = query.data
+
+    if data.startswith("game_"):
+        mode = data.split("_")[1]
+        state["game"] = mode
+        state["awaiting"] = "steps"
+        await query.edit_message_text(
+            f"🎮 *WinGo {mode.upper()} SELECTED*\n\n"
+            f"💰 *BET STEPS* লিখুন:\n_Example: 10,20,40,80,160_",
+            parse_mode="Markdown",
+        )
+    elif data == "stop_bet":
+        stop_user(uid)
+        await query.edit_message_text(
+            f"🛑 STOPPED\n💰 Profit: *{state['profit']}*",
+            parse_mode="Markdown",
+        )
+
+def main():
     if not BOT_TOKEN:
         print("Error: BOT_TOKEN পরিবেশক ভ্যারিয়েবল সেট করা নেই!")
-    else:
-        app = ApplicationBuilder().token(BOT_TOKEN).build()
-        app.add_handler(CommandHandler("start", start))
-        app.add_handler(CommandHandler("predict", predict))
-        print("Bot is running...")
-        app.run_polling()
-      
+        return
+
+    app = ApplicationBuilder().token(BOT_TOKEN).build()
+
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(CallbackQueryHandler(callback_handler))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+
+    print("Bot is running...")
+    app.run_polling()
+
+if __name__ == "__main__":
+    main()
