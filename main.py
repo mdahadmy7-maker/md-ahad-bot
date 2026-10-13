@@ -13,7 +13,7 @@ from telegram.ext import (
 )
 
 # Railway Environment Variable থেকে টোকেন নেওয়া হবে
-BOT_TOKEN = os.getenv("8918135716:AAGmTW1mZTLJDmnJWpGNjRj6cKGWIFqrvVc")
+BOT_TOKEN = os.getenv("BOT_TOKEN")
 LOGIN_URL = "https://www.hgnice.vip"
 ACCESS_KEY = "123456"
 
