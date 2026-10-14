@@ -12,7 +12,7 @@ from telegram.ext import (
 )
 
 # ⚠️ এখানে আপনার BotFather থেকে নেওয়া বটের আসল TOKEN এবং আপনার টেলিগ্রাম ID দিন
-BOT_TOKEN = "8918135716:AAGXOwAXGPvHww4lVVpi6xWowqIQCgfZO9c"  # আপনার বটের আসল API Token বসান
+BOT_TOKEN = "8918135716:AAEkl_SSM1n_t9UHEVL1ogrStbreFsxgPgw"  # আপনার বটের আসল API Token বসান
 ADMIN_ID = 8164888241             # আপনার অ্যাডমিন আইডি
 
 user_states = {}
