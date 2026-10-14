@@ -1,5 +1,3 @@
-
-import os
 import asyncio
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -12,8 +10,8 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# Railway Environment Variable থেকে টোকেন নেওয়া হবে
-BOT_TOKEN = os.getenv("BOT_TOKEN")
+# আপনার টেলিগ্রাম বটের টোকেনটি এখানে "YOUR_BOT_TOKEN_HERE" এর বদলে বসিয়ে দিন
+BOT_TOKEN = "8918135716:AAGmTW1mZTLJDmnJWpGNjRj6cKGWIFqrvVc"
 LOGIN_URL = "https://www.hgnice.vip"
 ACCESS_KEY = "123456"
 
@@ -169,10 +167,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
 def main():
-    if not BOT_TOKEN:
-        print("Error: BOT_TOKEN পরিবেশক ভ্যারিয়েবল সেট করা নেই!")
-        return
-
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
