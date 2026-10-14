@@ -11,9 +11,9 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# আপনার টেলিগ্রাম বটের টোকেনটি এখানে বসিয়ে দিন
+# আপনার টেলিগ্রাম বটের টোকেন এবং আপনার অ্যাডমিন আইডি এখানে বসিয়ে দিন
 BOT_TOKEN = "8918135716:AAGmTW1mZTLJDmnJWpGNjRj6cKGWIFqrvVc"
-ADMIN_ID = 8164888241  # আপনার প্রাপ্ত আইডি
+ADMIN_ID = 8164888241
 
 user_states = {}
 
@@ -21,7 +21,7 @@ def get_state(uid):
     if uid not in user_states:
         user_states[uid] = {
             "logged_in": False,
-            "awaiting": "phone",
+            "awaiting": None,
             "phone": "",
             "game": None,
             "steps": [],
@@ -54,6 +54,28 @@ async def auto_bet_loop(uid, ctx):
         pass
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    state = get_state(uid)
+    
+    # যদি ইউজার ইতিমধ্যে লগইন করা থাকে, তাকে সরাসরি গেম সিলেকশন দেখাবে
+    if state["logged_in"]:
+        keyboard = [
+            [
+                InlineKeyboardButton("🎮 WinGo 30s", callback_data="game_30s"),
+                InlineKeyboardButton("⏱️ WinGo 1m", callback_data="game_1m"),
+            ],
+            [
+                InlineKeyboardButton("🕐 WinGo 3m", callback_data="game_3m"),
+                InlineKeyboardButton("🕔 WinGo 5m", callback_data="game_5m"),
+            ],
+        ]
+        await update.message.reply_text(
+            "✅ আপনি ইতিমধ্যে অনুমোদিত আছেন!\n🎯 গেম সিলেক্ট করুন:",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+        return
+
     text = (
         "🧠 Prediction Engine — 9 Layers\n"
         "⚡ Streak • 🔷 Pattern • 📈 Trend\n"
@@ -117,7 +139,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             print(f"Admin message error: {e}")
         return
 
-    # স্টেপস এবং টার্গেট প্রফিট হ্যান্ডেলিং
+    # ২. গেমের স্টেপস সেট করা
     if state["logged_in"]:
         if state.get("awaiting") == "steps":
             try:
@@ -135,6 +157,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
             return
 
+        # ৩. টার্গেট প্রফিট সেট করা
         if state.get("awaiting") == "target":
             try:
                 tgt = float(text)
@@ -157,10 +180,10 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     uid = query.from_user.id
+    state = get_state(uid)
     data = query.data
 
     if data == "start_login":
-        state = get_state(uid)
         state["awaiting"] = "phone"
         login_text = (
             "╔═══════════════════════════════╗\n"
@@ -173,17 +196,20 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await query.message.reply_text(login_text, parse_mode="Markdown")
 
-    # অ্যাডমিন যখন APPROVE বাটনে চাপ দেবে
+    # অ্যাডমিন যখন যে কোনো ইউজারের APPROVE বাটনে চাপ দেবে
     elif data.startswith("approve_"):
         target_uid = int(data.split("_")[1])
         target_state = get_state(target_uid)
         target_state["logged_in"] = True
         target_state["awaiting"] = None
 
-        # অ্যাডমিন চ্যাট আপডেট করা
-        await query.edit_message_text(f"{query.message.text}\n\n✅ **APPROVED!**")
+        # অ্যাডমিন চ্যাট আপডেট করা যাতে বোঝা যায় এটি অ্যাপ্রুভ হয়ে গেছে
+        try:
+            await query.edit_message_text(f"{query.message.text}\n\n✅ **APPROVED!**")
+        except:
+            pass
 
-        # ইউজারকে গেম সিলেকশন বাটন পাঠানো
+        # নির্দিষ্ট ইউজারকে গেম সিলেকশন বাটন পাঠানো
         keyboard = [
             [
                 InlineKeyboardButton("🎮 WinGo 30s", callback_data="game_30s"),
@@ -205,7 +231,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             print(f"User notify error: {e}")
 
     elif data.startswith("game_"):
-        state = get_state(uid)
         if not state["logged_in"]:
             await query.message.reply_text("❌ আগে লগইন করুন এবং অ্যাডমিনের অনুমোদনের অপেক্ষা করুন।")
             return
