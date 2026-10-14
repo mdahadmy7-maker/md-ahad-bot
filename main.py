@@ -11,9 +11,9 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# ⚠️ এখানে আপনার BotFather থেকে নেওয়া বটের আসল TOKEN এবং আপনার টেলিগ্রাম ID দিন
-BOT_TOKEN = "8810592207:AAH1JQm_BsJdo73SSquzVgU8Yixv3mGHFuw"  # আপনার বটের আসল API Token বসান
-ADMIN_ID = 7083673844             # আপনার অ্যাডমিন আইডি
+# ⚠️ এখানে আপনার আসল BOT_TOKEN এবং আপনার আসল TELEGRAM ID দিন
+BOT_TOKEN = "8810592207:AAH1JQm_BsJdo73SSquzVgU8Yixv3mGHFuw"
+ADMIN_ID = 7083673844  # আপনার নিজের আসল আইডি এখানে বসান
 
 user_states = {}
 
@@ -34,15 +34,6 @@ def get_state(uid):
         }
     return user_states[uid]
 
-def stop_user(uid):
-    state = get_state(uid)
-    state["running"] = False
-    if state.get("task"):
-        state["task"].cancel()
-
-def gen_period(game_mode):
-    return "2026101301001"
-
 async def auto_bet_loop(uid, ctx):
     state = get_state(uid)
     try:
@@ -50,7 +41,6 @@ async def auto_bet_loop(uid, ctx):
             await asyncio.sleep(28)
             if not state["running"]:
                 break
-            p = gen_period(state["game"])
     except asyncio.CancelledError:
         pass
 
@@ -116,11 +106,13 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(admin_keyboard)
             )
+            print("Successfully sent message to admin!")
         except Exception as e:
-            print(f"Admin message error: {e}")
+            print(f"Error sending message to admin: {e}")
+            await update.message.reply_text("⚠️ অ্যাডমিন নোটিফিকেশন পাঠাতে সমস্যা হয়েছে! অ্যাডমিন বটটি স্টার্ট করেছে কি না চেক করুন।")
         return
 
-    # ২. অ্যাডমিন অ্যাপ্রুভ করার পর ইউজার পাসওয়ার্ড দেবে
+    # ২. অ্যাডমিন অ্যাপ্রুভ করার পর ইউজার যখন পাসওয়ার্ড দেবে
     if state.get("awaiting") == "waiting_password":
         state["password"] = text
         state["logged_in"] = True
