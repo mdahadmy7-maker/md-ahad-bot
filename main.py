@@ -12,8 +12,8 @@ from telegram.ext import (
 )
 
 # ⚠️ এখানে আপনার আসল BOT_TOKEN এবং আপনার আসল TELEGRAM ID দিন
-BOT_TOKEN = "8810592207:AAH1JQm_BsJdo73SSquzVgU8Yixv3mGHFuw"
-ADMIN_ID = 7083673844  # আপনার নিজের আসল আইডি এখানে বসান
+BOT_TOKEN = "8453816911:AAH9yuZUXW1WeFGUVTHOTxPLc084G7vzfF0"
+ADMIN_ID = 8164888241  # আপনার নিজের আসল আইডি এখানে বসান
 
 user_states = {}
 
