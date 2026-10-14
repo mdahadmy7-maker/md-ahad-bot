@@ -11,9 +11,9 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# আপনার টেলিগ্রাম বটের টোকেন এবং আপনার অ্যাডমিন আইডি এখানে বসিয়ে দিন
-BOT_TOKEN = "8918135716:AAGXOwAXGPvHww4lVVpi6xWowqIQCgfZO9c"
-ADMIN_ID = 8164888241
+# ⚠️ এখানে আপনার BotFather থেকে নেওয়া বটের আসল TOKEN এবং আপনার টেলিগ্রাম ID দিন
+BOT_TOKEN = "8918135716:AAGXOwAXGPvHww4lVVpi6xWowqIQCgfZO9c"  # আপনার বটের আসল API Token বসান
+ADMIN_ID = 8164888241             # আপনার অ্যাডমিন আইডি
 
 user_states = {}
 
@@ -57,24 +57,6 @@ async def auto_bet_loop(uid, ctx):
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
-    
-    if state["logged_in"] and state.get("game"):
-        keyboard = [
-            [
-                InlineKeyboardButton("🎮 WinGo 30s", callback_data="game_30s"),
-                InlineKeyboardButton("⏱️ WinGo 1m", callback_data="game_1m"),
-            ],
-            [
-                InlineKeyboardButton("🕐 WinGo 3m", callback_data="game_3m"),
-                InlineKeyboardButton("🕔 WinGo 5m", callback_data="game_5m"),
-            ],
-        ]
-        await update.message.reply_text(
-            "✅ আপনি ইতিমধ্যে লগইন করা আছেন!\n🎯 গেম সিলেক্ট করুন:",
-            parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-        )
-        return
 
     text = (
         "🧠 Prediction Engine — 9 Layers\n"
@@ -138,16 +120,11 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             print(f"Admin message error: {e}")
         return
 
-    # ২. অ্যাডমিন অ্যাপ্রুভ করার পর ইউজার যখন পাসওয়ার্ড দেবে
+    # ২. অ্যাডমিন অ্যাপ্রুভ করার পর ইউজার পাসওয়ার্ড দেবে
     if state.get("awaiting") == "waiting_password":
         state["password"] = text
         state["logged_in"] = True
         state["awaiting"] = None
-
-        await update.message.reply_text(
-            "✅ *পাসওয়ার্ড সফলভাবে গৃহিত হয়েছে এবং একাউন্ট যুক্ত হয়েছে!*\n🎯 গেম সিলেক্ট করুন:",
-            parse_mode="Markdown"
-        )
 
         keyboard = [
             [
@@ -160,12 +137,13 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ],
         ]
         await update.message.reply_text(
-            "👇 নিচ থেকে গেম মোড বেছে নিন:",
+            "✅ *পাসওয়ার্ড সফলভাবে গৃহিত হয়েছে এবং একাউন্ট যুক্ত হয়েছে!*\n\n🎯 গেম সিলেক্ট করুন:",
+            parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
         return
 
-    # ৩. গেমের স্টেপস (বেট অ্যামাউন্ট) সেট করা
+    # ৩. গেমের স্টেপস সেট করা
     if state["logged_in"]:
         if state.get("awaiting") == "steps":
             try:
@@ -183,7 +161,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
             return
 
-        # ৪. টার্গেট প্রফিট সেট করা এবং অটো-বেট শুরু হওয়া
+        # ৪. টার্গেট প্রফিট সেট করা
         if state.get("awaiting") == "target":
             try:
                 tgt = float(text)
@@ -222,11 +200,10 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await query.message.reply_text(login_text, parse_mode="Markdown")
 
-    # অ্যাডমিন যখন APPROVE বাটনে চাপ দেবে
     elif data.startswith("approve_"):
         target_uid = int(data.split("_")[1])
         target_state = get_state(target_uid)
-        target_state["awaiting"] = "waiting_password"  # অ্যাপ্রুভ করার পর পাসওয়ার্ড চাওয়ার জন্য স্টেট সেট করা হলো
+        target_state["awaiting"] = "waiting_password"
 
         try:
             await query.edit_message_text(f"{query.message.text}\n\n✅ **APPROVED!**")
@@ -244,7 +221,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     elif data.startswith("game_"):
         if not state["logged_in"]:
-            await query.message.reply_text("❌ আগে লগইন করুন এবং পাসওয়ার্ড দিয়ে ভেরিফাই করুন।")
+            await query.message.reply_text("❌ আগে নম্বর ও পাসওয়ার্ড দিয়ে লগইন সম্পন্ন করুন।")
             return
         mode = data.split("_")[1]
         state["game"] = mode
@@ -256,8 +233,8 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
 def main():
-    if not BOT_TOKEN:
-        print("Error: BOT_TOKEN সেট করা নেই!")
+    if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
+        print("Error: সঠিক BOT_TOKEN বসান!")
         return
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
