@@ -9,7 +9,7 @@ logging.basicConfig(
 )
 
 # ⚠️ এখানে আপনার নতুন বটের API Token বসান
-TOKEN = "8648518720:AAHddII2GVETJZLUimdzEviRigIuV-93eQA"
+TOKEN = "8648518720:AAHl00gx4GICu4ISNDpSN5lSveAMFqLo3iQ"
 
 # আপনার টেলিগ্রাম আইডি এখানে দিন যাতে শুধু আপনিই অ্যাডমিন প্যানেল দেখতে পারেন (আপনার ইউজার আইডি নম্বর)
 ADMIN_USER_ID = 8164888241  # এখানে আপনার টেলিগ্রাম আইডি বসাবেন
