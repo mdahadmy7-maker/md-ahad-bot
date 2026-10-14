@@ -8,14 +8,44 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# ⚠️ এখানে আপনার নতুন বটের API Token বসান
-TOKEN = "8648518720:AAH3PNB7Eaws5h7TJNZcxTvXPvDR5vZn1tU"
-
-# আপনার টেলিগ্রাম আইডি এখানে দিন যাতে শুধু আপনিই অ্যাডমিন প্যানেল দেখতে পারেন (আপনার ইউজার আইডি নম্বর)
+# ⚠️ আপনার বটের নতুন API Token এবং অ্যাডমিন আইডি বসান
+TOKEN = "8648518720:AAEWG-y74hp60BcrOyLiqNiTLMUwjvutPdA"
 ADMIN_USER_ID = 8164888241  # এখানে আপনার টেলিগ্রাম আইডি বসাবেন
 
-# ১. /start কমান্ড রেসপন্স
+# অনুমোদিত ইউজারদের আইডি জমা রাখার লিস্ট (ডিফল্টভাবে অ্যাডমিন অনুমোদিত)
+APPROVED_USERS = {ADMIN_USER_ID}
+
+# ১. /start কমান্ড
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    user_name = update.effective_user.first_name
+
+    # ইউজার অনুমোদিত কি না তা চেক করা
+    if user_id not in APPROVED_USERS:
+        # অ্যাডমিনকে নোটিফিকেশন পাঠানো
+        try:
+            await context.bot.send_message(
+                chat_id=ADMIN_USER_ID,
+                text=f"🔔 **New Access Request!**\n\n"
+                     f"👤 **User:** {user_name}\n"
+                     f"🆔 **ID:** `{user_id}`\n\n"
+                     f"অ্যাপ্রুভ করতে লিখুন: `/approve {user_id}`",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logging.error(f"Failed to notify admin: {e}")
+
+        # ইউজারকে নোটিফিকেশন
+        await update.message.reply_text(
+            f"❌ **Access Denied!**\n\n"
+            f"Hello {user_name}, you do not have permission to use this bot.\n"
+            f"Your Access Request (ID: `{user_id}`) has been sent to the Admin.\n\n"
+            f"⏳ Please wait for Admin approval.",
+            parse_mode="Markdown"
+        )
+        return
+
+    # অনুমোদিত ইউজারদের জন্য মূল মেনু
     welcome_message = (
         "🧠 **Prediction Engine — 9 Layers**\n"
         "⚡ Streak • 🔷 Pattern • 📈 Trend\n"
@@ -41,7 +71,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     user_id = update.effective_user.id
     
-    # চেক করা ইউজার অ্যাডমিন কি না
     if user_id != ADMIN_USER_ID:
         await update.message.reply_text("❌ আপনার এই প্যানেলটি ব্যবহার করার অনুমতি নেই।")
         return
@@ -49,25 +78,80 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     admin_text = (
         "⚙️ **Admin Control Panel**\n"
         "_________________________________________\n"
-        "Welcome to bot management system. Choose an option below:"
+        f"📊 Total Approved Users: {len(APPROVED_USERS)}\n\n"
+        "**Commands:**\n"
+        "• `/approve <user_id>` — ইউজারকে পারমিশন দিতে\n"
+        "• `/revoke <user_id>` — পারমিশন বাতিল করতে\n"
+        "• `/users` — অনুমোদিত ইউজারের লিস্ট দেখতে"
     )
     
     keyboard = [
         [InlineKeyboardButton("📊 Bot Status & Stats", callback_data="admin_stats")],
-        [InlineKeyboardButton("📢 Broadcast Message", callback_data="admin_broadcast")],
-        [InlineKeyboardButton("🔄 Restart Engine", callback_data="admin_restart")]
+        [InlineKeyboardButton("📢 Broadcast Message", callback_data="admin_broadcast")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(text=admin_text, reply_markup=reply_markup, parse_mode="Markdown")
 
-# ৩. বাটন হ্যান্ডলার (ইউজার এবং অ্যাডমিন ইন্টারঅ্যাকশন)
+# ৩. ইউজার পারমিশন দেওয়ার কমান্ড (/approve <user_id>)
+async def approve_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_USER_ID:
+        return
+    
+    try:
+        target_id = int(context.args[0])
+        APPROVED_USERS.add(target_id)
+        
+        await update.message.reply_text(f"✅ User `{target_id}` has been approved!", parse_mode="Markdown")
+        
+        # ইউজারকে জানান দেওয়া
+        await context.bot.send_message(
+            chat_id=target_id,
+            text="🎉 **Congratulations!** Your account has been approved by Admin.\nType /start to use the bot.",
+            parse_mode="Markdown"
+        )
+    except (IndexError, ValueError):
+        await update.message.reply_text("⚠️ সঠিক ফরম্যাট: `/approve <user_id>`", parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error notifying user: {e}")
+
+# ৪. ইউজার পারমিশন বাতিল করার কমান্ড (/revoke <user_id>)
+async def revoke_user(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_USER_ID:
+        return
+    
+    try:
+        target_id = int(context.args[0])
+        if target_id == ADMIN_USER_ID:
+            await update.message.reply_text("❌ আপনি নিজেকে রিমুভ করতে পারবেন না।")
+            return
+            
+        APPROVED_USERS.discard(target_id)
+        await update.message.reply_text(f"🚫 User `{target_id}` permission revoked!", parse_mode="Markdown")
+    except (IndexError, ValueError):
+        await update.message.reply_text("⚠️ সঠিক ফরম্যাট: `/revoke <user_id>`", parse_mode="Markdown")
+
+# ৫. অনুমোদিত ইউজারের লিস্ট (/users)
+async def list_users(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.effective_user.id != ADMIN_USER_ID:
+        return
+    
+    user_list = "\n".join([f"• `{uid}`" for uid in APPROVED_USERS])
+    await update.message.reply_text(f"👥 **Approved Users List:**\n\n{user_list}", parse_mode="Markdown")
+
+# ৬. বাটন হ্যান্ডলার
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
+    user_id = query.from_user.id
     await query.answer()
+
+    # ইউজার অনুমোদিত না থাকলে বাটন কাজ করবে না
+    if user_id not in APPROVED_USERS:
+        await query.edit_message_text("❌ আপনার একাউন্টটি এখনও অনুমোদিত নয়।")
+        return
+
     data = query.data
 
-    # ইউজার ফ্লো
     if data == "step_login":
         step2_message = (
             "✅ **Account Verified Successfully!**\n\n"
@@ -121,39 +205,36 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         ]
         await query.edit_message_text(text=welcome_message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
-    # অ্যাডমিন প্যানেল বাটন অ্যাকশন
     elif data == "admin_stats":
         await query.edit_message_text(
-            text="📊 **Bot Statistics:**\n\n- Total Users: Active\n- Server Status: Online (100%)\n- Current Ping: 45ms",
+            text=f"📊 **Bot Statistics:**\n\n- Approved Users: {len(APPROVED_USERS)}\n- Server Status: Online (100%)\n- Ping: 40ms",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Admin", callback_data="admin_back")]])
         )
     elif data == "admin_broadcast":
         await query.edit_message_text(
-            text="📢 Broadcast feature is ready. Send your announcement text.",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Admin", callback_data="admin_back")]])
-        )
-    elif data == "admin_restart":
-        await query.edit_message_text(
-            text="🔄 Engine restart signal sent successfully.",
+            text="📢 Broadcast feature is ready.",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Admin", callback_data="admin_back")]])
         )
     elif data == "admin_back":
-        admin_text = "⚙️ **Admin Control Panel**\nChoose an option below:"
+        admin_text = f"⚙️ **Admin Control Panel**\nTotal Approved Users: {len(APPROVED_USERS)}"
         keyboard = [
             [InlineKeyboardButton("📊 Bot Status & Stats", callback_data="admin_stats")],
-            [InlineKeyboardButton("📢 Broadcast Message", callback_data="admin_broadcast")],
-            [InlineKeyboardButton("🔄 Restart Engine", callback_data="admin_restart")]
+            [InlineKeyboardButton("📢 Broadcast Message", callback_data="admin_broadcast")]
         ]
         await query.edit_message_text(text=admin_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 def main() -> None:
     application = Application.builder().token(TOKEN).build()
     
+    # Handlers
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("admin", admin_panel))
+    application.add_handler(CommandHandler("approve", approve_user))
+    application.add_handler(CommandHandler("revoke", revoke_user))
+    application.add_handler(CommandHandler("users", list_users))
     application.add_handler(CallbackQueryHandler(button_handler))
     
-    print("Ahad WinGo Bot with Admin Panel is running...")
+    print("Ahad WinGo Bot with Permission System is running...")
     application.run_polling()
 
 if __name__ == '__main__':
