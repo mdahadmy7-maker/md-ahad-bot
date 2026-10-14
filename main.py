@@ -13,7 +13,7 @@ from telegram.ext import (
 )
 
 # আপনার টেলিগ্রাম বটের টোকেন এবং আপনার অ্যাডমিন আইডি
-BOT_TOKEN = "8648518720:AAH9vL-eBim_5uuvJLHVOZKkdb1-6Yp4oDw"
+BOT_TOKEN = "8648518720:AAFzo1UMYFKD_N2O-Dn2j--XKEj4ge4s8X8"
 ADMIN_ID = 8164888241
 
 user_states = {}
