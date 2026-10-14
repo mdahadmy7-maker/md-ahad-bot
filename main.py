@@ -107,8 +107,8 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     text = update.message.text.strip()
 
-    # ধাপ ১: ইউজার ফোন নম্বর দেবে
-    if not state["logged_in"] and state.get("awaiting") == "phone":
+    # ১. ইউজার যখন ফোন নম্বর দেবে
+    if state.get("awaiting") == "phone":
         state["phone"] = text
         state["awaiting"] = "pending_approval"
         
@@ -138,8 +138,8 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             print(f"Admin message error: {e}")
         return
 
-    # ধাপ ২: অ্যাডমিন অ্যাপ্রুভ করার পর ইউজার পাসওয়ার্ড দেবে
-    if not state["logged_in"] and state.get("awaiting") == "waiting_password":
+    # ২. অ্যাডমিন অ্যাপ্রুভ করার পর ইউজার যখন পাসওয়ার্ড দেবে
+    if state.get("awaiting") == "waiting_password":
         state["password"] = text
         state["logged_in"] = True
         state["awaiting"] = None
@@ -165,7 +165,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ধাপ ৩: গেমের স্টেপস (বেট অ্যামাউন্ট) সেট করা
+    # ৩. গেমের স্টেপস (বেট অ্যামাউন্ট) সেট করা
     if state["logged_in"]:
         if state.get("awaiting") == "steps":
             try:
@@ -183,7 +183,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
             return
 
-        # ধাপ ৪: টার্গেট প্রফিট সেট করা এবং অটো-বেট শুরু হওয়া
+        # ৪. টার্গেট প্রফিট সেট করা এবং অটো-বেট শুরু হওয়া
         if state.get("awaiting") == "target":
             try:
                 tgt = float(text)
@@ -226,7 +226,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("approve_"):
         target_uid = int(data.split("_")[1])
         target_state = get_state(target_uid)
-        target_state["awaiting"] = "waiting_password"  # অ্যাপ্রুভ করার পর পাসওয়ার্ড চাওয়ার জন্য সেট করা হলো
+        target_state["awaiting"] = "waiting_password"  # অ্যাপ্রুভ করার পর পাসওয়ার্ড চাওয়ার জন্য স্টেট সেট করা হলো
 
         try:
             await query.edit_message_text(f"{query.message.text}\n\n✅ **APPROVED!**")
