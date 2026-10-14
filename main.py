@@ -1,3 +1,4 @@
+import os
 import asyncio
 import logging
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -10,9 +11,8 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# আপনার টেলিগ্রাম বটের টোকেনটি এখানে "YOUR_BOT_TOKEN_HERE" এর বদলে বসিয়ে দিন
+# আপনার টেলিগ্রাম বটের টোকেনটি এখানে বসিয়ে দিন
 BOT_TOKEN = "8918135716:AAGmTW1mZTLJDmnJWpGNjRj6cKGWIFqrvVc"
-LOGIN_URL = "https://www.hgnice.vip"
 ACCESS_KEY = "123456"
 
 user_states = {}
@@ -21,7 +21,7 @@ def get_state(uid):
     if uid not in user_states:
         user_states[uid] = {
             "logged_in": False,
-            "awaiting": None,
+            "awaiting": "phone",  # শুরুতে ফোন নম্বর চাওয়ার জন্য
             "game": None,
             "steps": [],
             "step_idx": 0,
@@ -70,7 +70,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     )
 
     keyboard = [[
-        InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", url=LOGIN_URL)
+        InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")
     ]]
 
     await update.message.reply_text(
@@ -84,27 +84,30 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     text = update.message.text.strip()
 
+    # যদি ফোন নম্বর বা এক্সেস কি চাওয়া হয়
     if not state["logged_in"]:
-        if text.lower() == ACCESS_KEY.lower():
-            state["logged_in"] = True
-            keyboard = [
-                [
-                    InlineKeyboardButton("🎮 WinGo 30s", callback_data="game_30s"),
-                    InlineKeyboardButton("⏱️ WinGo 1m", callback_data="game_1m"),
-                ],
-                [
-                    InlineKeyboardButton("🕐 WinGo 3m", callback_data="game_3m"),
-                    InlineKeyboardButton("🕔 WinGo 5m", callback_data="game_5m"),
-                ],
-            ]
-            await update.message.reply_text(
-                "✅ *KEY ACCEPTED!*\n🎯 গেম সিলেক্ট করুন:",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(keyboard),
-            )
-        else:
-            await update.message.reply_text("❌ ভুল Access Key বা নম্বর। আবার দিন।")
-        return
+        if state.get("awaiting") == "phone" or state.get("awaiting") == "key":
+            if text.lower() == ACCESS_KEY.lower():
+                state["logged_in"] = True
+                state["awaiting"] = None
+                keyboard = [
+                    [
+                        InlineKeyboardButton("🎮 WinGo 30s", callback_data="game_30s"),
+                        InlineKeyboardButton("⏱️ WinGo 1m", callback_data="game_1m"),
+                    ],
+                    [
+                        InlineKeyboardButton("🕐 WinGo 3m", callback_data="game_3m"),
+                        InlineKeyboardButton("🕔 WinGo 5m", callback_data="game_5m"),
+                    ],
+                ]
+                await update.message.reply_text(
+                    "✅ *KEY ACCEPTED!*\n🎯 গেম সিলেক্ট করুন:",
+                    parse_mode="Markdown",
+                    reply_markup=InlineKeyboardMarkup(keyboard),
+                )
+            else:
+                await update.message.reply_text("❌ ভুল Access Key বা নম্বর। আবার দিন।")
+            return
 
     if state.get("awaiting") == "steps":
         try:
@@ -150,7 +153,20 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     data = query.data
 
-    if data.startswith("game_"):
+    if data == "start_login":
+        state["awaiting"] = "phone"
+        login_text = (
+            "╔═══════════════════════════════╗\n"
+            "║        🔐 **ACCOUNT LOGIN** 🔐        ║\n"
+            "╚═══════════════════════════════╝\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "📱 Enter your HGNICE phone number:\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "_Everyone uses their own account — your session is private._"
+        )
+        await query.message.reply_text(login_text, parse_mode="Markdown")
+
+    elif data.startswith("game_"):
         mode = data.split("_")[1]
         state["game"] = mode
         state["awaiting"] = "steps"
@@ -167,6 +183,10 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
 
 def main():
+    if not BOT_TOKEN:
+        print("Error: BOT_TOKEN সেট করা নেই!")
+        return
+
     app = ApplicationBuilder().token(BOT_TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
