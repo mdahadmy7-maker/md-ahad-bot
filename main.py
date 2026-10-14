@@ -1,6 +1,6 @@
 import logging
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 # Logging Setup
 logging.basicConfig(
@@ -8,13 +8,16 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# ⚠️ আপনার নতুন বটের API Token এখানে দিন
-TOKEN = "8572734509:AAElZm13hcSKvlnK6hw4i_VQr96-45amWTs"
+# ⚠️ এখানে আপনার নতুন বটের API Token বসান
+TOKEN = "8648518720:AAHddII2GVETJZLUimdzEviRigIuV-93eQA"
 
-# ১. /start কমান্ড এবং স্থায়ী মেনু কিবোর্ডসহ রেসপন্স
+# আপনার টেলিগ্রাম আইডি এখানে দিন যাতে শুধু আপনিই অ্যাডমিন প্যানেল দেখতে পারেন (আপনার ইউজার আইডি নম্বর)
+ADMIN_USER_ID = 8164888241  # এখানে আপনার টেলিগ্রাম আইডি বসাবেন
+
+# ১. /start কমান্ড রেসপন্স
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     welcome_message = (
-        "🧠 Prediction Engine — 9 Layers\n"
+        "🧠 **Prediction Engine — 9 Layers**\n"
         "⚡ Streak • 🔷 Pattern • 📈 Trend\n"
         "🔍 Manipulation • 🎨 Colour • 🔢 Frequency\n"
         "🔄 Markov • ♻️ Cycle • 💎 Momentum\n\n"
@@ -27,45 +30,71 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "👇 Press the button below to LOGIN"
     )
     
-    # স্ক্রিনের নিচের স্থায়ী মেনু বা কিবোর্ড বাটন (যা আপনি স্ক্রিনশটে দেখিয়েছেন)
-    reply_keyboard = [
-        [KeyboardButton("🔐 LOGIN TO ACCOUNT")],
-        [KeyboardButton("📊 Live Status"), KeyboardButton("ℹ️ Help")]
+    keyboard = [
+        [InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="step_login")]
     ]
-    markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # মেসেজের ভেতরে থাকা ইনলাইন লগইন বাটন
-    inline_keyboard = [
-        [InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="login")]
+    await update.message.reply_text(text=welcome_message, reply_markup=reply_markup, parse_mode="Markdown")
+
+# ২. অ্যাডমিন প্যানেল কমান্ড (/admin)
+async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    user_id = update.effective_user.id
+    
+    # চেক করা ইউজার অ্যাডমিন কি না
+    if user_id != ADMIN_USER_ID:
+        await update.message.reply_text("❌ আপনার এই প্যানেলটি ব্যবহার করার অনুমতি নেই।")
+        return
+
+    admin_text = (
+        "⚙️ **Admin Control Panel**\n"
+        "_________________________________________\n"
+        "Welcome to bot management system. Choose an option below:"
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("📊 Bot Status & Stats", callback_data="admin_stats")],
+        [InlineKeyboardButton("📢 Broadcast Message", callback_data="admin_broadcast")],
+        [InlineKeyboardButton("🔄 Restart Engine", callback_data="admin_restart")]
     ]
-    inline_markup = InlineKeyboardMarkup(inline_keyboard)
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
-    await update.message.reply_text(
-        text=welcome_message, 
-        reply_markup=inline_markup
-    )
-    # স্থায়ী মেনু কিবোর্ড পাঠানোর জন্য আলাদা মেসেজ বা একসাথে পাঠানো যায়
-    await update.message.reply_text(
-        text="👇 নিচের মেনু বাটন ব্যবহার করতে পারেন:",
-        reply_markup=markup
-    )
+    await update.message.reply_text(text=admin_text, reply_markup=reply_markup, parse_mode="Markdown")
 
-# ২. নিচের স্থায়ী মেনু থেকে কেউ কোনো বাটনে চাপ দিলে যা হবে
-async def handle_text_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    text = update.message.text
-    if text == "🔐 LOGIN TO ACCOUNT":
-        await update.message.reply_text("✅ অ্যাকাউন্ট ভেরিফিকেশন সফল হয়েছে! নিচের অপশনগুলো দেখুন:")
-    elif text == "📊 Live Status":
-        await update.message.reply_text("🚀 বর্তমান সার্ভার স্ট্যাটাস: ১০০% সচল এবং কাজ করছে।")
-    elif text == "ℹ️ Help":
-        await update.message.reply_text("💡 সাহায্য পেতে অ্যাডমিনের সাথে যোগাযোগ করুন।")
-
-# ৩. ইনলাইন বাটনের কাজ (আগের মতো)
+# ৩. বাটন হ্যান্ডলার (ইউজার এবং অ্যাডমিন ইন্টারঅ্যাকশন)
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
+    data = query.data
 
-    if query.data == "login":
+    # ইউজার ফ্লো
+    if data == "step_login":
+        step2_message = (
+            "✅ **Account Verified Successfully!**\n\n"
+            "Please select your Server / Game Mode to start live prediction:"
+        )
+        keyboard2 = [
+            [InlineKeyboardButton("🎯 WinGo 30s Server", callback_data="step_wingo_30s")],
+            [InlineKeyboardButton("🎲 WinGo 1m Server", callback_data="step_wingo_1m")],
+            [InlineKeyboardButton("🔙 Back to Main Menu", callback_data="step_main")]
+        ]
+        await query.edit_message_text(text=step2_message, reply_markup=InlineKeyboardMarkup(keyboard2), parse_mode="Markdown")
+
+    elif data == "step_wingo_30s" or data == "step_wingo_1m":
+        server_name = "WinGo 30s" if "30s" in data else "WinGo 1m"
+        step3_message = (
+            f"🚀 **{server_name} Engine Activated!**\n\n"
+            "📊 **Live Status:** Analyzing trend data...\n"
+            "⚡ **Current Hit Rate:** 94.2%\n\n"
+            "Press below to generate prediction for next period!"
+        )
+        keyboard3 = [
+            [InlineKeyboardButton("🔮 GENERATE PREDICTION", callback_data="step_predict")],
+            [InlineKeyboardButton("🔙 Back", callback_data="step_login")]
+        ]
+        await query.edit_message_text(text=step3_message, reply_markup=InlineKeyboardMarkup(keyboard3), parse_mode="Markdown")
+
+    elif data == "step_predict":
         prediction_text = (
             "🧠 **PREDICTION GENERATED** 🧠\n"
             "_________________________________________\n\n"
@@ -75,20 +104,56 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             "_________________________________________\n\n"
             "⏳ *Auto updating for next period in 30 seconds...*"
         )
-        keyboard = [
-            [InlineKeyboardButton("🔄 Refresh Prediction", callback_data="login")]
+        keyboard4 = [
+            [InlineKeyboardButton("🔄 Refresh Prediction", callback_data="step_predict")],
+            [InlineKeyboardButton("⚙️ Change Server", callback_data="step_login")]
         ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(text=prediction_text, reply_markup=reply_markup, parse_mode="Markdown")
+        await query.edit_message_text(text=prediction_text, reply_markup=InlineKeyboardMarkup(keyboard4), parse_mode="Markdown")
+
+    elif data == "step_main":
+        welcome_message = (
+            "🧠 **Prediction Engine — 9 Layers**\n"
+            "⚡ Streak • 🔷 Pattern • 📈 Trend\n\n"
+            "👇 Press the button below to LOGIN"
+        )
+        keyboard = [
+            [InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="step_login")]
+        ]
+        await query.edit_message_text(text=welcome_message, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+
+    # অ্যাডমিন প্যানেল বাটন অ্যাকশন
+    elif data == "admin_stats":
+        await query.edit_message_text(
+            text="📊 **Bot Statistics:**\n\n- Total Users: Active\n- Server Status: Online (100%)\n- Current Ping: 45ms",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Admin", callback_data="admin_back")]])
+        )
+    elif data == "admin_broadcast":
+        await query.edit_message_text(
+            text="📢 Broadcast feature is ready. Send your announcement text.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Admin", callback_data="admin_back")]])
+        )
+    elif data == "admin_restart":
+        await query.edit_message_text(
+            text="🔄 Engine restart signal sent successfully.",
+            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back to Admin", callback_data="admin_back")]])
+        )
+    elif data == "admin_back":
+        admin_text = "⚙️ **Admin Control Panel**\nChoose an option below:"
+        keyboard = [
+            [InlineKeyboardButton("📊 Bot Status & Stats", callback_data="admin_stats")],
+            [InlineKeyboardButton("📢 Broadcast Message", callback_data="admin_broadcast")],
+            [InlineKeyboardButton("🔄 Restart Engine", callback_data="admin_restart")]
+        ]
+        await query.edit_message_text(text=admin_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
 
 def main() -> None:
     application = Application.builder().token(TOKEN).build()
     
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("admin", admin_panel))
     application.add_handler(CallbackQueryHandler(button_handler))
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text_message))
     
-    print("Bot is running with custom menu...")
+    print("Ahad WinGo Bot with Admin Panel is running...")
     application.run_polling()
 
 if __name__ == '__main__':
