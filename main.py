@@ -13,10 +13,11 @@ from telegram.ext import (
 )
 
 # আপনার টেলিগ্রাম বটের টোকেন এবং আপনার অ্যাডমিন আইডি
-BOT_TOKEN = "8648518720:AAFzo1UMYFKD_N2O-Dn2j--XKEj4ge4s8X8"
-ADMIN_ID = 8164888241
+BOT_TOKEN = "8711693169:AAG4Xkq2cHKfh4i_PuA72R62HoCBBMPByEk"  # আপনার টোকেন
+ADMIN_ID = 8164888241  # আপনার অ্যাডমিন আইডি
 
 user_states = {}
+pending_users = {}  # পেন্ডিং ইউজারদের ডাটা রাখার জন্য
 
 def get_state(uid):
     if uid not in user_states:
@@ -25,7 +26,7 @@ def get_state(uid):
             "awaiting": None,
             "phone": "",
             "password": "",
-            "balance": 1000.0,  # টেস্টের জন্য ডিফল্ট ব্যালেন্স 1000 ধরা হলো
+            "balance": 1000.0,  # ডেমো ব্যালেন্স
             "game": None,
             "total_steps": 0,
             "steps": [],
@@ -34,6 +35,7 @@ def get_state(uid):
             "profit": 0,
             "running": False,
             "task": None,
+            "approved": False,  # নতুন: অ্যাডমিন অ্যাপ্রুভাল স্ট্যাটাস
         }
     return user_states[uid]
 
@@ -44,35 +46,33 @@ async def auto_bet_loop(uid, ctx):
     state = get_state(uid)
     try:
         while state["running"]:
-            await asyncio.sleep(30)  # প্রতি ৩০ সেকেন্ড পর পর সিগন্যাল
+            await asyncio.sleep(30)  # প্রতি ৩০ সেকেন্ড পর সিগন্যাল
             if not state["running"]:
                 break
-            
+
             if not state["steps"]:
                 break
-            
             current_step = state["steps"][state["step_idx"] % len(state["steps"])]
-            
-            # ব্যালেন্স চেক: অ্যাকাউন্টে পর্যাপ্ত ব্যালেন্স না থাকলে ক্রস চিহ্ন দিয়ে বন্ধ করা
+
             if state["balance"] < current_step:
                 state["running"] = False
-                await ctx.bot.send_message(
-                    chat_id=uid,
-                    text=f"❌ **INSUFFICIENT BALANCE!**\n\n"
-                         f"💰 আপনার বর্তমান ব্যালেন্স: `{state['balance']}`\n"
-                         f"⚠️ পরবর্তী স্টেপ বেট: `{current_step}`\n"
-                         f"অ্যাকাউন্টে পর্যাপ্ত ব্যালেন্স না থাকায় অটো-বেটিং বন্ধ করা হলো।",
-                    parse_mode="Markdown"
-                )
+                # শুধু ইউজারকে মেসেজ দেবে, অ্যাডমিনকে নয়
+                if uid != ADMIN_ID:
+                    await ctx.bot.send_message(
+                        chat_id=uid,
+                        text=f"❌ **INSUFFICIENT BALANCE!**\n\n"
+                             f"💰 আপনার বর্তমান ব্যালেন্স: `{state['balance']}`\n"
+                             f"⚠️ পরবর্তী স্টেপ বেট: `{current_step}`\n"
+                             f"অ্যাকাউন্টে পর্যাপ্ত ব্যালেন্স না থাকায় অটো-বেটিং বন্ধ করা হলো।",
+                        parse_mode="Markdown"
+                    )
                 break
 
             p = gen_period(state["game"])
             prediction = random.choice(["BIG / GREEN", "SMALL / RED"])
-            
-            # উইন নাকি লস নির্ধারণ
             is_win = random.choice([True, False])
             result_status = "🟢 WIN (+)" if is_win else "🔴 LOSS (-)"
-            
+
             if is_win:
                 state["balance"] += current_step
                 state["profit"] += current_step
@@ -86,25 +86,42 @@ async def auto_bet_loop(uid, ctx):
                 f"📌 **Period:** {p}\n"
                 f"🎮 **Game:** WinGo {state['game'].upper()}\n"
                 f"💰 **Current Step Bet:** {current_step}\n"
-                f"🎨 **Result:** {prediction}\n"
-                f"📊 **Status:** {result_status}\n"
-                f"💵 **Balance:** `{state['balance']}`\n"
+                f"🎨 **Result Type:** {prediction}\n"
+                f"📊 **Outcome:** {result_status}\n"
+                f"💵 **Updated Balance:** `{state['balance']}`\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"⏳ *Next prediction in 30 seconds...*"
             )
             try:
-                await ctx.bot.send_message(chat_id=uid, text=msg, parse_mode="Markdown")
+                # অ্যাডমিন ছাড়া বাকি সবার কাছে মেসেজ পাঠাবে
+                if uid != ADMIN_ID:
+                    await ctx.bot.send_message(chat_id=uid, text=msg, parse_mode="Markdown")
             except Exception as e:
                 print(f"Loop message error: {e}")
-                
+
     except asyncio.CancelledError:
         pass
 
 async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
+
+    # যদি ইউজার অ্যাডমিন হয়
+    if uid == ADMIN_ID:
+        keyboard = [
+            [InlineKeyboardButton("📋 Pending Users", callback_data="admin_pending")],
+            [InlineKeyboardButton("🔄 Refresh Panel", callback_data="admin_refresh")]
+        ]
+        await update.message.reply_text(
+            "🛠️ **ADMIN CONTROL PANEL** 🛠️\n\n"
+            "স্বাগতম! আপনি এখান থেকে ইউজারদের অ্যাপ্রুভ করতে পারবেন।",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
+        return
+
+    # সাধারণ ইউজারদের জন্য
     state = get_state(uid)
-    
-    if state["logged_in"] and state.get("game"):
+    if state["approved"] and state["logged_in"] and state.get("game"):
         keyboard = [
             [
                 InlineKeyboardButton("🎮 WinGo 30s", callback_data="game_30s"),
@@ -145,6 +162,9 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["phone"] = text
         state["awaiting"] = "pending_approval"
         
+        # পেন্ডিং লিস্টে যোগ করা
+        pending_users[uid] = {"name": name, "username": username, "phone": text}
+
         await update.message.reply_text(
             "⏳ আপনার নম্বরটি অ্যাডমিনের কাছে অনুমোদনের জন্য পাঠানো হয়েছে। দয়া করে অপেক্ষা করুন..."
         )
@@ -202,7 +222,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ৩. মোট কয়টি স্টেপ হবে তা নির্ধারণ (যেমন: 5)
+    # ৩. স্টেপ ও টার্গেট প্রসেসিং (আগের মতোই)
     if state["logged_in"]:
         if state.get("awaiting") == "total_steps":
             try:
@@ -219,7 +239,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ সঠিক সংখ্যা লিখুন। যেমন: 5")
             return
 
-        # ৪. সিরিয়াল অনুযায়ী স্টেপ ইনপুট নেওয়া (স্টেপ ১, স্টেপ ২...)
         if state.get("awaiting") == "collecting_steps":
             try:
                 val = float(text)
@@ -242,7 +261,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ সঠিক সংখ্যা লিখুন।")
             return
 
-        # ৫. টার্গেট প্রফিট সেট করা এবং অটো-বেটিং শুরু করা
         if state.get("awaiting") == "target":
             try:
                 tgt = float(text)
@@ -269,15 +287,36 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     data = query.data
 
-    if data == "start_login":
-        state["awaiting"] = "phone"
-        login_text = "📱 আপনার HGNICE ফোন নম্বরটি লিখুন:"
-        await query.message.reply_text(login_text)
+    # অ্যাডমিন প্যানেলের কলব্যাক
+    if data == "admin_pending":
+        if not pending_users:
+            await query.edit_message_text("📭 কোনো পেন্ডিং ইউজার নেই।")
+            return
+        
+        text = "📋 **PENDING USERS LIST:**\n\n"
+        for u_id, info in pending_users.items():
+            text += f"👤 {info['name']} (@{info['username']})\n📱 {info['phone']}\n🆔 `{u_id}`\n\n"
+        
+        await query.edit_message_text(text, parse_mode="Markdown")
 
+    elif data == "admin_refresh":
+        await query.edit_message_text("🔄 প্যানেল রিফ্রেশ করা হয়েছে। আবার /start দিন।")
+
+    # ইউজার লগইন শুরু
+    elif data == "start_login":
+        state["awaiting"] = "phone"
+        await query.message.reply_text("📱 আপনার HGNICE ফোন নম্বরটি লিখুন:")
+
+    # অ্যাডমিন অ্যাপ্রুভ করলে
     elif data.startswith("approve_"):
         target_uid = int(data.split("_")[1])
         target_state = get_state(target_uid)
+        target_state["approved"] = True  # ইউজারকে অ্যাপ্রুভ করা হলো
         target_state["awaiting"] = "password"
+
+        # পেন্ডিং লিস্ট থেকে সরানো
+        if target_uid in pending_users:
+            del pending_users[target_uid]
 
         try:
             await query.edit_message_text(f"{query.message.text}\n\n✅ **APPROVED!**")
@@ -293,7 +332,11 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             print(f"User notify error: {e}")
 
+    # গেম সিলেক্ট
     elif data.startswith("game_"):
+        if not state["approved"]:
+            await query.message.reply_text("❌ আপনি এখনো অ্যাডমিন দ্বারা অনুমোদিত হননি।")
+            return
         if not state["logged_in"]:
             await query.message.reply_text("❌ আগে লগইন করুন এবং পাসওয়ার্ড দিয়ে ভেরিফাই করুন।")
             return
