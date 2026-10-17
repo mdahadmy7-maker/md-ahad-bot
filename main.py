@@ -8,9 +8,12 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
-# 🔧 CONFIG (এখানে আপনার টোকেন বসান)
+# ১. 🔧 CONFIG (এখানে আপনার টোকেন বসান)
 # ═══════════════════════════════════════════
+# Railway Environment Variable-এ BOT_TOKEN দিলে সেটি কাজ করবে, 
+# নাহলে নিচের "YOUR_BOT_TOKEN_HERE" এর জায়গায় সরাসরি টোকেন বসিয়ে দিন।
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAEHLP6ghiuFc0So1MG4Dq6RlqFOOCTCmok") 
+
 SITE_URL = "https://www.hgnice.vip"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -29,24 +32,24 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# ১. হেল্পার: লগইন সফল হয়েছে কিনা চেক করা
+# ২. হেল্পার: লগইন সফল হয়েছে কিনা চেক করা
 # ───────────────────────────────────────────
 async def check_login_success(page):
     try:
         await page.wait_for_timeout(4000) # পেজ লোড হওয়ার জন্য অপেক্ষা
         
-        # ১. ভুল পাসওয়ার্ডের পপ-আপ চেক
+        # ভুল পাসওয়ার্ডের পপ-আপ চেক
         error_popup = page.locator('text="Wrong account or password"').first
         if await error_popup.is_visible():
             return False, "Wrong account or password (Error: 147)"
             
-        # ২. অন্য কোনো এরর চেক
+        # অন্য কোনো এরর চেক
         error_text_locator = page.locator('text=/Error/i').first
         if await error_text_locator.is_visible():
              error_msg = await error_text_locator.inner_text()
              return False, error_msg
              
-        # ৩. লগইন সফল হলে (কোনো এরর না থাকলে)
+        # লগইন সফল হলে
         return True, "Success"
         
     except Exception as e:
@@ -54,7 +57,7 @@ async def check_login_success(page):
         return True, "Assume Success"
 
 # ───────────────────────────────────────────
-# ২. হেল্পার: স্ক্রিন থেকে আসল ব্যালেন্স ও UID বের করা
+# ৩. হেল্পার: স্ক্রিন থেকে আসল ব্যালেন্স ও UID বের করা
 # ───────────────────────────────────────────
 async def get_account_info(page):
     try:
@@ -63,16 +66,14 @@ async def get_account_info(page):
         uid = "Unknown"
         
         try:
-            # পেজের সব টেক্সট নেওয়া
             page_text = await page.inner_text("body")
             
-            # UID খোঁজার চেষ্টা (স্ক্রিনে "UID | 548284" বা "Account UID" এরকম থাকলে)
+            # UID খোঁজা
             uid_match = re.search(r'(?:UID|Account\s*UID)\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
             if uid_match:
                 uid = uid_match.group(1)
                 
-            # ব্যালেন্স খোঁজার চেষ্টা (স্ক্রিনে "Total balance ৳0.40" বা "Balance: 6.56" এরকম থাকলে)
-            # এটি ৳ চিহ্ন বা Balance শব্দের পরে আসা সংখ্যা খুঁজবে
+            # ব্যালেন্স খোঁজা
             balance_match = re.search(r'(?:Total\s*)?[Bb]alance\s*[৳:]?\s*([\d.]+)', page_text)
             if balance_match:
                 balance = balance_match.group(1)
@@ -86,7 +87,7 @@ async def get_account_info(page):
         return "0.00", "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. হেল্পার: বাজি ধরা এবং রেজাল্ট চেক
+# ৪. হেল্পার: বাজি ধরা এবং রেজাল্ট চেক
 # ───────────────────────────────────────────
 async def place_bet_and_check_win(page, bet_mode, amount):
     try:
@@ -118,7 +119,7 @@ async def place_bet_and_check_win(page, bet_mode, amount):
         return False
 
 # ───────────────────────────────────────────
-# ৪. মূল অটো-বেট লুপ
+# ৫. মূল অটো-বেট লুপ (নীরবে লগইন চেক করবে)
 # ───────────────────────────────────────────
 async def auto_bet_loop(uid, ctx):
     state = get_state(uid)
@@ -128,22 +129,20 @@ async def auto_bet_loop(uid, ctx):
         page = await browser.new_page()
         
         try:
-            await ctx.bot.send_message(chat_id=uid, text="🌐 HGNice সাইটে ঢুকছি...")
             await page.goto(SITE_URL, timeout=60000)
             await page.wait_for_timeout(5000)
             
-            await ctx.bot.send_message(chat_id=uid, text="🔐 লগইন করা হচ্ছে...")
             await page.get_by_placeholder("Please enter the phone number").fill(state["phone"])
             await page.get_by_placeholder("Password").fill(state["password"])
             await page.locator('text="Log in"').last.click()
             
-            # লগইন চেক (ভুল পাসওয়ার্ড হলে এখানেই আটকে যাবে)
+            # লগইন চেক
             login_success, login_msg = await check_login_success(page)
             
             if not login_success:
                 await ctx.bot.send_message(
                     chat_id=uid, 
-                    text=f"❌ **LOGIN FAILED**\n{login_msg}\n\nদয়া করে সঠিক পাসওয়ার্ড দিয়ে আবার চেষ্টা করুন।",
+                    text=f"❌ **LOGIN FAILED**\n{login_msg}\n\nদয়া করে সঠিক নাম্বার ও পাসওয়ার্ড দিয়ে আবার চেষ্টা করুন।",
                     parse_mode="Markdown"
                 )
                 state["running"] = False
@@ -155,7 +154,7 @@ async def auto_bet_loop(uid, ctx):
             state["balance"] = bal
             state["account_uid"] = user_uid
             
-            # লগইন সফল হওয়ার পর ড্যাশবোর্ড মেসেজ পাঠানো
+            # লগইন সফল হলে সরাসরি সাকসেস মেসেজ পাঠানো
             login_msg_text = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -180,7 +179,7 @@ async def auto_bet_loop(uid, ctx):
             markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
             await ctx.bot.send_message(chat_id=uid, text=login_msg_text, parse_mode="Markdown", reply_markup=markup)
             
-            await ctx.bot.send_message(chat_id=uid, text="🎮 WinGo 30s গেমে ঢুকছি...")
+            # গেমে ঢোকা
             await page.locator('text="WinGo 30sec"').first.click(timeout=5000)
             await page.wait_for_timeout(3000)
             
@@ -226,7 +225,7 @@ async def auto_bet_loop(uid, ctx):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৫. টেলিগ্রাম হ্যান্ডলার
+# ৬. টেলিগ্রাম হ্যান্ডলার
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -234,7 +233,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state["running"] = False
     if state.get("task"): state["task"].cancel()
     
-    # আপনার দেওয়া নতুন টেক্সট
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -279,18 +277,15 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # পাসওয়ার্ড গ্রহণ
+    # পাসওয়ার্ড গ্রহণ (মেসেজ ডিলিট হবে, চেকিংয়ের মেসেজ আসবে না)
     if state.get("awaiting") == "password":
         state["password"] = text
         state["awaiting"] = "steps"
         
-        # পাসওয়ার্ড মেসেজ ডিলিট
         try: await update.message.delete()
         except: pass
         
-        await update.message.reply_text("⏳ লগইন যাচাই করা হচ্ছে, অপেক্ষা করুন...")
-        
-        # বেটিং লুপ শুরু করা (লগইন চেক এখানেই হবে)
+        # সরাসরি ব্যাকগ্রাউন্ডে চেক শুরু হবে
         state["running"] = True
         if state.get("task"): state["task"].cancel()
         state["task"] = asyncio.create_task(auto_bet_loop(uid, ctx))
@@ -394,7 +389,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🛑 **AUTO BETTING STOPPED**", parse_mode="Markdown")
 
 # ───────────────────────────────────────────
-# ৬. মেইন ফাংশন
+# ৭. মেইন ফাংশন (বট রান)
 # ───────────────────────────────────────────
 def main():
     if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or not BOT_TOKEN:
