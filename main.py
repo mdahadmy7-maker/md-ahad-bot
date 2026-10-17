@@ -10,7 +10,7 @@ from playwright.async_api import async_playwright
 # 🔧 CONFIG
 # ═══════════════════════════════════════════
 # Railway Environment Variable থেকে টোকেন নেবে
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAEzfZELg3IiwzWsobRTOZETrr0rH-ADNKA")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAEHLP6ghiuFc0So1MG4Dq6RlqFOOCTCmok")
 SITE_URL = "https://www.hgnice.vip"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
