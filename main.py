@@ -8,7 +8,7 @@ from playwright.async_api import async_playwright
 # ═══════════════════════════════════════════
 # 🔧 CONFIG
 # ═══════════════════════════════════════════
-BOT_TOKEN = "8850232346:AAFWXcu2non0243vYXhWoLYmHPRwxN2o"  # ← এখানে আপনার টোকেন দিন
+BOT_TOKEN = "8850232346:AAEzfZELg3IiwzWsobRTOZETrr0rH-ADNKA"  # ← এখানে আপনার টোকেন দিন
 SITE_URL = "https://www.hgnice.vip"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
