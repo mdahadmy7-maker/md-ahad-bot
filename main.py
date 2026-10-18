@@ -1,20 +1,19 @@
 import asyncio
 import logging
 import os
-import aiohttp
+import requests
 import hashlib
 import uuid
 import time
-import json
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 # ═══════════════════════════════════════════
 # ১. 🔧 CONFIG
 # ═══════════════════════════════════════════
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAHStYqC8f3OSE65wYmyxmC8gvqKDw2B57Y") 
+# ⚠️ এখানে আপনার টেলিগ্রাম বটের টোকেনটি বসান
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE") 
 
-# আপনার সাইটের সঠিক API লিংক
 LOGIN_API_URL = "https://api.hgnicepayapi.com/api/Login"     
 GET_USER_INFO_URL = "https://api.hgnicepayapi.com/api/GetUserInfo" 
 
@@ -32,14 +31,12 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# ২. API ফাংশন (লগইন এবং ব্যালেন্স)
+# ২. API ফাংশন (requests দিয়ে - যা Pydroid এ কাজ করেছিল)
 # ───────────────────────────────────────────
-async def api_login(phone, password):
+def sync_api_login(phone, password):
     device_id = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()
     random_str = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()
     timestamp = int(time.time())
-    
-    # আপনার সাইটের সফল সিগনেচার
     signature = "1EFC4E6797FE1A0EDFDB3664BB51197A" 
 
     payload = {
@@ -48,37 +45,35 @@ async def api_login(phone, password):
         "fbp": "", "adId": "", "language": 0, "random": random_str,
         "signature": signature, "timestamp": timestamp
     }
-    
     headers = {"Content-Type": "application/json;charset=UTF-8"}
     
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(LOGIN_API_URL, json=payload, headers=headers, timeout=15) as res:
-                data = await res.json()
-                if data.get("code") == 0 or data.get("msg") == "Succeed":
-                    token = data.get("data", {}).get("token", "")
-                    return True, token
-                return False, data.get("msg", "ভুল নাম্বার বা পাসওয়ার্ড!")
+        res = requests.post(LOGIN_API_URL, json=payload, headers=headers, timeout=15)
+        data = res.json()
+        if data.get("code") == 0 or data.get("msg") == "Succeed":
+            return True, data.get("data", {}).get("token", "")
+        elif data.get("msg") == "Access too frequently, please try again later":
+            return False, "সার্ভার ব্লক করেছে! অনুগ্রহ করে ২-৩ মিনিট পর আবার চেষ্টা করুন।"
+        return False, data.get("msg", "ভুল নাম্বার বা পাসওয়ার্ড!")
     except Exception as e:
-        return False, str(e)
+        return False, f"নেটওয়ার্ক এরর: {str(e)}"
 
-async def api_get_balance(token):
+def sync_api_balance(token):
     headers = {
         "Content-Type": "application/json;charset=UTF-8",
         "Authorization": f"Bearer {token}"
     }
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.get(GET_USER_INFO_URL, headers=headers, timeout=10) as res:
-                data = await res.json()
-                if data.get("code") == 0:
-                    user_data = data.get("data", {})
-                    balance = user_data.get("amount", "0.00")
-                    user_id = user_data.get("userId", "Unknown")
-                    return True, balance, user_id
-                return False, "ব্যালেন্স পাওয়া যায়নি", "Unknown"
+        res = requests.get(GET_USER_INFO_URL, headers=headers, timeout=10)
+        data = res.json()
+        if data.get("code") == 0:
+            user_data = data.get("data", {})
+            balance = user_data.get("amount", "0.00")
+            user_id = user_data.get("userId", "Unknown")
+            return True, balance, user_id
+        return False, data.get("msg", "ব্যালেন্স পাওয়া যায়নি"), "Unknown"
     except Exception as e:
-        return False, str(e), "Unknown"
+        return False, f"নেটওয়ার্ক এরর: {str(e)}", "Unknown"
 
 # ───────────────────────────────────────────
 # ৩. টেলিগ্রাম হ্যান্ডলার
@@ -125,28 +120,25 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["password"] = text
         state["awaiting"] = None 
         
-        # পাসওয়ার্ড মেসেজ ডিলিট করা
         try: await update.message.delete()
         except: pass
         
-        # লোডিং মেসেজ
         loading_msg = await update.message.reply_text("🔄 **CONNECTING TO HGNICE**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
         
         for i in range(1, 11):
-            await asyncio.sleep(0.1) # দ্রুত লোডিং
+            await asyncio.sleep(0.1)
             filled = "█" * i
             empty = "░" * (10 - i)
             try:
                 await loading_msg.edit_text(f"🔄 **CONNECTING TO HGNICE**\n[{filled}{empty}] {i*10}%", parse_mode="Markdown")
             except: pass
         
-        # API লগইন কল
-        login_success, token_or_msg = await api_login(state["phone"], state["password"])
+        # requests লাইব্রেরি যাতে বটকে ব্লক না করে তাই asyncio.to_thread ব্যবহার করা হলো
+        login_success, token_or_msg = await asyncio.to_thread(sync_api_login, state["phone"], state["password"])
         
         if login_success:
             state["token"] = token_or_msg
-            # API ব্যালেন্স কল
-            bal_success, balance, user_id = await api_get_balance(state["token"])
+            bal_success, balance, user_id = await asyncio.to_thread(sync_api_balance, state["token"])
             
             if bal_success:
                 state["logged_in"] = True
@@ -186,7 +178,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     # ৩. অন্যান্য বাটন
     if text == "🚀 START YOUR TARGET":
-        await update.message.reply_text("⏳ এই ফিচারটি পরবর্তী ধাপে যুক্ত হবে।")
+        await update.message.reply_text("⏳ অটো-বেট ফিচারটি পরবর্তী ধাপে যুক্ত হবে।")
         return
     if text == "🛑 STOP TRADE":
         await update.message.reply_text("🛑 **STOPPED**")
@@ -221,7 +213,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ৪. মেইন ফাংশন
 # ───────────────────────────────────────────
 def main():
-    if not BOT_TOKEN or BOT_TOKEN == "আপনার_বট_টোকেন_এখানে_দিন":
+    if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
         print("❌ Error: BOT_TOKEN সেট করা নেই!")
         return
 
