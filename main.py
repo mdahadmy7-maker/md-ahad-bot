@@ -11,10 +11,12 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 # ═══════════════════════════════════════════
 # ১. 🔧 CONFIG
 # ═══════════════════════════════════════════
+# ⚠️ এখানে আপনার আসল বট টোকেনটি বসান
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAGqRw1Mnj30rhr3N233Il4U8Huccz1mwVk") 
 
-LOGIN_API_URL = "https://api.hgnicepayapi.com/api/v1/Login"     
-BALANCE_API_URL = "https://api.hgnicepayapi.com/api/v1/GetUserInfo" 
+# ⭐ আপনার পাওয়া আসল API লিংক
+LOGIN_API_URL = "https://api.hgnicepayapi.com/api/webapi/Login"     
+GET_USER_INFO_URL = "https://api.hgnicepayapi.com/api/webapi/GetUserInfo" 
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -30,7 +32,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# ২. API ফাংশন
+# ২. API ফাংশন (requests দিয়ে)
 # ───────────────────────────────────────────
 def sync_api_login(phone, password):
     device_id = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()
@@ -39,36 +41,43 @@ def sync_api_login(phone, password):
     signature = "1EFC4E6797FE1A0EDFDB3664BB51197A" 
 
     payload = {
-        "username": phone, "pwd": password, "phonetype": 0, "logintype": "mobile",
+        "username": phone, "pwd": password, "phonetype": 1, "logintype": "mobile",
         "packId": "", "deviceId": device_id, "pixelId": "", "fbcId": "", "fbc": "",
         "fbp": "", "adId": "", "language": 0, "random": random_str,
         "signature": signature, "timestamp": timestamp
     }
-    headers = {"Content-Type": "application/json;charset=UTF-8"}
+    
+    headers = {
+        "Content-Type": "application/json;charset=UTF-8",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+    }
     
     try:
         res = requests.post(LOGIN_API_URL, json=payload, headers=headers, timeout=15)
         data = res.json()
         if data.get("code") == 0 or data.get("msg") == "Succeed":
             return True, data.get("data", {}).get("token", "")
-        return False, data.get("msg", "ভুল পাসওয়ার্ড!")
+        return False, data.get("msg", "ভুল নাম্বার বা পাসওয়ার্ড!")
     except Exception as e:
-        return False, "সার্ভারে কানেক্ট করা যাচ্ছে না!"
+        return False, str(e)
 
 def sync_api_balance(token):
     headers = {
         "Content-Type": "application/json;charset=UTF-8",
-        "Authorization": f"Bearer {token}"
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
     }
     try:
-        res = requests.get(BALANCE_API_URL, headers=headers, timeout=10)
+        res = requests.get(GET_USER_INFO_URL, headers=headers, timeout=10)
         data = res.json()
         if data.get("code") == 0:
             user_data = data.get("data", {})
-            return True, user_data.get("amount", "0.00"), user_data.get("userId", "Unknown")
-        return False, "ব্যালেন্স পাওয়া যায়নি", "Unknown"
-    except Exception:
-        return False, "ব্যালেন্স চেক করা যায়নি", "Unknown"
+            balance = user_data.get("amount", "0.00")
+            user_id = user_data.get("userId", "Unknown")
+            return True, balance, user_id
+        return False, data.get("msg", "ব্যালেন্স পাওয়া যায়নি"), "Unknown"
+    except Exception as e:
+        return False, str(e), "Unknown"
 
 # ───────────────────────────────────────────
 # ৩. টেলিগ্রাম হ্যান্ডলার
@@ -82,6 +91,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 Mode    : Auto Analyse & bet\n"
         "🔐 Access  : Private · Authorized Members\n"
         "🔴 Status  : Not Logged In\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -99,7 +109,12 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["phone"] = text
         state["awaiting"] = "password"
         await update.message.reply_text(
-            f"📱 Number: {text}\n\n🔑 **Now enter your password:**\n_Your message will be deleted immediately for security._",
+            "╔════════════════════════╗\n"
+            "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
+            "╚════════════════════════╝\n"
+            f"📱 Number: {text}\n\n"
+            "🔑 **Now enter your password:**\n"
+            "_Your message will be deleted immediately for security._",
             parse_mode="Markdown"
         )
         return
@@ -132,7 +147,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 state["balance"] = balance
                 state["account_uid"] = user_id
                 
-                # ⭐ আপনার স্ক্রিনশটের ডিজাইন
                 login_msg_text = (
                     "┌────────────────────────┐\n"
                     "    🎉 LOGIN SUCCESSFUL ✅\n"
@@ -186,7 +200,13 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["awaiting"] = "phone"
         await ctx.bot.send_message(
             chat_id=uid,
-            text="📱 **Enter your HGNICE phone number:**\n\n_Everyone uses their own account — your session is private._",
+            text=(
+                "╔════════════════════════╗\n"
+                "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
+                "╚════════════════════════╝\n\n"
+                "📱 **Enter your HGNICE phone number:**\n\n"
+                "_Everyone uses their own account — your session is private._"
+            ),
             parse_mode="Markdown"
         )
 
