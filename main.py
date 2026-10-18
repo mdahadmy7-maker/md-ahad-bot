@@ -3,16 +3,23 @@ import logging
 import random
 import os
 import re
+import aiohttp
+import hashlib
+import uuid
+import time
+import json
+import base64
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
-from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
 # ১. 🔧 CONFIG
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAFqxoU8330Tgqjbs8GNzblIfUQqnnJ7wPg") 
 
-SITE_URL = "https://www.hgnice.vip"
+# আপনার সাইটের সফল API লিংক
+LOGIN_API_URL = "https://api.hgnicepayapi.com/api/v1/Login"     
+GET_USER_INFO_URL = "https://api.hgnicepayapi.com/api/v1/GetUserInfo" 
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,210 +32,131 @@ def get_state(uid):
             "logged_in": False, "awaiting": None, "phone": "", "password": "",
             "running": False, "task": None, "steps": [], "step_idx": 0, 
             "target": 0, "profit": 0, "bet_choice": "RANDOM",
-            "balance": "0.00", "account_uid": "Unknown"
+            "balance": "0.00", "account_uid": "Unknown", "token": ""
         }
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# ২. হেল্পার: লগইন সফল হয়েছে কিনা চেক করা (Playwright)
+# ২. API ফাংশন (লগইন এবং ব্যালেন্স)
 # ───────────────────────────────────────────
-async def check_login_success(page):
+async def api_login(phone, password):
+    device_id = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()
+    random_str = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()
+    timestamp = int(time.time())
+    signature = "1EFC4E6797FE1A0EDFDB3664BB51197A" 
+
+    payload = {
+        "username": phone, "pwd": password, "phonetype": 0, "logintype": "mobile",
+        "packId": "", "deviceId": device_id, "pixelId": "", "fbcId": "", "fbc": "",
+        "fbp": "", "adId": "", "language": 0, "random": random_str,
+        "signature": signature, "timestamp": timestamp
+    }
+    
+    headers = {"Content-Type": "application/json;charset=UTF-8"}
+    
     try:
-        await page.wait_for_timeout(4000) # পেজ লোড হওয়ার জন্য অপেক্ষা
-        
-        # ভুল পাসওয়ার্ডের পপ-আপ চেক
-        error_popup = page.locator('text="Wrong account or password"').first
-        if await error_popup.is_visible():
-            return False, "Wrong account or password (Error: 147)"
-            
-        # অন্য কোনো এরর চেক
-        error_text_locator = page.locator('text=/Error/i').first
-        if await error_text_locator.is_visible():
-             error_msg = await error_text_locator.inner_text()
-             return False, error_msg
-             
-        # লগইন সফল হলে (কোনো এরর না থাকলে)
-        return True, "Success"
-        
+        async with aiohttp.ClientSession() as session:
+            async with session.post(LOGIN_API_URL, json=payload, headers=headers, timeout=15) as res:
+                data = await res.json()
+                if data.get("code") == 0 or data.get("msg") == "Succeed":
+                    token = data.get("data", {}).get("token", "")
+                    return True, token
+                return False, data.get("msg", "Wrong account or password")
     except Exception as e:
-        logger.error(f"Login check error: {e}")
-        return True, "Assume Success"
+        return False, str(e)
+
+async def api_get_balance(token):
+    headers = {
+        "Content-Type": "application/json;charset=UTF-8",
+        "Authorization": f"Bearer {token}"
+    }
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(GET_USER_INFO_URL, headers=headers, timeout=10) as res:
+                data = await res.json()
+                if data.get("code") == 0:
+                    balance = data.get("data", {}).get("amount", 0.0)
+                    return True, balance
+                return False, "ব্যালেন্স পাওয়া যায়নি"
+    except Exception as e:
+        return False, str(e)
 
 # ───────────────────────────────────────────
-# ৩. হেল্পার: স্ক্রিন থেকে আসল ব্যালেন্স ও UID বের করা
-# ───────────────────────────────────────────
-async def get_account_info(page):
-    try:
-        await page.wait_for_timeout(4000)
-        balance = "0.00"
-        uid = "Unknown"
-        
-        try:
-            page_text = await page.inner_text("body")
-            
-            # UID খোঁজা
-            uid_match = re.search(r'(?:UID|Account\s*UID)\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
-            if uid_match:
-                uid = uid_match.group(1)
-                
-            # ব্যালেন্স খোঁজা
-            balance_match = re.search(r'(?:Total\s*)?[Bb]alance\s*[৳:]?\s*([\d.]+)', page_text)
-            if balance_match:
-                balance = balance_match.group(1)
-                
-        except Exception as e:
-            logger.error(f"Scraping regex error: {e}")
-            
-        return balance, uid
-    except Exception as e:
-        logger.error(f"Info error: {e}")
-        return "0.00", "Unknown"
-
-# ───────────────────────────────────────────
-# ৪. হেল্পার: বাজি ধরা এবং রেজাল্ট চেক
-# ───────────────────────────────────────────
-async def place_bet_and_check_win(page, bet_mode, amount):
-    try:
-        if bet_mode == "BIG":
-            await page.locator('text="Big"').first.click(timeout=5000)
-        else:
-            await page.locator('text="Small"').first.click(timeout=5000)
-        
-        await page.wait_for_timeout(1000)
-        try:
-            await page.locator('text="Confirm"').first.click(timeout=3000)
-        except:
-            pass
-        
-        await asyncio.sleep(32)
-        
-        try:
-            await page.locator('text="My history"').first.click(timeout=5000)
-            await page.wait_for_timeout(3000)
-            first_result = await page.locator('text="Win"').first.is_visible()
-            await page.locator('text="Chart"').first.click(timeout=5000)
-            await page.wait_for_timeout(2000)
-            return first_result
-        except Exception as e:
-            logger.error(f"Result check error: {e}")
-            return False
-    except Exception as e:
-        logger.error(f"Bet error: {e}")
-        return False
-
-# ───────────────────────────────────────────
-# ৫. মূল অটো-বেট লুপ (লগইন চেক এবং ব্যালেন্স)
+# ৩. মূল অটো-বেট লুপ (API দিয়ে লগইন)
 # ───────────────────────────────────────────
 async def auto_bet_loop(uid, ctx):
     state = get_state(uid)
     
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True) 
-        page = await browser.new_page()
+    # ১. API লগইন
+    login_success, token_or_msg = await api_login(state["phone"], state["password"])
+    
+    if not login_success:
+        await ctx.bot.send_message(
+            chat_id=uid, 
+            text=f"❌ **LOGIN FAILED**\n{token_or_msg}\n\nদয়া করে সঠিক নাম্বার ও পাসওয়ার্ড দিয়ে আবার চেষ্টা করুন।",
+            parse_mode="Markdown"
+        )
+        state["running"] = False
+        return
         
-        try:
-            await page.goto(SITE_URL, timeout=60000)
-            await page.wait_for_timeout(5000)
-            
-            await page.get_by_placeholder("Please enter the phone number").fill(state["phone"])
-            await page.get_by_placeholder("Password").fill(state["password"])
-            await page.locator('text="Log in"').last.click()
-            
-            # লগইন চেক
-            login_success, login_msg = await check_login_success(page)
-            
-            if not login_success:
-                await ctx.bot.send_message(
-                    chat_id=uid, 
-                    text=f"❌ **LOGIN FAILED**\n{login_msg}\n\nদয়া করে সঠিক নাম্বার ও পাসওয়ার্ড দিয়ে আবার চেষ্টা করুন।",
-                    parse_mode="Markdown"
-                )
-                state["running"] = False
-                await browser.close()
-                return
-            
-            # আসল ব্যালেন্স ও UID বের করা
-            bal, user_uid = await get_account_info(page)
-            state["balance"] = bal
-            state["account_uid"] = user_uid
-            state["logged_in"] = True
-            
-            # লগইন সফল হলে ড্যাশবোর্ড মেসেজ
-            login_msg_text = (
-                "╔════════════════════════╗\n"
-                "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
-                "╚════════════════════════╝\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "☎️ **Phone Number**\n"
-                f"****{state['phone'][-4:]}\n\n"
-                "👤 **Account UID**\n"
-                f"{state['account_uid']}\n\n"
-                "💰 **Account Balance**\n"
-                f"৳ {state['balance']}\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                "🧠 Analysis Engine:  READY\n"
-                "🚀 AutoTrade System: READY\n\n"
-                "👇 Press START YOUR TARGET to begin"
-            )
-            
-            reply_keyboard = [
-                [KeyboardButton("🚀 START YOUR TARGET")],
-                [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]
-            ]
-            markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
-            await ctx.bot.send_message(chat_id=uid, text=login_msg_text, parse_mode="Markdown", reply_markup=markup)
-            
-            # গেমে ঢোকা
-            await page.locator('text="WinGo 30sec"').first.click(timeout=5000)
-            await page.wait_for_timeout(3000)
-            
-            while state["running"]:
-                if not state["steps"]:
-                    await asyncio.sleep(2)
-                    continue
+    state["token"] = token_or_msg
+    # ২. API ব্যালেন্স
+    bal_success, balance = await api_get_balance(state["token"])
+    
+    uid_from_token = "Unknown"
+    try:
+        payload_b64 = state["token"].split('.')[1]
+        payload_b64 += '=' * (-len(payload_b64) % 4)
+        decoded = json.loads(base64.urlsafe_b64decode(payload_b64))
+        uid_from_token = decoded.get("UserId", "Unknown")
+    except: pass
 
-                current_amount = state["steps"][state["step_idx"]]
+    if bal_success:
+        state["logged_in"] = True
+        state["balance"] = balance
+        state["account_uid"] = uid_from_token
+        
+        # লগইন সফল হলে ড্যাশবোর্ড মেসেজ (আপনার ডিজাইন)
+        login_msg_text = (
+            "╔════════════════════════╗\n"
+            "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
+            "╚════════════════════════╝\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "☎️ **Phone Number**\n"
+            f"****{state['phone'][-4:]}\n\n"
+            "👤 **Account UID**\n"
+            f"{state['account_uid']}\n\n"
+            "💰 **Account Balance**\n"
+            f"৳ {state['balance']}\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🧠 Analysis Engine:  READY\n"
+            "🚀 AutoTrade System: READY\n\n"
+            "👇 Press START YOUR TARGET to begin"
+        )
+        
+        reply_keyboard = [
+            [KeyboardButton("🚀 START YOUR TARGET")],
+            [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]
+        ]
+        markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
+        await ctx.bot.send_message(chat_id=uid, text=login_msg_text, parse_mode="Markdown", reply_markup=markup)
+        
+        # এখানে পরবর্তী ধাপে Playwright দিয়ে আসল বাজি ধরার লজিক বসবে
+        # আপাতত বেট লুপ ডেমো হিসেবে চলবে
+        while state["running"]:
+            if not state["steps"]:
+                await asyncio.sleep(2)
+                continue
                 
-                if state["bet_choice"] == "RANDOM":
-                    bet_mode = random.choice(["BIG", "SMALL"])
-                else:
-                    bet_mode = state["bet_choice"]
-                    
-                emoji = "🟠" if bet_mode == "BIG" else "🔵"
-                await ctx.bot.send_message(
-                    chat_id=uid, 
-                    text=f"{emoji} **{bet_mode}**-এ {current_amount} টাকা বাজি ধরছে...\n(Step {state['step_idx']+1}/{len(state['steps'])})"
-                )
-                
-                is_win = await place_bet_and_check_win(page, bet_mode, current_amount)
-                
-                if is_win:
-                    state["profit"] += (current_amount * 0.96)
-                    state["step_idx"] = 0 
-                    await ctx.bot.send_message(chat_id=uid, text=f"✅ **WIN!** প্রফিট: ৳{state['profit']:.2f}")
-                else:
-                    state["profit"] -= current_amount
-                    state["step_idx"] += 1
-                    if state["step_idx"] >= len(state["steps"]):
-                        state["step_idx"] = 0
-                    await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOSE!** প্রফিট: ৳{state['profit']:.2f}")
-                
-                if state["profit"] >= state["target"]:
-                    await ctx.bot.send_message(chat_id=uid, text="🎉 **TARGET REACHED!** বট বন্ধ হচ্ছে।")
-                    state["running"] = False
-                    break
-                    
-                await asyncio.sleep(3)
-                
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Playwright error: {e}")
-        finally:
-            await browser.close()
+            current_amount = state["steps"][state["step_idx"]]
+            await ctx.bot.send_message(chat_id=uid, text=f"⏳ পরবর্তী ধাপে এখানে {current_amount} টাকা বাজি ধরবে।")
+            await asyncio.sleep(5) # ডেমো অপেক্ষা
+    else:
+        await ctx.bot.send_message(chat_id=uid, text=f"✅ লগইন হয়েছে, কিন্তু ব্যালেন্স আনতে সমস্যা: {balance}")
+        state["running"] = False
 
 # ───────────────────────────────────────────
-# ৬. টেলিগ্রাম হ্যান্ডলার
+# ৪. টেলিগ্রাম হ্যান্ডলার
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -285,13 +213,9 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["password"] = text
         state["awaiting"] = None 
         
-        # পাসওয়ার্ড মেসেজটি ডিলিট করা
-        try: 
-            await update.message.delete()
-        except: 
-            pass
+        try: await update.message.delete()
+        except: pass
         
-        # লোডিং মেসেজ
         loading_msg = await update.message.reply_text("🔄 **CONNECTING TO HGNICE**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
         
         for i in range(1, 11):
@@ -301,10 +225,9 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             percent = i * 10
             try:
                 await loading_msg.edit_text(f"🔄 **CONNECTING TO HGNICE**\n[{filled}{empty}] {percent}%", parse_mode="Markdown")
-            except:
-                pass
+            except: pass
         
-        # বেটিং লুপ শুরু (এখানেই লগইন চেক হবে)
+        # লগইন এবং ব্যালেন্স চেক টাস্ক শুরু
         state["running"] = True
         if state.get("task"): state["task"].cancel()
         state["task"] = asyncio.create_task(auto_bet_loop(uid, ctx))
@@ -337,6 +260,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if text == "🚪 LOGOUT":
         state["running"] = False
         state["logged_in"] = False
+        state["token"] = ""
         if state.get("task"): state["task"].cancel()
         await update.message.reply_text("🚪 **LOGGED OUT**\nYour session has ended successfully.", parse_mode="Markdown")
         return
@@ -407,7 +331,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🛑 **AUTO BETTING STOPPED**", parse_mode="Markdown")
 
 # ───────────────────────────────────────────
-# ৭. মেইন ফাংশন
+# ৫. মেইন ফাংশন
 # ───────────────────────────────────────────
 def main():
     if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or not BOT_TOKEN:
