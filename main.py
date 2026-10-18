@@ -20,7 +20,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAGHxO0ZNcoSVb3N5u1dSXcWa1_n
 
 SITE_URL = "https://www.hgnice.vip"
 
-# ⚠️ এখানে আপনার সাইটের আসল API লিংক বসান (যেটা আপনি F12 থেকে পেয়েছিলেন)
+# ⚠️ আপনার সাইটের আসল API লিংক এখানে বসান (যেটা আপনি F12 থেকে পেয়েছিলেন)
 LOGIN_API_URL = "https://api.hgnice.vip/api/v1/login"     
 BALANCE_API_URL = "https://api.hgnice.vip/api/v1/balance" 
 
@@ -47,7 +47,6 @@ async def api_login(phone, password):
     random_str = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()
     timestamp = int(time.time())
     
-    # আপনার আগের সফল সিগনেচার
     signature = "1EFC4E6797FE1A0EDFDB3664BB51197A" 
 
     payload = {
@@ -119,7 +118,7 @@ async def place_bet_and_check_win(page, bet_mode, amount):
         return False
 
 # ───────────────────────────────────────────
-# ৪. মূল অটো-বেট লুপ
+# ৪. মূল অটো-বেট লুপ (শুধু বাজি ধরার কাজ করবে)
 # ───────────────────────────────────────────
 async def auto_bet_loop(uid, ctx):
     state = get_state(uid)
@@ -132,13 +131,11 @@ async def auto_bet_loop(uid, ctx):
             await page.goto(SITE_URL, timeout=60000)
             await page.wait_for_timeout(5000)
             
-            # Playwright দিয়ে সাইটে ম্যানুয়াল লগইন (ব্যাকআপ হিসেবে)
             await page.get_by_placeholder("Please enter the phone number").fill(state["phone"])
             await page.get_by_placeholder("Password").fill(state["password"])
             await page.locator('text="Log in"').last.click()
             await page.wait_for_timeout(4000)
-
-            # লগইন সফল হলে গেমে ঢোকা
+            
             await page.locator('text="WinGo 30sec"').first.click(timeout=5000)
             await page.wait_for_timeout(3000)
             
@@ -203,11 +200,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "🔐 Access  : Private · Authorized Members\n"
         "🔴 Status  : Not Logged In\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🧠 Prediction Engine — 9 Layers\n"
-        "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
-        "🔍 Manipulation · 🎨 Colour · 🔢 Frequency\n"
-        "🔄 Markov · ♻️ Cycle · 💠 Momentum\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "👇 Press the button below to LOGIN"
     )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
@@ -234,7 +226,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ২. পাসওয়ার্ড গ্রহণ, API লগইন এবং ব্যালেন্স চেক
+    # ২. পাসওয়ার্ড গ্রহণ এবং API লগইন
     if state.get("awaiting") == "password":
         state["password"] = text
         state["awaiting"] = None 
@@ -257,11 +249,10 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         
         if login_success:
             state["token"] = token_or_msg
-            
             # API ব্যালেন্স চেক
             bal_success, balance = await api_get_balance(state["token"])
             
-            # টোকেন থেকে UID বের করা
+            # UID বের করা
             uid_from_token = "Unknown"
             try:
                 payload_b64 = state["token"].split('.')[1]
@@ -298,11 +289,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ]
                 markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
                 await loading_msg.edit_text(login_msg_text, parse_mode="Markdown", reply_markup=markup)
-                
-                # Playwright অটো-বেট লুপ চালু
-                state["running"] = True
-                if state.get("task"): state["task"].cancel()
-                state["task"] = asyncio.create_task(auto_bet_loop(uid, ctx))
                 
             else:
                 await loading_msg.edit_text(f"✅ লগইন হয়েছে, কিন্তু ব্যালেন্স আনতে সমস্যা: {balance}")
