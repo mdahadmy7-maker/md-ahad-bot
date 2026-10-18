@@ -10,7 +10,7 @@ from playwright.async_api import async_playwright
 # ═══════════════════════════════════════════
 # ১. 🔧 CONFIG
 # ═══════════════════════════════════════════
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAHStYqC8f3OSE65wYmyxmC8gvqKDw2B57Y") 
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAECx446UkSRAZ1OOUmpSRL_Ic2jTC2zT74") 
 
 SITE_URL = "https://www.hgnice.vip"
 
