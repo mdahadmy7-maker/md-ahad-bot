@@ -1,9 +1,7 @@
 import asyncio
 import logging
-import random
 import os
-import re
-import requests
+import aiohttp
 import hashlib
 import uuid
 import time
@@ -17,6 +15,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAEWe-iYZTxENir6OeegScMpn9aQPuBFQpQ") 
 
+# আপনার সাইটের সফল API লিংক
 LOGIN_API_URL = "https://api.hgnicepayapi.com/api/v1/Login"     
 GET_USER_INFO_URL = "https://api.hgnicepayapi.com/api/v1/GetUserInfo" 
 
@@ -36,9 +35,9 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# ২. API ফাংশন (requests দিয়ে - যা Pydroid এ কাজ করেছিল)
+# ২. API ফাংশন (লগইন এবং ব্যালেন্স)
 # ───────────────────────────────────────────
-def sync_api_login(phone, password):
+async def api_login(phone, password):
     device_id = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()
     random_str = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()
     timestamp = int(time.time())
@@ -50,28 +49,33 @@ def sync_api_login(phone, password):
         "fbp": "", "adId": "", "language": 0, "random": random_str,
         "signature": signature, "timestamp": timestamp
     }
+    
     headers = {"Content-Type": "application/json;charset=UTF-8"}
     
     try:
-        res = requests.post(LOGIN_API_URL, json=payload, headers=headers, timeout=15)
-        data = res.json()
-        if data.get("code") == 0 or data.get("msg") == "Succeed":
-            return True, data.get("data", {}).get("token", "")
-        return False, data.get("msg", "Wrong account or password")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(LOGIN_API_URL, json=payload, headers=headers, timeout=15) as res:
+                data = await res.json()
+                if data.get("code") == 0 or data.get("msg") == "Succeed":
+                    token = data.get("data", {}).get("token", "")
+                    return True, token
+                return False, data.get("msg", "Wrong account or password")
     except Exception as e:
         return False, str(e)
 
-def sync_api_balance(token):
+async def api_get_balance(token):
     headers = {
         "Content-Type": "application/json;charset=UTF-8",
         "Authorization": f"Bearer {token}"
     }
     try:
-        res = requests.get(GET_USER_INFO_URL, headers=headers, timeout=10)
-        data = res.json()
-        if data.get("code") == 0:
-            return True, data.get("data", {}).get("amount", 0.0)
-        return False, "ব্যালেন্স পাওয়া যায়নি"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(GET_USER_INFO_URL, headers=headers, timeout=10) as res:
+                data = await res.json()
+                if data.get("code") == 0:
+                    balance = data.get("data", {}).get("amount", 0.0)
+                    return True, balance
+                return False, "ব্যালেন্স পাওয়া যায়নি"
     except Exception as e:
         return False, str(e)
 
@@ -120,9 +124,11 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["password"] = text
         state["awaiting"] = None 
         
+        # পাসওয়ার্ড মেসেজ ডিলিট করা
         try: await update.message.delete()
         except: pass
         
+        # লোডিং মেসেজ
         loading_msg = await update.message.reply_text("🔄 **CONNECTING TO HGNICE**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
         
         for i in range(1, 11):
@@ -133,12 +139,13 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await loading_msg.edit_text(f"🔄 **CONNECTING TO HGNICE**\n[{filled}{empty}] {i*10}%", parse_mode="Markdown")
             except: pass
         
-        # এখানে asyncio.to_thread ব্যবহার করা হয়েছে যাতে requests ব্লক না করে
-        login_success, token_or_msg = await asyncio.to_thread(sync_api_login, state["phone"], state["password"])
+        # API লগইন কল
+        login_success, token_or_msg = await api_login(state["phone"], state["password"])
         
         if login_success:
             state["token"] = token_or_msg
-            bal_success, balance = await asyncio.to_thread(sync_api_balance, state["token"])
+            # API ব্যালেন্স কল
+            bal_success, balance = await api_get_balance(state["token"])
             
             uid_from_token = "Unknown"
             try:
