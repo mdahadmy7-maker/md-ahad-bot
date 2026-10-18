@@ -16,7 +16,6 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 # ⚠️ এখানে আপনার আসল বট টোকেনটি বসান
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAHStYqC8f3OSE65wYmyxmC8gvqKDw2B57Y") 
 
-# সঠিক API লিংক (এখানে /User/ যোগ করা হয়েছে)
 LOGIN_API_URL = "https://api.hgnicepayapi.com/api/User/Login"     
 GET_USER_INFO_URL = "https://api.hgnicepayapi.com/api/User/GetUserInfo" 
 
@@ -24,7 +23,7 @@ logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=lo
 logger = logging.getLogger(__name__)
 
 # ───────────────────────────────────────────
-# 🌐 ডামি ওয়েবসাইট (সার্ভার যাতে বন্ধ না করে)
+# 🌐 ডামি ওয়েবসাইট
 # ───────────────────────────────────────────
 web_app = Flask(__name__)
 
@@ -37,7 +36,7 @@ def run_web_server():
     web_app.run(host='0.0.0.0', port=port)
 
 # ───────────────────────────────────────────
-# ২. API ফাংশন (requests দিয়ে)
+# ২. API ফাংশন
 # ───────────────────────────────────────────
 user_state = {}
 
@@ -61,23 +60,37 @@ def sync_api_login(phone, password):
         "fbp": "", "adId": "", "language": 0, "random": random_str,
         "signature": signature, "timestamp": timestamp
     }
-    headers = {"Content-Type": "application/json;charset=UTF-8"}
+    
+    # ⭐ ব্রাউজারের মতো হেডার যোগ করা হলো
+    headers = {
+        "Content-Type": "application/json;charset=UTF-8",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36",
+        "Origin": "https://www.hgnice.vip",
+        "Referer": "https://www.hgnice.vip/"
+    }
     
     try:
         res = requests.post(LOGIN_API_URL, json=payload, headers=headers, timeout=15)
         data = res.json()
+        
+        # সার্ভার থেকে ঠিক কী মেসেজ আসছে সেটা দেখা
+        logger.info(f"Login Response: {data}")
+        
         if data.get("code") == 0 or data.get("msg") == "Succeed":
             return True, data.get("data", {}).get("token", "")
         elif data.get("msg") == "Access too frequently, please try again later":
             return False, "সার্ভার ব্লক করেছে! অনুগ্রহ করে ২-৩ মিনিট পর আবার চেষ্টা করুন।"
-        return False, data.get("msg", "ভুল নাম্বার বা পাসওয়ার্ড!")
+        
+        # সার্ভার যা বলছে, সেটাই রিটার্ন করা হবে
+        return False, f"{data.get('msg', 'ভুল নাম্বার বা পাসওয়ার্ড!')} (Code: {data.get('code')})"
     except Exception as e:
         return False, f"নেটওয়ার্ক এরর: {str(e)}"
 
 def sync_api_balance(token):
     headers = {
         "Content-Type": "application/json;charset=UTF-8",
-        "Authorization": f"Bearer {token}"
+        "Authorization": f"Bearer {token}",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
     }
     try:
         res = requests.get(GET_USER_INFO_URL, headers=headers, timeout=10)
@@ -225,7 +238,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ৪. মেইন ফাংশন
 # ───────────────────────────────────────────
 def main():
-    # Flask সার্ভার চালু করা (ব্যাকগ্রাউন্ডে)
     threading.Thread(target=run_web_server, daemon=True).start()
     
     if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
