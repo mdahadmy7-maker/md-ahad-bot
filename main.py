@@ -13,10 +13,12 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 # ═══════════════════════════════════════════
 # ১. 🔧 CONFIG
 # ═══════════════════════════════════════════
+# ⚠️ এখানে আপনার আসল বট টোকেনটি বসান
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAHStYqC8f3OSE65wYmyxmC8gvqKDw2B57Y") 
 
-LOGIN_API_URL = "https://api.hgnicepayapi.com/api/Login"     
-GET_USER_INFO_URL = "https://api.hgnicepayapi.com/api/GetUserInfo" 
+# সঠিক API লিংক (এখানে /User/ যোগ করা হয়েছে)
+LOGIN_API_URL = "https://api.hgnicepayapi.com/api/User/Login"     
+GET_USER_INFO_URL = "https://api.hgnicepayapi.com/api/User/GetUserInfo" 
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
