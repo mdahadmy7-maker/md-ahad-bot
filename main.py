@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import random
 import os
+import re
 import aiohttp
 import hashlib
 import uuid
@@ -13,7 +15,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 # ═══════════════════════════════════════════
 # ১. 🔧 CONFIG
 # ═══════════════════════════════════════════
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAEWe-iYZTxENir6OeegScMpn9aQPuBFQpQ") 
+# ⚠️ এখানে আপনার বট টোকেনটি বসান (এক জায়গাতেই)
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAFqxoU8330Tgqjbs8GNzblIfUQqnnJ7wPg") 
 
 # আপনার সাইটের সফল API লিংক
 LOGIN_API_URL = "https://api.hgnicepayapi.com/api/v1/Login"     
@@ -28,8 +31,6 @@ def get_state(uid):
     if uid not in user_state:
         user_state[uid] = {
             "logged_in": False, "awaiting": None, "phone": "", "password": "",
-            "running": False, "task": None, "steps": [], "step_idx": 0, 
-            "target": 0, "profit": 0, "bet_choice": "RANDOM",
             "balance": "0.00", "account_uid": "Unknown", "token": ""
         }
     return user_state[uid]
@@ -85,7 +86,6 @@ async def api_get_balance(token):
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
-    state["running"] = False
     
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
@@ -139,56 +139,61 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await loading_msg.edit_text(f"🔄 **CONNECTING TO HGNICE**\n[{filled}{empty}] {i*10}%", parse_mode="Markdown")
             except: pass
         
-        # API লগইন কল
-        login_success, token_or_msg = await api_login(state["phone"], state["password"])
-        
-        if login_success:
-            state["token"] = token_or_msg
-            # API ব্যালেন্স কল
-            bal_success, balance = await api_get_balance(state["token"])
+        try:
+            # API লগইন কল
+            login_success, token_or_msg = await api_login(state["phone"], state["password"])
             
-            uid_from_token = "Unknown"
-            try:
-                payload_b64 = state["token"].split('.')[1]
-                payload_b64 += '=' * (-len(payload_b64) % 4)
-                decoded = json.loads(base64.urlsafe_b64decode(payload_b64))
-                uid_from_token = decoded.get("UserId", "Unknown")
-            except: pass
+            if login_success:
+                state["token"] = token_or_msg
+                # API ব্যালেন্স কল
+                bal_success, balance = await api_get_balance(state["token"])
+                
+                uid_from_token = "Unknown"
+                try:
+                    payload_b64 = state["token"].split('.')[1]
+                    payload_b64 += '=' * (-len(payload_b64) % 4)
+                    decoded = json.loads(base64.urlsafe_b64decode(payload_b64))
+                    uid_from_token = decoded.get("UserId", "Unknown")
+                except: pass
 
-            if bal_success:
-                state["logged_in"] = True
-                state["balance"] = balance
-                state["account_uid"] = uid_from_token
-                
-                login_msg_text = (
-                    "╔════════════════════════╗\n"
-                    "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
-                    "╚════════════════════════╝\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    "☎️ **Phone Number**\n"
-                    f"****{state['phone'][-4:]}\n\n"
-                    "👤 **Account UID**\n"
-                    f"{state['account_uid']}\n\n"
-                    "💰 **Account Balance**\n"
-                    f"৳ {state['balance']}\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                    "🧠 Analysis Engine:  READY\n"
-                    "🚀 AutoTrade System: READY\n\n"
-                    "👇 Press START YOUR TARGET to begin"
-                )
-                
-                reply_keyboard = [
-                    [KeyboardButton("🚀 START YOUR TARGET")],
-                    [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]
-                ]
-                markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
-                await loading_msg.edit_text(login_msg_text, parse_mode="Markdown", reply_markup=markup)
-                
+                if bal_success:
+                    state["logged_in"] = True
+                    state["balance"] = balance
+                    state["account_uid"] = uid_from_token
+                    
+                    login_msg_text = (
+                        "╔════════════════════════╗\n"
+                        "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
+                        "╚════════════════════════╝\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        "☎️ **Phone Number**\n"
+                        f"****{state['phone'][-4:]}\n\n"
+                        "👤 **Account UID**\n"
+                        f"{state['account_uid']}\n\n"
+                        "💰 **Account Balance**\n"
+                        f"৳ {state['balance']}\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                        "🧠 Analysis Engine:  READY\n"
+                        "🚀 AutoTrade System: READY\n\n"
+                        "👇 Press START YOUR TARGET to begin"
+                    )
+                    
+                    reply_keyboard = [
+                        [KeyboardButton("🚀 START YOUR TARGET")],
+                        [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]
+                    ]
+                    markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
+                    await loading_msg.edit_text(login_msg_text, parse_mode="Markdown", reply_markup=markup)
+                    
+                else:
+                    await loading_msg.edit_text(f"✅ লগইন হয়েছে, কিন্তু ব্যালেন্স আনতে সমস্যা: {balance}")
             else:
-                await loading_msg.edit_text(f"✅ লগইন হয়েছে, কিন্তু ব্যালেন্স আনতে সমস্যা: {balance}")
-        else:
-            state["logged_in"] = False
-            await loading_msg.edit_text(f"❌ **LOGIN FAILED**\n{token_or_msg}\n\nদয়া করে সঠিক নাম্বার ও পাসওয়ার্ড দিয়ে আবার চেষ্টা করুন।", parse_mode="Markdown")
+                state["logged_in"] = False
+                await loading_msg.edit_text(f"❌ **LOGIN FAILED**\n{token_or_msg}\n\nদয়া করে সঠিক নাম্বার ও পাসওয়ার্ড দিয়ে আবার চেষ্টা করুন।", parse_mode="Markdown")
+                
+        except Exception as e:
+            # কোনো এরর হলে বট চুপ না করে জানাবে
+            await loading_msg.edit_text(f"⚠️ **SYSTEM ERROR**\n\n`{str(e)}`", parse_mode="Markdown")
         return
 
     # ৩. অন্যান্য বাটন
