@@ -11,14 +11,12 @@ import json
 import base64
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
-from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
 # ১. 🔧 CONFIG
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAGHxO0ZNcoSVb3N5u1dSXcWa1_nszIRlxM") 
 
-SITE_URL = "https://www.hgnice.vip"
 # আপনার সাইটের সফল API লিংক
 LOGIN_API_URL = "https://api.hgnicepayapi.com/api/v1/Login"     
 GET_USER_INFO_URL = "https://api.hgnicepayapi.com/api/v1/GetUserInfo" 
@@ -39,7 +37,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# ২. API ফাংশন: লগইন এবং আসল ব্যালেন্স
+# ২. API ফাংশন (লগইন এবং ব্যালেন্স)
 # ───────────────────────────────────────────
 async def api_login(phone, password):
     device_id = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()
@@ -84,106 +82,7 @@ async def api_get_balance(token):
         return False, str(e)
 
 # ───────────────────────────────────────────
-# ৩. হেল্পার: বাজি ধরা (Playwright - পরবর্তী ধাপের জন্য)
-# ───────────────────────────────────────────
-async def place_bet_and_check_win(page, bet_mode, amount):
-    try:
-        if bet_mode == "BIG":
-            await page.locator('text="Big"').first.click(timeout=5000)
-        else:
-            await page.locator('text="Small"').first.click(timeout=5000)
-        
-        await page.wait_for_timeout(1000)
-        try:
-            await page.locator('text="Confirm"').first.click(timeout=3000)
-        except:
-            pass
-        
-        await asyncio.sleep(32)
-        
-        try:
-            await page.locator('text="My history"').first.click(timeout=5000)
-            await page.wait_for_timeout(3000)
-            first_result = await page.locator('text="Win"').first.is_visible()
-            await page.locator('text="Chart"').first.click(timeout=5000)
-            await page.wait_for_timeout(2000)
-            return first_result
-        except Exception as e:
-            logger.error(f"Result check error: {e}")
-            return False
-    except Exception as e:
-        logger.error(f"Bet error: {e}")
-        return False
-
-# ───────────────────────────────────────────
-# ৪. মূল অটো-বেট লুপ (Playwright দিয়ে)
-# ───────────────────────────────────────────
-async def auto_bet_loop(uid, ctx):
-    state = get_state(uid)
-    
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True) 
-        page = await browser.new_page()
-        
-        try:
-            await page.goto(SITE_URL, timeout=60000)
-            await page.wait_for_timeout(5000)
-            
-            await page.get_by_placeholder("Please enter the phone number").fill(state["phone"])
-            await page.get_by_placeholder("Password").fill(state["password"])
-            await page.locator('text="Log in"').last.click()
-            await page.wait_for_timeout(4000)
-            
-            await page.locator('text="WinGo 30sec"').first.click(timeout=5000)
-            await page.wait_for_timeout(3000)
-            
-            while state["running"]:
-                if not state["steps"]:
-                    await asyncio.sleep(2)
-                    continue
-
-                current_amount = state["steps"][state["step_idx"]]
-                
-                if state["bet_choice"] == "RANDOM":
-                    bet_mode = random.choice(["BIG", "SMALL"])
-                else:
-                    bet_mode = state["bet_choice"]
-                    
-                emoji = "🟠" if bet_mode == "BIG" else "🔵"
-                await ctx.bot.send_message(
-                    chat_id=uid, 
-                    text=f"{emoji} **{bet_mode}**-এ {current_amount} টাকা বাজি ধরছে...\n(Step {state['step_idx']+1}/{len(state['steps'])})"
-                )
-                
-                is_win = await place_bet_and_check_win(page, bet_mode, current_amount)
-                
-                if is_win:
-                    state["profit"] += (current_amount * 0.96)
-                    state["step_idx"] = 0 
-                    await ctx.bot.send_message(chat_id=uid, text=f"✅ **WIN!** প্রফিট: ৳{state['profit']:.2f}")
-                else:
-                    state["profit"] -= current_amount
-                    state["step_idx"] += 1
-                    if state["step_idx"] >= len(state["steps"]):
-                        state["step_idx"] = 0
-                    await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOSE!** প্রফিট: ৳{state['profit']:.2f}")
-                
-                if state["profit"] >= state["target"]:
-                    await ctx.bot.send_message(chat_id=uid, text="🎉 **TARGET REACHED!** বট বন্ধ হচ্ছে।")
-                    state["running"] = False
-                    break
-                    
-                await asyncio.sleep(3)
-                
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            logger.error(f"Playwright error: {e}")
-        finally:
-            await browser.close()
-
-# ───────────────────────────────────────────
-# ৫. টেলিগ্রাম হ্যান্ডলার
+# ৩. টেলিগ্রাম হ্যান্ডলার (হুবহু আপনার সিরিয়াল)
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -220,7 +119,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     text = update.message.text.strip()
 
-    # ১. ফোন নম্বর নেওয়া
+    # ১. ফোন নম্বর গ্রহণ
     if state.get("awaiting") == "phone":
         state["phone"] = text
         state["awaiting"] = "password"
@@ -235,25 +134,30 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ২. পাসওয়ার্ড নেওয়া এবং API চেক
+    # ২. পাসওয়ার্ড গ্রহণ এবং লোডিং অ্যানিমেশন
     if state.get("awaiting") == "password":
         state["password"] = text
         state["awaiting"] = None 
         
-        try: await update.message.delete()
-        except: pass
+        # পাসওয়ার্ড মেসেজটি ডিলিট করা
+        try: 
+            await update.message.delete()
+        except: 
+            pass
         
+        # লোডিং মেসেজ
         loading_msg = await update.message.reply_text("🔄 **CONNECTING TO HGNICE**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
         
         for i in range(1, 11):
             await asyncio.sleep(0.2)
             filled = "█" * i
             empty = "░" * (10 - i)
+            percent = i * 10
             try:
-                await loading_msg.edit_text(f"🔄 **CONNECTING TO HGNICE**\n[{filled}{empty}] {i*10}%", parse_mode="Markdown")
+                await loading_msg.edit_text(f"🔄 **CONNECTING TO HGNICE**\n[{filled}{empty}] {percent}%", parse_mode="Markdown")
             except: pass
         
-        # API লগইন কল
+        # API দিয়ে লগইন
         login_success, token_or_msg = await api_login(state["phone"], state["password"])
         
         if login_success:
@@ -295,6 +199,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]
                 ]
                 markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
+                
                 await loading_msg.edit_text(login_msg_text, parse_mode="Markdown", reply_markup=markup)
                 
             else:
@@ -390,8 +295,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown",
             reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🛑 STOP", callback_data="stop_bet")]])
         )
-        if state.get("task"): state["task"].cancel()
-        state["task"] = asyncio.create_task(auto_bet_loop(uid, ctx))
+        # পরবর্তী ধাপে এখানে Playwright অটো-বেট কল হবে
         
     elif data == "stop_bet":
         state["running"] = False
@@ -399,7 +303,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🛑 **AUTO BETTING STOPPED**", parse_mode="Markdown")
 
 # ───────────────────────────────────────────
-# ৬. মেইন ফাংশন
+# ৪. মেইন ফাংশন
 # ───────────────────────────────────────────
 def main():
     if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or not BOT_TOKEN:
