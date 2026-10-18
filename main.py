@@ -3,7 +3,7 @@ import logging
 import random
 import os
 import re
-import requests
+import aiohttp
 import hashlib
 import uuid
 import time
@@ -36,9 +36,9 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# ২. API ফাংশন (requests দিয়ে - যা Pydroid এ কাজ করেছিল)
+# ২. API ফাংশন (aiohttp দিয়ে)
 # ───────────────────────────────────────────
-def sync_api_login(phone, password):
+async def api_login(phone, password):
     device_id = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()
     random_str = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()
     timestamp = int(time.time())
@@ -50,28 +50,33 @@ def sync_api_login(phone, password):
         "fbp": "", "adId": "", "language": 0, "random": random_str,
         "signature": signature, "timestamp": timestamp
     }
+    
     headers = {"Content-Type": "application/json;charset=UTF-8"}
     
     try:
-        res = requests.post(LOGIN_API_URL, json=payload, headers=headers, timeout=10)
-        data = res.json()
-        if data.get("code") == 0 or data.get("msg") == "Succeed":
-            return True, data.get("data", {}).get("token", "")
-        return False, data.get("msg", "Wrong account or password")
+        async with aiohttp.ClientSession() as session:
+            async with session.post(LOGIN_API_URL, json=payload, headers=headers, timeout=15) as res:
+                data = await res.json()
+                if data.get("code") == 0 or data.get("msg") == "Succeed":
+                    token = data.get("data", {}).get("token", "")
+                    return True, token
+                return False, data.get("msg", "Wrong account or password")
     except Exception as e:
         return False, str(e)
 
-def sync_api_balance(token):
+async def api_get_balance(token):
     headers = {
         "Content-Type": "application/json;charset=UTF-8",
         "Authorization": f"Bearer {token}"
     }
     try:
-        res = requests.get(GET_USER_INFO_URL, headers=headers, timeout=10)
-        data = res.json()
-        if data.get("code") == 0:
-            return True, data.get("data", {}).get("amount", 0.0)
-        return False, "ব্যালেন্স পাওয়া যায়নি"
+        async with aiohttp.ClientSession() as session:
+            async with session.get(GET_USER_INFO_URL, headers=headers, timeout=10) as res:
+                data = await res.json()
+                if data.get("code") == 0:
+                    balance = data.get("data", {}).get("amount", 0.0)
+                    return True, balance
+                return False, "ব্যালেন্স পাওয়া যায়নি"
     except Exception as e:
         return False, str(e)
 
@@ -133,12 +138,12 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await loading_msg.edit_text(f"🔄 **CONNECTING TO HGNICE**\n[{filled}{empty}] {i*10}%", parse_mode="Markdown")
             except: pass
         
-        # এখানে ব্লকিং ফাংশনগুলোকে asyncio.to_thread দিয়ে কল করছি যাতে বট হ্যাং না হয়
-        login_success, token_or_msg = await asyncio.to_thread(sync_api_login, state["phone"], state["password"])
+        # API লগইন
+        login_success, token_or_msg = await api_login(state["phone"], state["password"])
         
         if login_success:
             state["token"] = token_or_msg
-            bal_success, balance = await asyncio.to_thread(sync_api_balance, state["token"])
+            bal_success, balance = await api_get_balance(state["token"])
             
             uid_from_token = "Unknown"
             try:
@@ -184,7 +189,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await loading_msg.edit_text(f"❌ **LOGIN FAILED**\n{token_or_msg}\n\nদয়া করে সঠিক নাম্বার ও পাসওয়ার্ড দিয়ে আবার চেষ্টা করুন।", parse_mode="Markdown")
         return
 
-    # অন্যান্য বাটনগুলো (আপাতত পরের ধাপের জন্য)
+    # ৩. অন্যান্য বাটন
     if text == "🚀 START YOUR TARGET":
         await update.message.reply_text("⏳ এই ফিচারটি পরের ধাপে যুক্ত হবে।")
         return
@@ -217,6 +222,9 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
+# ───────────────────────────────────────────
+# ৪. মেইন ফাংশন
+# ───────────────────────────────────────────
 def main():
     if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
         print("❌ Error: BOT_TOKEN সেট করা নেই!")
