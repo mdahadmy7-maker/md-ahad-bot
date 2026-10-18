@@ -1,4 +1,2 @@
 python-telegram-bot
-playwright
-playwright-stealth
-flask
+requests
