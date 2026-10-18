@@ -5,6 +5,8 @@ import requests
 import hashlib
 import uuid
 import time
+import threading
+from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
@@ -19,6 +21,22 @@ GET_USER_INFO_URL = "https://api.hgnicepayapi.com/api/GetUserInfo"
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# ───────────────────────────────────────────
+# 🌐 ডামি ওয়েবসাইট (সার্ভার যাতে বন্ধ না করে)
+# ───────────────────────────────────────────
+web_app = Flask(__name__)
+
+@web_app.route('/')
+def health_check():
+    return "Bot is running perfectly!"
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 8080))
+    web_app.run(host='0.0.0.0', port=port)
+
+# ───────────────────────────────────────────
+# ২. API ফাংশন (requests দিয়ে)
+# ───────────────────────────────────────────
 user_state = {}
 
 def get_state(uid):
@@ -29,9 +47,6 @@ def get_state(uid):
         }
     return user_state[uid]
 
-# ───────────────────────────────────────────
-# ২. API ফাংশন
-# ───────────────────────────────────────────
 def sync_api_login(phone, password):
     device_id = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()
     random_str = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()
@@ -204,7 +219,13 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
+# ───────────────────────────────────────────
+# ৪. মেইন ফাংশন
+# ───────────────────────────────────────────
 def main():
+    # Flask সার্ভার চালু করা (ব্যাকগ্রাউন্ডে)
+    threading.Thread(target=run_web_server, daemon=True).start()
+    
     if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
         print("❌ Error: BOT_TOKEN সেট করা নেই!")
         return
