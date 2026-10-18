@@ -11,7 +11,6 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 # ═══════════════════════════════════════════
 # ১. 🔧 CONFIG
 # ═══════════════════════════════════════════
-# ⚠️ এখানে আপনার টেলিগ্রাম বটের টোকেনটি বসান
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAHStYqC8f3OSE65wYmyxmC8gvqKDw2B57Y") 
 
 LOGIN_API_URL = "https://api.hgnicepayapi.com/api/Login"     
@@ -31,7 +30,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# ২. API ফাংশন (requests দিয়ে - যা Pydroid এ কাজ করেছিল)
+# ২. API ফাংশন
 # ───────────────────────────────────────────
 def sync_api_login(phone, password):
     device_id = hashlib.md5(str(uuid.uuid4()).encode()).hexdigest()
@@ -100,7 +99,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     text = update.message.text.strip()
 
-    # ১. ফোন নম্বর গ্রহণ
     if state.get("awaiting") == "phone":
         state["phone"] = text
         state["awaiting"] = "password"
@@ -115,7 +113,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ২. পাসওয়ার্ড গ্রহণ এবং API লগইন
     if state.get("awaiting") == "password":
         state["password"] = text
         state["awaiting"] = None 
@@ -133,7 +130,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await loading_msg.edit_text(f"🔄 **CONNECTING TO HGNICE**\n[{filled}{empty}] {i*10}%", parse_mode="Markdown")
             except: pass
         
-        # requests লাইব্রেরি যাতে বটকে ব্লক না করে তাই asyncio.to_thread ব্যবহার করা হলো
         login_success, token_or_msg = await asyncio.to_thread(sync_api_login, state["phone"], state["password"])
         
         if login_success:
@@ -176,7 +172,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await loading_msg.edit_text(f"❌ **LOGIN FAILED**\n{token_or_msg}\n\nদয়া করে সঠিক নাম্বার ও পাসওয়ার্ড দিয়ে আবার চেষ্টা করুন।", parse_mode="Markdown")
         return
 
-    # ৩. অন্যান্য বাটন
     if text == "🚀 START YOUR TARGET":
         await update.message.reply_text("⏳ অটো-বেট ফিচারটি পরবর্তী ধাপে যুক্ত হবে।")
         return
@@ -209,9 +204,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
 
-# ───────────────────────────────────────────
-# ৪. মেইন ফাংশন
-# ───────────────────────────────────────────
 def main():
     if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
         print("❌ Error: BOT_TOKEN সেট করা নেই!")
