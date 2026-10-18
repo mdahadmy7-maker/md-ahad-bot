@@ -11,11 +11,14 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 # ═══════════════════════════════════════════
 # ১. 🔧 CONFIG
 # ═══════════════════════════════════════════
-# ⚠️ এখানে আপনার টেলিগ্রাম বটের টোকেনটি বসান (১৪ নম্বর লাইন)
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAGqRw1Mnj30rhr3N233Il4U8Huccz1mwVk") 
 
-LOGIN_API_URL = "https://api.hgnicepayapi.com/api/v1/Login"     
-BALANCE_API_URL = "https://api.hgnicepayapi.com/api/v1/GetUserInfo" 
+# আপনার সাইটের সম্ভাব্য দুটি লিংক (যেটা আগে কাজ করেছিল)
+LOGIN_API_URLS = [
+    "https://api.hgnicepayapi.com/api/User/Login",
+    "https://api.hgnicepayapi.com/api/Login"
+]
+BALANCE_API_URL = "https://api.hgnicepayapi.com/api/User/GetUserInfo" 
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -47,14 +50,22 @@ def sync_api_login(phone, password):
     }
     headers = {"Content-Type": "application/json;charset=UTF-8"}
     
-    try:
-        res = requests.post(LOGIN_API_URL, json=payload, headers=headers, timeout=15)
-        data = res.json()
-        if data.get("code") == 0 or data.get("msg") == "Succeed":
-            return True, data.get("data", {}).get("token", "")
-        return False, data.get("msg", "Wrong account or password")
-    except Exception as e:
-        return False, str(e)
+    # দুটি লিংক ট্রাই করা
+    for url in LOGIN_API_URLS:
+        try:
+            res = requests.post(url, json=payload, headers=headers, timeout=10)
+            data = res.json()
+            
+            # যদি 'Url is not exist' না আসে, তার মানে লিংকটা সঠিক
+            if data.get("msg") != "Url is not exist":
+                if data.get("code") == 0 or data.get("msg") == "Succeed":
+                    return True, data.get("data", {}).get("token", ""), "Success"
+                else:
+                    return False, data.get("msg", "ভুল নাম্বার বা পাসওয়ার্ড!"), "Failed"
+        except Exception:
+            continue
+            
+    return False, "সার্ভারে কানেক্ট করা যাচ্ছে না!", "Error"
 
 def sync_api_balance(token):
     headers = {
@@ -65,14 +76,16 @@ def sync_api_balance(token):
         res = requests.get(BALANCE_API_URL, headers=headers, timeout=10)
         data = res.json()
         if data.get("code") == 0:
-            balance = data.get("data", {}).get("amount", 0.0)
-            return True, balance
-        return False, "ব্যালেন্স পাওয়া যায়নি"
+            user_data = data.get("data", {})
+            balance = user_data.get("amount", "0.00")
+            user_id = user_data.get("userId", "Unknown")
+            return True, balance, user_id
+        return False, data.get("msg", "ব্যালেন্স পাওয়া যায়নি"), "Unknown"
     except Exception as e:
-        return False, str(e)
+        return False, str(e), "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. টেলিগ্রাম হ্যান্ডলার (আপনার আগের বড় ড্যাশবোর্ড)
+# ৩. টেলিগ্রাম হ্যান্ডলার
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -87,21 +100,9 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "🔐 Access  : Private · Authorized Members\n"
         "🔴 Status  : Not Logged In\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🧠 Prediction Engine — 9 Layers\n"
-        "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
-        "🔍 Manipulation · 🎨 Colour · 🔢 Frequency\n"
-        "🔄 Markov · ♻️ Cycle · 💠 Momentum\n"
-        "🔁 Every layer is back-tested live so its vote\n"
-        "weight follows its real hit-rate\n"
-        "🔴 Confidence below 30% → sit out\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🎬 4-second 🧠 generating prediction animation\n"
-        "🚀 Analysis → auto bet every 30s period\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "👇 Press the button below to LOGIN"
     )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
-    
     await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -109,7 +110,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     text = update.message.text.strip()
 
-    # ১. ফোন নম্বর গ্রহণ
     if state.get("awaiting") == "phone":
         state["phone"] = text
         state["awaiting"] = "password"
@@ -124,7 +124,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ২. পাসওয়ার্ড গ্রহণ এবং API চেক
     if state.get("awaiting") == "password":
         state["password"] = text
         state["awaiting"] = None 
@@ -142,16 +141,17 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 await loading_msg.edit_text(f"🔄 **CONNECTING TO HGNICE**\n[{filled}{empty}] {i*10}%", parse_mode="Markdown")
             except: pass
         
-        login_success, token_or_msg = await asyncio.to_thread(sync_api_login, state["phone"], state["password"])
+        # API থেকে লগইন রেজাল্ট নেওয়া
+        login_success, token_or_msg, status = await asyncio.to_thread(sync_api_login, state["phone"], state["password"])
         
         if login_success:
             state["token"] = token_or_msg
-            bal_success, balance = await asyncio.to_thread(sync_api_balance, state["token"])
+            bal_success, balance, user_id = await asyncio.to_thread(sync_api_balance, state["token"])
             
             if bal_success:
                 state["logged_in"] = True
                 state["balance"] = balance
-                state["account_uid"] = "548284" 
+                state["account_uid"] = user_id
                 
                 login_msg_text = (
                     "╔════════════════════════╗\n"
@@ -176,30 +176,24 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 ]
                 markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
                 await loading_msg.edit_text(login_msg_text, parse_mode="Markdown", reply_markup=markup)
-                
             else:
                 await loading_msg.edit_text(f"✅ লগইন হয়েছে, কিন্তু ব্যালেন্স আনতে সমস্যা: {balance}")
         else:
             state["logged_in"] = False
+            # যদি ভুল পাসওয়ার্ড বা নাম্বার হয়, তবে এই মেসেজটি যাবে
             await loading_msg.edit_text(f"❌ **LOGIN FAILED**\n{token_or_msg}\n\nদয়া করে সঠিক নাম্বার ও পাসওয়ার্ড দিয়ে আবার চেষ্টা করুন।", parse_mode="Markdown")
         return
 
-    # ৩. অন্যান্য বাটন হ্যান্ডলার
     if text == "🚀 START YOUR TARGET":
-        if not state["logged_in"]:
-            await update.message.reply_text("❌ আগে লগইন করুন। /start দিন।")
-        else:
-            await update.message.reply_text("🚀 বেটিং সিস্টেম চালু হচ্ছে...")
+        await update.message.reply_text("⏳ অটো-বেট ফিচারটি পরবর্তী ধাপে যুক্ত হবে।")
         return
-
     if text == "🛑 STOP TRADE":
-        await update.message.reply_text("🛑 **TRADE STOPPED**")
+        await update.message.reply_text("🛑 **STOPPED**")
         return
-
     if text == "🚪 LOGOUT":
         state["logged_in"] = False
         state["token"] = ""
-        await update.message.reply_text("🚪 **LOGGED OUT**\nYour session has ended successfully.", parse_mode="Markdown")
+        await update.message.reply_text("🚪 **LOGGED OUT**\nসেশন শেষ হয়েছে।", parse_mode="Markdown")
         return
 
 async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -235,8 +229,8 @@ def main():
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     
-    print("🤖 Bot started...")
+    print("🤖 Bot started successfully...")
     app.run_polling()
 
 if __name__ == "__main__":
-    main() 
+    main()
