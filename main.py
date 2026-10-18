@@ -12,7 +12,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 # ১. 🔧 CONFIG
 # ═══════════════════════════════════════════
 # ⚠️ এখানে আপনার টেলিগ্রাম বটের টোকেনটি বসান
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE") 
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAHStYqC8f3OSE65wYmyxmC8gvqKDw2B57Y") 
 
 LOGIN_API_URL = "https://api.hgnicepayapi.com/api/Login"     
 GET_USER_INFO_URL = "https://api.hgnicepayapi.com/api/GetUserInfo" 
