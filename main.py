@@ -4,6 +4,8 @@ import random
 import os
 import re
 import threading
+import json
+import base64
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -12,7 +14,7 @@ from playwright.async_api import async_playwright
 # ═══════════════════════════════════════════
 # ১. 🔧 CONFIG
 # ═══════════════════════════════════════════
-# ⚠️ এখানে আপনার আসল বট টোকেনটি বসান
+# ⚠️⚠️⚠️ এখানে আপনার আসল বট টোকেনটি বসান ⚠️⚠️⚠️
 BOT_TOKEN = "8850232346:AAGbO6zilJIPKrOyPpuCatWDuGzc5ryc94c" 
 
 SITE_URL = "https://www.hgnice.vip"
@@ -33,55 +35,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# ২. হেল্পার: লগইন সফল হয়েছে কিনা চেক করা
-# ───────────────────────────────────────────
-async def check_login_success(page):
-    try:
-        await page.wait_for_timeout(8000) 
-        
-        error_popup = page.locator('text="Wrong account or password"').first
-        if await error_popup.is_visible():
-            return False, "Wrong account or password"
-            
-        error_text_locator = page.locator('text=/Error/i').first
-        if await error_text_locator.is_visible():
-             error_msg = await error_text_locator.inner_text()
-             return False, error_msg
-             
-        return True, "Success"
-        
-    except Exception as e:
-        logger.error(f"Login check error: {e}")
-        return True, "Assume Success"
-
-# ───────────────────────────────────────────
-# ৩. হেল্পার: স্ক্রিন থেকে আসল ব্যালেন্স ও UID বের করা
-# ───────────────────────────────────────────
-async def get_account_info(page):
-    try:
-        await page.wait_for_timeout(3000)
-        balance = "0.00"
-        uid = "Unknown"
-        try:
-            page_text = await page.inner_text("body")
-            
-            uid_match = re.search(r'(?:UID|Account\s*UID)\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
-            if uid_match:
-                uid = uid_match.group(1)
-                
-            balance_match = re.search(r'(?:Total\s*)?[Bb]alance\s*[৳:]?\s*([\d.]+)', page_text)
-            if balance_match:
-                balance = balance_match.group(1)
-        except Exception as e:
-            logger.error(f"Scraping regex error: {e}")
-            
-        return balance, uid
-    except Exception as e:
-        logger.error(f"Info error: {e}")
-        return "0.00", "Unknown"
-
-# ───────────────────────────────────────────
-# ৪. হেল্পার: বাজি ধরা এবং রেজাল্ট চেক
+# ২. হেল্পার: বাজি ধরা এবং রেজাল্ট চেক
 # ───────────────────────────────────────────
 async def place_bet_and_check_win(page, bet_mode, amount):
     try:
@@ -113,7 +67,7 @@ async def place_bet_and_check_win(page, bet_mode, amount):
         return False
 
 # ───────────────────────────────────────────
-# ৫. মূল অটো-বেট লুপ
+# ৩. মূল অটো-বেট লুপ (API রেসপন্স ধরার লজিক সহ)
 # ───────────────────────────────────────────
 async def auto_bet_loop(uid, ctx, loading_msg):
     state = get_state(uid)
@@ -125,53 +79,78 @@ async def auto_bet_loop(uid, ctx, loading_msg):
         ) 
         page = await browser.new_page()
         
+        login_data = {"uid": "Unknown", "balance": "0.00"}
+
+        # ⚠️ API রেসপন্স ধরার ফাংশন
+        async def handle_response(response):
+            if "api/webapi/Login" in response.url and response.status == 200:
+                try:
+                    json_data = await response.json()
+                    if "data" in json_data and json_data["data"]:
+                        data = json_data["data"]
+                        login_data["uid"] = str(data.get("parentUserId", "Unknown"))
+                        
+                        token = data.get("token", "")
+                        if token:
+                            # JWT টোকেন থেকে Amount ও UserId বের করা
+                            payload = token.split('.')[1]
+                            payload += '=' * (-len(payload) % 4)
+                            decoded = json.loads(base64.b64decode(payload).decode('utf-8'))
+                            login_data["balance"] = decoded.get("Amount", "0.00")
+                            login_data["uid"] = decoded.get("UserId", login_data["uid"])
+                except Exception as e:
+                    logger.error(f"Response parse error: {e}")
+
+        page.on("response", handle_response)
+        
         try:
             await page.goto(SITE_URL, timeout=60000)
-            await page.wait_for_timeout(5000) 
+            await page.wait_for_timeout(4000) 
             
-            # ⚠️ ইউজার যে নাম্বার ও পাসওয়ার্ড দেবে, সেটিই এখানে বসবে
             await page.get_by_placeholder("Please enter the phone number").fill(state["phone"])
             await page.get_by_placeholder("Password").fill(state["password"])
             
             # লগইন বাটনে ক্লিক
             await page.locator('text="Log in"').last.click()
             
-            # লগইন চেক
-            login_success, login_msg = await check_login_success(page)
+            # ⚠️ API রেসপন্স আসার জন্য অপেক্ষা (সর্বোচ্চ ১০ সেকেন্ড)
+            for _ in range(20):
+                if login_data["uid"] != "Unknown":
+                    break
+                await page.wait_for_timeout(500)
             
-            if not login_success:
+            if login_data["uid"] == "Unknown":
+                # লগইন ব্যর্থ
                 if loading_msg:
                     try: await loading_msg.delete()
                     except: pass
                     
                 await ctx.bot.send_message(
                     chat_id=uid, 
-                    text=f"❌ **LOGIN FAILED**\n{login_msg}\n\nদয়া করে সঠিক নাম্বার ও পাসওয়ার্ড দিয়ে আবার চেষ্টা করুন।",
+                    text=f"❌ **LOGIN FAILED**\n\nভুল নাম্বার বা পাসওয়ার্ড! অথবা সার্ভারে সমস্যা হচ্ছে।",
                     parse_mode="Markdown"
                 )
                 state["running"] = False
                 await browser.close()
                 return
             
-            # ⚠️ ওই ইউজারের আসল ব্যালেন্স ও UID বের করা
-            bal, user_uid = await get_account_info(page)
-            state["balance"] = bal
-            state["account_uid"] = user_uid
+            state["balance"] = login_data["balance"]
+            state["account_uid"] = login_data["uid"]
             state["logged_in"] = True
             
-            # লোডিং মেসেজ ডিলিট করা
+            # ⚠️ লগইন সফল হলে লোডিং মেসেজটি ডিলিট
             if loading_msg:
                 try: await loading_msg.delete()
                 except: pass
             
-            # ⚠️ এখানে state['phone'] এর শেষ ৪ ডিজিট দেখানো হচ্ছে (হাইড করা)
+            # ড্যাশবোর্ড মেসেজ (আপনার স্ক্রিনশটের মতো)
             login_msg_text = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
                 "╚════════════════════════╝\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "☎️ **Phone Number**\n"
-                f"****{state['phone'][-4:]}\n\n" 
+                f"****{state['phone'][-4:]}\n\n"
                 "👤 **Account UID**\n"
                 f"{state['account_uid']}\n\n"
                 "💰 **Account Balance**\n"
@@ -243,7 +222,7 @@ async def auto_bet_loop(uid, ctx, loading_msg):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৬. টেলিগ্রাম হ্যান্ডলার
+# ৪. টেলিগ্রাম হ্যান্ডলার
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -286,7 +265,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "╔════════════════════════╗\n"
             "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
             "╚════════════════════════╝\n"
-            f"📱 Number: {state['phone']}\n\n" # ⚠️ এখানে ইউজারের দেওয়া পুরো নাম্বার দেখাবে
+            f"📱 Number: {text}\n\n"
             "🔑 **Now enter your password:**\n"
             "_Your message will be deleted immediately for security._",
             parse_mode="Markdown"
@@ -417,7 +396,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🛑 **AUTO BETTING STOPPED**", parse_mode="Markdown")
 
 # ───────────────────────────────────────────
-# ৭. Railway Healthcheck Server
+# ৫. Railway Healthcheck Server
 # ───────────────────────────────────────────
 def start_health_server():
     port = int(os.environ.get("PORT", 8080))
@@ -432,7 +411,7 @@ def start_health_server():
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
 # ───────────────────────────────────────────
-# ৮. মেইন ফাংশন
+# ৬. মেইন ফাংশন
 # ───────────────────────────────────────────
 def main():
     if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or not BOT_TOKEN:
