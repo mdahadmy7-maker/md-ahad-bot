@@ -3,7 +3,8 @@ import logging
 import requests
 import json
 import re
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import base64
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 # ═══════════════════════════════════════════
@@ -11,7 +12,9 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 # ⚠️ এখানে আপনার টেলিগ্রাম বটের টোকেন বসান
 # ═══════════════════════════════════════════
 BOT_TOKEN = "8850232346:AAEUh-lBN2hW0i3WRqR_CJUsGi3CSmSU7HU" 
-API_URL = "https://api.hgnicepayapi.com/api/webapi/Login"
+
+LOGIN_URL = "https://api.hgnicepayapi.com/api/webapi/Login"
+USER_INFO_URL = "https://api.hgnicepayapi.com/api/webapi/GetUserInfo"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -24,12 +27,11 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# 💡 লগইন ফাংশন (আপনার সফল curl ডেটা দিয়ে)
+# 💡 লগইন এবং ব্যালেন্স আনার ফাংশন
 # ───────────────────────────────────────────
 async def api_login(uid, ctx, loading_msg_id):
     state = get_state(uid)
     
-    # আপনার সফল curl থেকে নেওয়া হেডার
     headers = {
         "authority": "api.hgnicepayapi.com",
         "accept": "application/json, text/plain, */*",
@@ -47,9 +49,9 @@ async def api_login(uid, ctx, loading_msg_id):
         "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
     }
 
-    # আপনার সফল পেলোড
-    payload = {
-        "username": state["phone"], # অথবা সরাসরি "8801884495095"
+    # লগইন পেলোড (আপনার আগের সফল curl থেকে নেওয়া)
+    login_payload = {
+        "username": state["phone"],
         "pwd": state["password"],
         "phonetype": 0,
         "logintype": "mobile",
@@ -62,57 +64,92 @@ async def api_login(uid, ctx, loading_msg_id):
         "adId": "",
         "language": 0,
         "random": "f6dd624a23b343ee9d7e53fd01b8cc66",
-        "signature": "F9FF4A78B3914639BB25FCD184E650C8", # আপনার সফল সিগনেচার
-        "timestamp": 1792437970 # আপনার সফল টাইমস্ট্যাম্প
+        "signature": "F9FF4A78B3914639BB25FCD184E650C8", 
+        "timestamp": 1792437970 
     }
 
     try:
-        # রিকোয়েস্ট পাঠানো
-        response = requests.post(API_URL, json=payload, headers=headers, timeout=15)
+        response = requests.post(LOGIN_URL, json=login_payload, headers=headers, timeout=15)
         data = response.json()
         
-        # লোডিং মেসেজ ডিলিট
         if loading_msg_id:
             try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
             except: pass
 
-        if data.get("code") == 0:
-            # লগইন সফল হলে ডেটা বের করা
-            user_data = data.get("data", {})
-            
-            # টোকেন বের করা
-            token = user_data.get("token", "")
-            
-            # UID বের করা (webSocketChannels এর ভেতর থেকে)
-            uid_val = "Unknown"
-            channels = user_data.get("webSocketChannels", [])
-            if channels:
-                match = re.search(r'userid/(\d+)', channels[0])
-                if match:
-                    uid_val = match.group(1)
-            
-            # ব্যালেন্স (রেসপন্সে সরাসরি না থাকলে 0.00 দেখাবে, পরে প্রোফাইল API থেকে আনতে হবে)
-            balance = user_data.get("balance", "0.00") 
-            
-            masked_phone = f"****{state['phone'][-4:]}"
-            
-            success_msg = (
-                "╔════════════════════════╗\n"
-                "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
-                "╚════════════════════════╝\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"☎️ **Phone:** {masked_phone}\n"
-                f"👤 **Account UID:** {uid_val}\n"
-                f"💰 **Balance:** ৳ {balance}\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            )
-            await ctx.bot.send_message(chat_id=uid, text=success_msg, parse_mode="Markdown")
-            
-        else:
-            # এরর মেসেজ
+        if data.get("code") != 0:
             err_msg = data.get("msg", "Wrong account or password")
             await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED**\n\n{err_msg}", parse_mode="Markdown")
+            return
+
+        # টোকেন বের করা
+        user_data = data.get("data", {})
+        token = user_data.get("token", "")
+        
+        # GetUserInfo এর জন্য হেডার আপডেট
+        headers["authorization"] = f"Bearer {token}"
+        
+        info_payload = {
+            "language": 0,
+            "random": "5f8cc6db4f79466498af393f4cefa024",
+            "signature": "1B8641B191D774437D642C99F656F62B",
+            "timestamp": 1792440119
+        }
+        
+        # ডিফল্ট ভ্যালু
+        uid_val = "Unknown"
+        balance = "0.00"
+
+        # ১. API থেকে ব্যালেন্স আনার চেষ্টা
+        try:
+            info_response = requests.post(USER_INFO_URL, json=info_payload, headers=headers, timeout=10)
+            info_data = info_response.json()
+            if info_data.get("code") == 0:
+                info_d = info_data.get("data", {})
+                balance = info_d.get("amount", info_d.get("Amount", "0.00"))
+                uid_val = info_d.get("userId", info_d.get("UserId", "Unknown"))
+        except:
+            pass
+
+        # ২. ব্যাকআপ: JWT টোকেন ডিকোড করে UID ও ব্যালেন্স বের করা
+        try:
+            payload_b64 = token.split('.')[1]
+            payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
+            decoded_payload = json.loads(base64.b64decode(payload_b64).decode('utf-8'))
             
+            if uid_val == "Unknown": uid_val = decoded_payload.get("UserId", "Unknown")
+            if balance == "0.00": balance = decoded_payload.get("Amount", "0.00")
+        except Exception as e:
+            logger.error(f"Token decode error: {e}")
+
+        masked_phone = f"****{state['phone'][-4:]}"
+        
+        # 💡 আপনার দেওয়া স্ক্রিনশটের মতো ড্যাশবোর্ড ডিজাইন
+        dashboard_msg = (
+            "╔════════════════════════╗\n"
+            "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
+            "╚════════════════════════╝\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"☎️ **Phone Number**\n"
+            f"{masked_phone}\n\n"
+            f"👤 **Account UID**\n"
+            f"{uid_val}\n\n"
+            f"💰 **Account Balance**\n"
+            f"৳ {balance}\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🧠 Analysis Engine:  READY\n"
+            "🚀 AutoTrade System: READY\n\n"
+            "👇 Press START YOUR TARGET to begin"
+        )
+        
+        # নিচের কিবোর্ড বাটন
+        reply_keyboard = [
+            [KeyboardButton("🚀 START YOUR TARGET")],
+            [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]
+        ]
+        markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
+        
+        await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, parse_mode="Markdown", reply_markup=markup)
+
     except Exception as e:
         if loading_msg_id:
             try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
@@ -123,8 +160,33 @@ async def api_login(uid, ctx, loading_msg_id):
 # টেলিগ্রাম হ্যান্ডলার
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    get_state(update.effective_user.id)
-    await update.message.reply_text("🔐 **LOGIN TO ACCOUNT**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔐 LOGIN", callback_data="start_login")]]))
+    uid = update.effective_user.id
+    get_state(uid)
+    
+    # 💡 আপনার প্রথম দিকের ওয়েলকাম মেসেজটি এখানে ফিরিয়ে আনা হয়েছে
+    welcome_text = (
+        "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 Mode    : Auto Analyse & bet\n"
+        "🔐 Access  : Private · Authorized Members\n"
+        "🔴 Status  : Not Logged In\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 Prediction Engine — 9 Layers\n"
+        "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
+        "🔍 Manipulation · 🎨 Colour · 🔢 Frequency\n"
+        "🔄 Markov · ♻️ Cycle · 💠 Momentum\n"
+        "🔁 Every layer is back-tested live so its vote\n"
+        "weight follows its real hit-rate\n"
+        "🔴 Confidence below 30% → sit out\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🎬 4-second 🧠 generating prediction animation\n"
+        "🚀 Analysis → auto bet every 30s period\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "👇 Press the button below to LOGIN"
+    )
+    keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
+    
+    await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -151,6 +213,19 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             except: pass
         
         await api_login(uid, ctx, loading_msg.message_id)
+        return
+
+    # 💡 বাটনগুলোর রেসপন্স (পরবর্তীতে অটো-বেট লজিক যোগ করা যাবে)
+    if text == "🚀 START YOUR TARGET":
+        await update.message.reply_text("🚀 **AUTO TRADING STARTED**\n(Coming soon...)", parse_mode="Markdown")
+        return
+    if text == "🛑 STOP TRADE":
+        await update.message.reply_text("🛑 **TRADE STOPPED**", parse_mode="Markdown")
+        return
+    if text == "🚪 LOGOUT":
+        state["phone"] = ""
+        state["password"] = ""
+        await update.message.reply_text("🚪 **LOGGED OUT**\n/start দিয়ে আবার লগইন করুন।", parse_mode="Markdown")
         return
 
 async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
