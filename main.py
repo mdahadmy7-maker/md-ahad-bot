@@ -13,7 +13,8 @@ from playwright.async_api import async_playwright
 # ═══════════════════════════════════════════
 BOT_TOKEN = "8850232346:AAFxrxOHHdFzS560JepDpxgj2oqS0tr6nPo" 
 
-SITE_URL = "https://www.hgnice.vip"
+# 💡 এখানে সরাসরি লগইন পেজের লিংক দেওয়া হলো
+SITE_URL = "https://www.hgnice.vip/#/login"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,9 +36,9 @@ def get_state(uid):
 # ───────────────────────────────────────────
 async def check_login_success(page):
     try:
-        await page.wait_for_timeout(5000) # লগইন রিকোয়েস্ট প্রসেস হওয়ার জন্য অপেক্ষা
+        await page.wait_for_timeout(5000) 
         
-        # ১. ভুল পাসওয়ার্ডের পপ-আপ চেক (Error 147)
+        # ১. ভুল পাসওয়ার্ডের পপ-আপ চেক
         error_popup = page.locator('text="Wrong account or password"').first
         if await error_popup.is_visible():
             return False, "Wrong account or password (Error: 147)"
@@ -65,12 +66,10 @@ async def get_account_info(page):
         try:
             page_text = await page.inner_text("body")
             
-            # UID খোঁজা
             uid_match = re.search(r'UID\s*\|\s*(\d+)', page_text, re.IGNORECASE)
             if uid_match:
                 uid = uid_match.group(1)
                 
-            # ব্যালেন্স খোঁজা
             balance_match = re.search(r'Total balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
             if balance_match:
                 balance = balance_match.group(1)
@@ -116,16 +115,18 @@ async def place_bet_and_check_win(page, bet_mode, amount):
         return False
 
 # ───────────────────────────────────────────
-# ৫. মূল অটো-বেট লুপ (এখানে ক্লিকের লজিক দেওয়া আছে)
+# ৫. মূল অটো-বেট লুপ
 # ───────────────────────────────────────────
 async def auto_bet_loop(uid, ctx, loading_msg_id):
     state = get_state(uid)
     
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False) 
+        # সার্ভারে রান করলে headless=True করে দিবেন, পিসিতে দেখতে চাইলে False
+        browser = await p.chromium.launch(headless=True) 
         page = await browser.new_page()
         
         try:
+            # 💡 এখন সরাসরি লগইন পেজে যাবে
             await page.goto(SITE_URL, timeout=60000)
             await page.wait_for_timeout(5000) 
             
@@ -149,21 +150,16 @@ async def auto_bet_loop(uid, ctx, loading_msg_id):
                 
             await page.wait_for_timeout(1500)
             
-            # ৩. লাল "Log in" বাটনে ক্লিক করা (এখানে ৪টি ভিন্ন পদ্ধতি ব্যবহার করা হয়েছে)
-            logger.info("Attempting to click Login button...")
+            # ৩. লাল "Log in" বাটনে ক্লিক করা
             try:
-                # পদ্ধতি ১: বাটনের ভেতরের লেখা "Log in" দিয়ে খোঁজা
                 await page.locator('button:has-text("Log in")').last.click(timeout=3000)
             except:
                 try:
-                    # পদ্ধতি ২: শুধু টেক্সট "Log in" দিয়ে খোঁজা
                     await page.locator('text="Log in"').last.click(timeout=3000)
                 except:
                     try:
-                        # পদ্ধতি ৩: ওয়েবসাইটের কমন ক্লাস নাম (van-button) দিয়ে খোঁজা
                         await page.locator('.van-button--primary, .login-btn, .submit-btn').last.click(timeout=3000)
                     except:
-                        # পদ্ধতি ৪: পেজের সবচেয়ে বড় লাল বাটনটি খোঁজা
                         await page.locator('div[role="button"], button').last.click(timeout=3000)
             
             # --- লগইন রেজাল্ট চেক ---
@@ -273,7 +269,7 @@ async def auto_bet_loop(uid, ctx, loading_msg_id):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৬. টেলিগ্রাম হ্যান্ডলার (আপনার আগের কোড অনুযায়ী)
+# ৬. টেলিগ্রাম হ্যান্ডলার (অপরিবর্তিত)
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
