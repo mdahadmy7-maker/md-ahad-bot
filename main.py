@@ -4,8 +4,6 @@ import random
 import os
 import re
 import threading
-import json
-import base64
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -35,7 +33,33 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# ২. হেল্পার: বাজি ধরা এবং রেজাল্ট চেক
+# ২. হেল্পার: স্ক্রিন থেকে আসল ব্যালেন্স ও UID বের করা
+# ───────────────────────────────────────────
+async def get_account_info(page):
+    try:
+        await page.wait_for_timeout(3000)
+        balance = "0.00"
+        uid = "Unknown"
+        try:
+            page_text = await page.inner_text("body")
+            
+            uid_match = re.search(r'(?:UID|Account\s*UID)\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
+            if uid_match:
+                uid = uid_match.group(1)
+                
+            balance_match = re.search(r'(?:Total\s*)?[Bb]alance\s*[৳:]?\s*([\d.]+)', page_text)
+            if balance_match:
+                balance = balance_match.group(1)
+        except Exception as e:
+            logger.error(f"Scraping regex error: {e}")
+            
+        return balance, uid
+    except Exception as e:
+        logger.error(f"Info error: {e}")
+        return "0.00", "Unknown"
+
+# ───────────────────────────────────────────
+# ৩. হেল্পার: বাজি ধরা এবং রেজাল্ট চেক
 # ───────────────────────────────────────────
 async def place_bet_and_check_win(page, bet_mode, amount):
     try:
@@ -67,7 +91,7 @@ async def place_bet_and_check_win(page, bet_mode, amount):
         return False
 
 # ───────────────────────────────────────────
-# ৩. মূল অটো-বেট লুপ (API রেসপন্স ধরার লজিক সহ)
+# ৪. মূল অটো-বেট লুপ (পপ-আপ বন্ধ করবে না)
 # ───────────────────────────────────────────
 async def auto_bet_loop(uid, ctx, loading_msg):
     state = get_state(uid)
@@ -79,33 +103,9 @@ async def auto_bet_loop(uid, ctx, loading_msg):
         ) 
         page = await browser.new_page()
         
-        login_data = {"uid": "Unknown", "balance": "0.00"}
-
-        # ⚠️ API রেসপন্স ধরার ফাংশন
-        async def handle_response(response):
-            if "api/webapi/Login" in response.url and response.status == 200:
-                try:
-                    json_data = await response.json()
-                    if "data" in json_data and json_data["data"]:
-                        data = json_data["data"]
-                        login_data["uid"] = str(data.get("parentUserId", "Unknown"))
-                        
-                        token = data.get("token", "")
-                        if token:
-                            # JWT টোকেন থেকে Amount ও UserId বের করা
-                            payload = token.split('.')[1]
-                            payload += '=' * (-len(payload) % 4)
-                            decoded = json.loads(base64.b64decode(payload).decode('utf-8'))
-                            login_data["balance"] = decoded.get("Amount", "0.00")
-                            login_data["uid"] = decoded.get("UserId", login_data["uid"])
-                except Exception as e:
-                    logger.error(f"Response parse error: {e}")
-
-        page.on("response", handle_response)
-        
         try:
             await page.goto(SITE_URL, timeout=60000)
-            await page.wait_for_timeout(4000) 
+            await page.wait_for_timeout(5000) 
             
             await page.get_by_placeholder("Please enter the phone number").fill(state["phone"])
             await page.get_by_placeholder("Password").fill(state["password"])
@@ -113,37 +113,21 @@ async def auto_bet_loop(uid, ctx, loading_msg):
             # লগইন বাটনে ক্লিক
             await page.locator('text="Log in"').last.click()
             
-            # ⚠️ API রেসপন্স আসার জন্য অপেক্ষা (সর্বোচ্চ ১০ সেকেন্ড)
-            for _ in range(20):
-                if login_data["uid"] != "Unknown":
-                    break
-                await page.wait_for_timeout(500)
+            # লগইন প্রসেস শেষ হওয়ার জন্য অপেক্ষা
+            await page.wait_for_timeout(8000)
             
-            if login_data["uid"] == "Unknown":
-                # লগইন ব্যর্থ
-                if loading_msg:
-                    try: await loading_msg.delete()
-                    except: pass
-                    
-                await ctx.bot.send_message(
-                    chat_id=uid, 
-                    text=f"❌ **LOGIN FAILED**\n\nভুল নাম্বার বা পাসওয়ার্ড! অথবা সার্ভারে সমস্যা হচ্ছে।",
-                    parse_mode="Markdown"
-                )
-                state["running"] = False
-                await browser.close()
-                return
-            
-            state["balance"] = login_data["balance"]
-            state["account_uid"] = login_data["uid"]
+            # ⚠️ কোনো পপ-আপ অটোমেটিক বন্ধ করা হবে না। বট শুধু ব্যালেন্স ও UID বের করবে।
+            bal, user_uid = await get_account_info(page)
+            state["balance"] = bal
+            state["account_uid"] = user_uid
             state["logged_in"] = True
             
-            # ⚠️ লগইন সফল হলে লোডিং মেসেজটি ডিলিট
+            # লোডিং মেসেজ ডিলিট করা
             if loading_msg:
                 try: await loading_msg.delete()
                 except: pass
             
-            # ড্যাশবোর্ড মেসেজ (আপনার স্ক্রিনশটের মতো)
+            # আপনার স্ক্রিনশটের মতো ড্যাশবোর্ড মেসেজ
             login_msg_text = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -168,9 +152,12 @@ async def auto_bet_loop(uid, ctx, loading_msg):
             markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
             await ctx.bot.send_message(chat_id=uid, text=login_msg_text, parse_mode="Markdown", reply_markup=markup)
             
-            # গেমে ঢোকা
-            await page.locator('text="WinGo 30sec"').first.click(timeout=5000)
-            await page.wait_for_timeout(3000)
+            # গেমে ঢোকা (যদি পপ-আপ থাকে, তবে সেটি অন থাকবে, WinGo-তে ঢুকতে সমস্যা হলে বন্ধ করতে হবে)
+            try:
+                await page.locator('text="WinGo 30sec"').first.click(timeout=5000)
+                await page.wait_for_timeout(3000)
+            except:
+                pass # গেমে ঢুকতে না পারলে আপাতত কিছুই করবে না, আপনার পরবর্তী নির্দেশনার অপেক্ষায় থাকবে
             
             # বেটিং লজিক
             while state["running"]:
@@ -222,7 +209,7 @@ async def auto_bet_loop(uid, ctx, loading_msg):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৪. টেলিগ্রাম হ্যান্ডলার
+# ৫. টেলিগ্রাম হ্যান্ডলার
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -237,17 +224,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "🔐 Access  : Private · Authorized Members\n"
         "🔴 Status  : Not Logged In\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🧠 Prediction Engine — 9 Layers\n"
-        "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
-        "🔍 Manipulation · 🎨 Colour · 🔢 Frequency\n"
-        "🔄 Markov · ♻️ Cycle · 💠 Momentum\n"
-        "🔁 Every layer is back-tested live so its vote\n"
-        "weight follows its real hit-rate\n"
-        "🔴 Confidence below 30% → sit out\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🎬 4-second 🧠 generating prediction animation\n"
-        "🚀 Analysis → auto bet every 30s period\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "👇 Press the button below to LOGIN"
     )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
@@ -396,7 +372,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🛑 **AUTO BETTING STOPPED**", parse_mode="Markdown")
 
 # ───────────────────────────────────────────
-# ৫. Railway Healthcheck Server
+# ৬. Railway Healthcheck Server
 # ───────────────────────────────────────────
 def start_health_server():
     port = int(os.environ.get("PORT", 8080))
@@ -411,7 +387,7 @@ def start_health_server():
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
 # ───────────────────────────────────────────
-# ৬. মেইন ফাংশন
+# ৭. মেইন ফাংশন
 # ───────────────────────────────────────────
 def main():
     if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or not BOT_TOKEN:
