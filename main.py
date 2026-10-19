@@ -43,10 +43,12 @@ async def get_account_info(page):
         try:
             page_text = await page.inner_text("body")
             
+            # UID খোঁজা
             uid_match = re.search(r'(?:UID|Account\s*UID)\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
             if uid_match:
                 uid = uid_match.group(1)
                 
+            # ব্যালেন্স খোঁজা
             balance_match = re.search(r'(?:Total\s*)?[Bb]alance\s*[৳:]?\s*([\d.]+)', page_text)
             if balance_match:
                 balance = balance_match.group(1)
@@ -91,7 +93,7 @@ async def place_bet_and_check_win(page, bet_mode, amount):
         return False
 
 # ───────────────────────────────────────────
-# ৪. মূল অটো-বেট লুপ (পপ-আপ বন্ধ করবে না)
+# ৪. মূল অটো-বেট লুপ
 # ───────────────────────────────────────────
 async def auto_bet_loop(uid, ctx, loading_msg):
     state = get_state(uid)
@@ -113,16 +115,16 @@ async def auto_bet_loop(uid, ctx, loading_msg):
             # লগইন বাটনে ক্লিক
             await page.locator('text="Log in"').last.click()
             
-            # লগইন প্রসেস শেষ হওয়ার জন্য অপেক্ষা
-            await page.wait_for_timeout(8000)
+            # ⚠️ লগইন প্রসেস শেষ হওয়ার জন্য ১০ সেকেন্ড অপেক্ষা
+            await page.wait_for_timeout(10000)
             
-            # ⚠️ কোনো পপ-আপ অটোমেটিক বন্ধ করা হবে না। 
+            # ব্যালেন্স ও UID বের করা
             bal, user_uid = await get_account_info(page)
             state["balance"] = bal
             state["account_uid"] = user_uid
             state["logged_in"] = True
             
-            # লোডিং মেসেজ ডিলিট করা
+            # লোডিং মেসেজ ডিলিট
             if loading_msg:
                 try: await loading_msg.delete()
                 except: pass
@@ -209,7 +211,7 @@ async def auto_bet_loop(uid, ctx, loading_msg):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৫. টেলিগ্রাম হ্যান্ডলার
+# ৫. টেলিগ্রাম হ্যান্ডলার (ওয়েলকাম মেসেজ আগের মতো বড়)
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -224,6 +226,17 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "🔐 Access  : Private · Authorized Members\n"
         "🔴 Status  : Not Logged In\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 Prediction Engine — 9 Layers\n"
+        "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
+        "🔍 Manipulation · 🎨 Colour · 🔢 Frequency\n"
+        "🔄 Markov · ♻️ Cycle · 💠 Momentum\n"
+        "🔁 Every layer is back-tested live so its vote\n"
+        "weight follows its real hit-rate\n"
+        "🔴 Confidence below 30% → sit out\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🎬 4-second 🧠 generating prediction animation\n"
+        "🚀 Analysis → auto bet every 30s period\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "👇 Press the button below to LOGIN"
     )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
