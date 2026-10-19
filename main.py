@@ -116,7 +116,7 @@ async def auto_bet_loop(uid, ctx, loading_msg):
             # লগইন প্রসেস শেষ হওয়ার জন্য অপেক্ষা
             await page.wait_for_timeout(8000)
             
-            # ⚠️ কোনো পপ-আপ অটোমেটিক বন্ধ করা হবে না। বট শুধু ব্যালেন্স ও UID বের করবে।
+            # ⚠️ কোনো পপ-আপ অটোমেটিক বন্ধ করা হবে না। 
             bal, user_uid = await get_account_info(page)
             state["balance"] = bal
             state["account_uid"] = user_uid
@@ -152,12 +152,12 @@ async def auto_bet_loop(uid, ctx, loading_msg):
             markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
             await ctx.bot.send_message(chat_id=uid, text=login_msg_text, parse_mode="Markdown", reply_markup=markup)
             
-            # গেমে ঢোকা (যদি পপ-আপ থাকে, তবে সেটি অন থাকবে, WinGo-তে ঢুকতে সমস্যা হলে বন্ধ করতে হবে)
+            # গেমে ঢোকা
             try:
                 await page.locator('text="WinGo 30sec"').first.click(timeout=5000)
                 await page.wait_for_timeout(3000)
             except:
-                pass # গেমে ঢুকতে না পারলে আপাতত কিছুই করবে না, আপনার পরবর্তী নির্দেশনার অপেক্ষায় থাকবে
+                pass
             
             # বেটিং লজিক
             while state["running"]:
