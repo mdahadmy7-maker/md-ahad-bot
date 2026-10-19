@@ -13,7 +13,7 @@ from playwright.async_api import async_playwright
 # ═══════════════════════════════════════════
 BOT_TOKEN = "8850232346:AAFxrxOHHdFzS560JepDpxgj2oqS0tr6nPo" 
 
-# 💡 এখানে সরাসরি লগইন পেজের লিংক দেওয়া হলো
+# সরাসরি লগইন পেজের সঠিক লিংক
 SITE_URL = "https://www.hgnice.vip/#/login"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -121,12 +121,11 @@ async def auto_bet_loop(uid, ctx, loading_msg_id):
     state = get_state(uid)
     
     async with async_playwright() as p:
-        # সার্ভারে রান করলে headless=True করে দিবেন, পিসিতে দেখতে চাইলে False
+        # পিসিতে টেস্ট করতে False রাখুন, সার্ভারে দিলে True করে দিবেন
         browser = await p.chromium.launch(headless=True) 
         page = await browser.new_page()
         
         try:
-            # 💡 এখন সরাসরি লগইন পেজে যাবে
             await page.goto(SITE_URL, timeout=60000)
             await page.wait_for_timeout(5000) 
             
@@ -269,7 +268,7 @@ async def auto_bet_loop(uid, ctx, loading_msg_id):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৬. টেলিগ্রাম হ্যান্ডলার (অপরিবর্তিত)
+# ৬. টেলিগ্রাম হ্যান্ডলার (চ্যানেল জয়েনের কোনো কোড নেই)
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -306,6 +305,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     text = update.message.text.strip()
 
+    # ১. ফোন নম্বর গ্রহণ (এখানে কোনো চ্যানেল চেক নেই, সরাসরি পাসওয়ার্ড চাইবে)
     if state.get("awaiting") == "phone":
         state["phone"] = text
         state["awaiting"] = "password"
@@ -320,6 +320,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
+    # ২. পাসওয়ার্ড গ্রহণ
     if state.get("awaiting") == "password":
         state["password"] = text
         state["awaiting"] = None 
@@ -346,6 +347,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["task"] = asyncio.create_task(auto_bet_loop(uid, ctx, loading_msg.message_id))
         return
 
+    # ৩. START YOUR TARGET বাটন
     if text == "🚀 START YOUR TARGET":
         if not state["logged_in"]:
             state["awaiting"] = "steps"
@@ -361,12 +363,14 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             state["task"] = asyncio.create_task(auto_bet_loop(uid, ctx, None)) 
         return
 
+    # ৪. STOP TRADE বাটন
     if text == "🛑 STOP TRADE":
         state["running"] = False
         if state.get("task"): state["task"].cancel()
         await update.message.reply_text("🛑 **TRADE STOPPED**\nAutoTrading session paused.", parse_mode="Markdown")
         return
 
+    # ৫. LOGOUT বাটন
     if text == "🚪 LOGOUT":
         state["running"] = False
         state["logged_in"] = False
@@ -374,6 +378,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🚪 **LOGGED OUT**\nYour session has ended successfully.", parse_mode="Markdown")
         return
 
+    # ৬. স্টেপ গ্রহণ
     if state.get("awaiting") == "steps":
         try:
             parts = [float(x.strip()) for x in text.replace(" ", "").split(",")]
@@ -385,6 +390,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ ভুল ফরম্যাট! আবার লিখুন (যেমন: 2,4,8):")
         return
 
+    # ৭. টার্গেট গ্রহণ
     if state.get("awaiting") == "target":
         try:
             state["target"] = float(text)
