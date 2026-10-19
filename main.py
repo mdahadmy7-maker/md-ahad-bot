@@ -23,7 +23,10 @@ user_state = {}
 
 def get_state(uid):
     if uid not in user_state:
-        user_state[uid] = {"awaiting": None, "phone": "", "password": ""}
+        user_state[uid] = {
+            "awaiting": None, "phone": "", "password": "", 
+            "balance": "0.00", "target": 0
+        }
     return user_state[uid]
 
 # ───────────────────────────────────────────
@@ -49,7 +52,6 @@ async def api_login(uid, ctx, loading_msg_id):
         "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
     }
 
-    # লগইন পেলোড (আপনার আগের সফল curl থেকে নেওয়া)
     login_payload = {
         "username": state["phone"],
         "pwd": state["password"],
@@ -81,13 +83,10 @@ async def api_login(uid, ctx, loading_msg_id):
             await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED**\n\n{err_msg}", parse_mode="Markdown")
             return
 
-        # টোকেন বের করা
         user_data = data.get("data", {})
         token = user_data.get("token", "")
         
-        # GetUserInfo এর জন্য হেডার আপডেট
         headers["authorization"] = f"Bearer {token}"
-        
         info_payload = {
             "language": 0,
             "random": "5f8cc6db4f79466498af393f4cefa024",
@@ -95,11 +94,9 @@ async def api_login(uid, ctx, loading_msg_id):
             "timestamp": 1792440119
         }
         
-        # ডিফল্ট ভ্যালু
         uid_val = "Unknown"
         balance = "0.00"
 
-        # ১. API থেকে ব্যালেন্স আনার চেষ্টা
         try:
             info_response = requests.post(USER_INFO_URL, json=info_payload, headers=headers, timeout=10)
             info_data = info_response.json()
@@ -110,38 +107,36 @@ async def api_login(uid, ctx, loading_msg_id):
         except:
             pass
 
-        # ২. ব্যাকআপ: JWT টোকেন ডিকোড করে UID ও ব্যালেন্স বের করা
         try:
             payload_b64 = token.split('.')[1]
             payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
             decoded_payload = json.loads(base64.b64decode(payload_b64).decode('utf-8'))
-            
             if uid_val == "Unknown": uid_val = decoded_payload.get("UserId", "Unknown")
             if balance == "0.00": balance = decoded_payload.get("Amount", "0.00")
         except Exception as e:
             logger.error(f"Token decode error: {e}")
 
+        state["balance"] = balance
         masked_phone = f"****{state['phone'][-4:]}"
         
-        # 💡 আপনার দেওয়া স্ক্রিনশটের মতো ড্যাশবোর্ড ডিজাইন
+        # 💡 আপনার দেওয়া হুবহু ড্যাশবোর্ড ফরম্যাট
         dashboard_msg = (
             "╔════════════════════════╗\n"
             "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
             "╚════════════════════════╝\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"☎️ **Phone Number**\n"
+            f"☎️ Phone Number\n"
             f"{masked_phone}\n\n"
-            f"👤 **Account UID**\n"
+            f"👤 Account UID\n"
             f"{uid_val}\n\n"
-            f"💰 **Account Balance**\n"
+            f"💰 Account Balance\n"
             f"৳ {balance}\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
             "🧠 Analysis Engine:  READY\n"
             "🚀 AutoTrade System: READY\n\n"
             "👇 Press START YOUR TARGET to begin"
         )
         
-        # নিচের কিবোর্ড বাটন
         reply_keyboard = [
             [KeyboardButton("🚀 START YOUR TARGET")],
             [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]
@@ -163,7 +158,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     get_state(uid)
     
-    # 💡 আপনার প্রথম দিকের ওয়েলকাম মেসেজটি এখানে ফিরিয়ে আনা হয়েছে
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -193,12 +187,23 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     text = update.message.text.strip()
 
+    # ১. ফোন নাম্বার নেওয়া
     if state.get("awaiting") == "phone":
         state["phone"] = text
         state["awaiting"] = "password"
-        await update.message.reply_text(f"📱 Number: {text}\n\n🔑 **Now enter your password:**")
+        # 💡 আপনার দেওয়া ২ নাম্বার স্ক্রিনশটের ফরম্যাট
+        await update.message.reply_text(
+            "╔════════════════════════╗\n"
+            "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
+            "╚════════════════════════╝\n\n"
+            f"☎️ **Number :** {text}\n\n"
+            "🔑 **Now enter your password:**\n"
+            "_Your message will be deleted immediately for security._",
+            parse_mode="Markdown"
+        )
         return
 
+    # ২. পাসওয়ার্ড নেওয়া
     if state.get("awaiting") == "password":
         state["password"] = text
         state["awaiting"] = None 
@@ -215,10 +220,35 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await api_login(uid, ctx, loading_msg.message_id)
         return
 
-    # 💡 বাটনগুলোর রেসপন্স (পরবর্তীতে অটো-বেট লজিক যোগ করা যাবে)
+    # ৩. START YOUR TARGET বাটনে ক্লিক করলে (আপনার ৪ নাম্বার স্ক্রিনশট)
     if text == "🚀 START YOUR TARGET":
-        await update.message.reply_text("🚀 **AUTO TRADING STARTED**\n(Coming soon...)", parse_mode="Markdown")
+        state["awaiting"] = "target"
+        target_msg = (
+            "╔════════════════════════╗\n"
+            "║   🚀 START YOUR TARGET 🚀   ║\n"
+            "╚════════════════════════╝\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💰 **YOUR BALANCE**\n"
+            f"৳ {state.get('balance', '0.00')}\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🎯 **Enter your TARGET profit amount:**\n"
+            "_How much do you want to earn? (in ৳)_"
+        )
+        await update.message.reply_text(target_msg, parse_mode="Markdown")
         return
+
+    # ৪. টার্গেট প্রফিট নেওয়া
+    if state.get("awaiting") == "target":
+        try:
+            target_amount = float(text)
+            state["target"] = target_amount
+            state["awaiting"] = None
+            await update.message.reply_text(f"✅ **TARGET SET: ৳ {target_amount}**\n\nবট এখন কাজ শুরু করবে (লজিক পরবর্তীতে যোগ হবে)।")
+        except ValueError:
+            await update.message.reply_text("❌ **ভুল ফরম্যাট!** দয়া করে শুধু সংখ্যা লিখুন (যেমন: 50)।")
+        return
+
+    # ৫. STOP TRADE এবং LOGOUT বাটন
     if text == "🛑 STOP TRADE":
         await update.message.reply_text("🛑 **TRADE STOPPED**", parse_mode="Markdown")
         return
@@ -236,7 +266,17 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     
     if query.data == "start_login":
         state["awaiting"] = "phone"
-        await ctx.bot.send_message(chat_id=uid, text="📱 **Enter your phone number:**\n_Example: 8801884495095_")
+        # 💡 আপনার দেওয়া ১ নাম্বার স্ক্রিনশটের ফরম্যাট
+        login_msg = (
+            "╔════════════════════════╗\n"
+            "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
+            "╚════════════════════════╝\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📱 **Enter your HGNICE phone number:**\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "_Everyone uses their own account — your session is private._"
+        )
+        await ctx.bot.send_message(chat_id=uid, text=login_msg, parse_mode="Markdown")
 
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
