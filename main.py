@@ -11,7 +11,7 @@ from playwright_stealth import stealth_async
 # ═══════════════════════════════════════════
 # ১. 🔧 CONFIG
 # ═══════════════════════════════════════════
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "YOUR_BOT_TOKEN_HERE") 
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAHF4OS29vsOfg6uIn49B8Kj9pQuPkDpxHE") 
 SITE_URL = "https://www.hgnice.vip"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
