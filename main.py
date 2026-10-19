@@ -1,17 +1,17 @@
 import asyncio
 import logging
-import random
+import requests
+import json
 import re
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
-from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
 # ১. 🔧 CONFIG 
 # ⚠️ এখানে আপনার টেলিগ্রাম বটের টোকেন বসান
 # ═══════════════════════════════════════════
-BOT_TOKEN = "8850232346:AAErjalxskS6UxedoFXoWTDsl1Q2XA28eys" 
-SITE_URL = "https://www.hgnice.vip" 
+BOT_TOKEN = "8850232346:AAEUh-lBN2hW0i3WRqR_CJUsGi3CSmSU7HU" 
+API_URL = "https://api.hgnicepayapi.com/api/webapi/Login"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -20,150 +20,110 @@ user_state = {}
 
 def get_state(uid):
     if uid not in user_state:
-        user_state[uid] = {
-            "logged_in": False, "awaiting": None, "phone": "", "password": "",
-            "running": False, "task": None,
-            "balance": "0.00", "account_uid": "Unknown"
-        }
+        user_state[uid] = {"awaiting": None, "phone": "", "password": ""}
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# হেল্পার: লগইন সফল হয়েছে কিনা চেক করা
+# 💡 লগইন ফাংশন (আপনার সফল curl ডেটা দিয়ে)
 # ───────────────────────────────────────────
-async def check_login_success(page):
-    try:
-        for _ in range(20): # ১০ সেকেন্ড অপেক্ষা করবে
-            await page.wait_for_timeout(500)
-            
-            # ১. ভুল পাসওয়ার্ড চেক
-            if await page.locator('text="Wrong account or password"').first.is_visible():
-                return False, "Wrong account or password (Error: 147)"
-                
-            # ২. সফল লগইন চেক
-            if await page.locator('text="UID"').first.is_visible():
-                return True, "Success"
-                
-        return False, "Timeout: Website dashboard did not load."
-    except Exception as e:
-        return False, f"Error: {str(e)[:50]}"
-
-async def get_account_info(page):
-    try:
-        await page.wait_for_timeout(2000)
-        page_text = await page.inner_text("body")
-        
-        uid = "Unknown"
-        uid_match = re.search(r'UID\s*\|\s*(\d+)', page_text, re.IGNORECASE)
-        if uid_match: uid = uid_match.group(1)
-            
-        balance = "0.00"
-        balance_match = re.search(r'Total balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
-        if balance_match: balance = balance_match.group(1)
-                
-        return balance, uid
-    except Exception:
-        return "0.00", "Unknown"
-
-# ───────────────────────────────────────────
-# মূল লগইন লজিক (অটোমেটিক টাইপিং)
-# ───────────────────────────────────────────
-async def auto_bet_loop(uid, ctx, loading_msg_id):
+async def api_login(uid, ctx, loading_msg_id):
     state = get_state(uid)
     
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True) 
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
-        )
-        page = await context.new_page()
+    # আপনার সফল curl থেকে নেওয়া হেডার
+    headers = {
+        "authority": "api.hgnicepayapi.com",
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9",
+        "ar-origin": "https://www.hgnice.vip",
+        "content-type": "application/json;charset=UTF-8",
+        "origin": "https://www.hgnice.vip",
+        "referer": "https://www.hgnice.vip/",
+        "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
+        "sec-ch-ua-mobile": "?0",
+        "sec-ch-ua-platform": '"Linux"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "cross-site",
+        "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
+    }
+
+    # আপনার সফল পেলোড
+    payload = {
+        "username": state["phone"], # অথবা সরাসরি "8801884495095"
+        "pwd": state["password"],
+        "phonetype": 0,
+        "logintype": "mobile",
+        "packId": "",
+        "deviceId": "6c872674c682a8f66a5ef13954daf91b",
+        "pixelId": "",
+        "fbcId": "",
+        "fbc": "",
+        "fbp": "",
+        "adId": "",
+        "language": 0,
+        "random": "f6dd624a23b343ee9d7e53fd01b8cc66",
+        "signature": "F9FF4A78B3914639BB25FCD184E650C8", # আপনার সফল সিগনেচার
+        "timestamp": 1792437970 # আপনার সফল টাইমস্ট্যাম্প
+    }
+
+    try:
+        # রিকোয়েস্ট পাঠানো
+        response = requests.post(API_URL, json=payload, headers=headers, timeout=15)
+        data = response.json()
         
-        try:
-            await page.goto(SITE_URL, timeout=60000)
-            await page.wait_for_timeout(5000) 
-            
-            # যদি সরাসরি লগইন পেজ না থাকে
-            try:
-                await page.locator('text="Log in"').first.click(timeout=3000)
-                await page.wait_for_timeout(2000)
-            except:
-                pass 
+        # লোডিং মেসেজ ডিলিট
+        if loading_msg_id:
+            try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
+            except: pass
 
-            login_phone = state["phone"]
-            if login_phone.startswith("880"): login_phone = login_phone[3:]
-            elif login_phone.startswith("88"): login_phone = login_phone[2:]
-
-            # 💡 ১. প্রথম ইনপুট বক্সে ক্লিক করে টাইপ করা
-            try:
-                phone_input = page.locator('input[type="text"], input[type="tel"]').first
-                await phone_input.click(timeout=5000)
-                await page.keyboard.type(login_phone, delay=50) # মানুষের মতো টাইপ করবে
-                await page.wait_for_timeout(1000)
-            except Exception as e:
-                logger.error(f"Phone error: {e}")
-
-            # 💡 ২. পাসওয়ার্ড বক্সে ক্লিক করে টাইপ করা
-            try:
-                pass_input = page.locator('input[type="password"]').first
-                await pass_input.click(timeout=5000)
-                await page.keyboard.type(state["password"], delay=50)
-                await page.wait_for_timeout(1000)
-            except Exception as e:
-                logger.error(f"Pass error: {e}")
+        if data.get("code") == 0:
+            # লগইন সফল হলে ডেটা বের করা
+            user_data = data.get("data", {})
             
-            # 💡 ৩. লগইন বাটনে ক্লিক করা
-            try:
-                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=5000)
-            except:
-                try:
-                    await page.locator('div:has-text("Log in")').last.click(timeout=5000)
-                except:
-                    await page.keyboard.press("Enter")
+            # টোকেন বের করা
+            token = user_data.get("token", "")
             
-            # --- রেজাল্ট চেক ---
-            login_success, login_msg = await check_login_success(page)
+            # UID বের করা (webSocketChannels এর ভেতর থেকে)
+            uid_val = "Unknown"
+            channels = user_data.get("webSocketChannels", [])
+            if channels:
+                match = re.search(r'userid/(\d+)', channels[0])
+                if match:
+                    uid_val = match.group(1)
             
-            if loading_msg_id:
-                try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
-                except: pass
+            # ব্যালেন্স (রেসপন্সে সরাসরি না থাকলে 0.00 দেখাবে, পরে প্রোফাইল API থেকে আনতে হবে)
+            balance = user_data.get("balance", "0.00") 
             
-            if not login_success:
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED**\n\n{login_msg}", parse_mode="Markdown")
-                state["running"] = False
-                await browser.close()
-                return
+            masked_phone = f"****{state['phone'][-4:]}"
             
-            bal, user_uid = await get_account_info(page)
-            state["balance"] = bal
-            state["account_uid"] = user_uid
-            state["logged_in"] = True
-            masked_phone = f"****{login_phone[-4:]}"
-            
-            login_msg_text = (
+            success_msg = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
                 "╚════════════════════════╝\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"☎️ **Phone:** {masked_phone}\n"
-                f"👤 **UID:** {state['account_uid']}\n"
-                f"💰 **Balance:** ৳ {state['balance']}\n"
+                f"👤 **Account UID:** {uid_val}\n"
+                f"💰 **Balance:** ৳ {balance}\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
             )
-            reply_keyboard = [[KeyboardButton("🚪 LOGOUT")]]
-            await ctx.bot.send_message(chat_id=uid, text=login_msg_text, parse_mode="Markdown", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
+            await ctx.bot.send_message(chat_id=uid, text=success_msg, parse_mode="Markdown")
             
-        except Exception as e:
-            if loading_msg_id:
-                try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
-                except: pass
-            await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **BOT ERROR:**\n`{str(e)[:150]}`", parse_mode="Markdown")
-        finally:
-            await browser.close()
+        else:
+            # এরর মেসেজ
+            err_msg = data.get("msg", "Wrong account or password")
+            await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED**\n\n{err_msg}", parse_mode="Markdown")
+            
+    except Exception as e:
+        if loading_msg_id:
+            try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
+            except: pass
+        await ctx.bot.send_message(chat_id=uid, text=f"❌ **Network Error:**\n`{str(e)[:100]}`", parse_mode="Markdown")
 
 # ───────────────────────────────────────────
-# টেলিগ্রাম হ্যান্ডলার (পাসওয়ার্ড চাওয়ার লজিক)
+# টেলিগ্রাম হ্যান্ডলার
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    get_state(update.effective_user.id)["running"] = False
+    get_state(update.effective_user.id)
     await update.message.reply_text("🔐 **LOGIN TO ACCOUNT**", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔐 LOGIN", callback_data="start_login")]]))
 
 async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -171,7 +131,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     text = update.message.text.strip()
 
-    # 💡 নাম্বার নেওয়ার পর পাসওয়ার্ড চাওয়া
     if state.get("awaiting") == "phone":
         state["phone"] = text
         state["awaiting"] = "password"
@@ -187,19 +146,11 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         
         loading_msg = await update.message.reply_text("🔄 **CONNECTING...** [░░░░░░░░░░] 0%")
         for i in range(1, 11):
-            await asyncio.sleep(0.15)
+            await asyncio.sleep(0.1)
             try: await loading_msg.edit_text(f"🔄 **CONNECTING...** [{'█'*i}{'░'*(10-i)}] {i*10}%")
             except: pass
         
-        state["running"] = True
-        if state.get("task"): state["task"].cancel()
-        state["task"] = asyncio.create_task(auto_bet_loop(uid, ctx, loading_msg.message_id))
-        return
-
-    if text == "🚪 LOGOUT":
-        state["running"] = False
-        state["logged_in"] = False
-        await update.message.reply_text("🚪 **LOGGED OUT**")
+        await api_login(uid, ctx, loading_msg.message_id)
         return
 
 async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
