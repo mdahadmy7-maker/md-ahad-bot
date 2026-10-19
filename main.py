@@ -7,12 +7,7 @@ import base64
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
-# ═══════════════════════════════════════════
-# ১. 🔧 CONFIG 
-# ⚠️ এখানে আপনার টেলিগ্রাম বটের টোকেন বসান
-# ═══════════════════════════════════════════
 BOT_TOKEN = "8850232346:AAEUh-lBN2hW0i3WRqR_CJUsGi3CSmSU7HU" 
-
 LOGIN_URL = "https://api.hgnicepayapi.com/api/webapi/Login"
 USER_INFO_URL = "https://api.hgnicepayapi.com/api/webapi/GetUserInfo"
 
@@ -24,20 +19,12 @@ user_state = {}
 def get_state(uid):
     if uid not in user_state:
         user_state[uid] = {
-            "awaiting": None, 
-            "temp_phone": "", 
-            "temp_password": "",
-            "accounts": [], 
-            "active_account_index": 0, 
-            "balance": "0.00", 
-            "target": 0,
-            "steps": 0
+            "awaiting": None, "temp_phone": "", "temp_password": "",
+            "accounts": [], "active_account_index": 0, 
+            "balance": "0.00", "target": 0, "steps": 0
         }
     return user_state[uid]
 
-# ───────────────────────────────────────────
-# 💡 লগইন এবং ব্যালেন্স আনার ফাংশন
-# ───────────────────────────────────────────
 async def api_login(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
     
@@ -77,6 +64,7 @@ async def api_login(uid, ctx, loading_msg_id, phone, password):
     }
 
     try:
+        # --- ধাপ ১: লগইন রিকোয়েস্ট ---
         response = requests.post(LOGIN_URL, json=login_payload, headers=headers, timeout=15)
         data = response.json()
         
@@ -89,6 +77,7 @@ async def api_login(uid, ctx, loading_msg_id, phone, password):
             await ctx.bot.send_message(chat_id=uid, text=f"❌ LOGIN FAILED ({phone})\n\n{err_msg}")
             return
 
+        # --- ধাপ ২: টোকেন নিয়ে GetUserInfo থেকে আসল ডেটা আনা ---
         user_data = data.get("data", {})
         token = user_data.get("token", "")
         
@@ -107,12 +96,14 @@ async def api_login(uid, ctx, loading_msg_id, phone, password):
             info_response = requests.post(USER_INFO_URL, json=info_payload, headers=headers, timeout=10)
             info_data = info_response.json()
             if info_data.get("code") == 0:
+                # 💡 আপনার স্ক্রিনশট অনুযায়ী রেসপন্সের ভেতরে 'data' অবজেক্ট আছে
                 info_d = info_data.get("data", {})
-                balance = info_d.get("amount", info_d.get("Amount", "0.00"))
-                uid_val = info_d.get("userId", info_d.get("UserId", "Unknown"))
-        except:
-            pass
+                balance = info_d.get("amount", "0.00")
+                uid_val = info_d.get("userId", "Unknown")
+        except Exception as e:
+            logger.error(f"Info API error: {e}")
 
+        # ব্যাকআপ (যদি উপরেরটা ফেইল করে)
         try:
             payload_b64 = token.split('.')[1]
             payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
@@ -120,7 +111,7 @@ async def api_login(uid, ctx, loading_msg_id, phone, password):
             if uid_val == "Unknown": uid_val = decoded_payload.get("UserId", "Unknown")
             if balance == "0.00": balance = decoded_payload.get("Amount", "0.00")
         except Exception as e:
-            logger.error(f"Token decode error: {e}")
+            pass
 
         account_info = {
             "phone": phone, "password": password, "uid": uid_val,
@@ -139,7 +130,7 @@ async def api_login(uid, ctx, loading_msg_id, phone, password):
         state["balance"] = balance
         masked_phone = f"***{phone[-4:]}"
         
-        # 💡 ১. আপনার প্রথম দেওয়া ড্যাশবোর্ড ডিজাইন
+        # 💡 ৩. আপনার দেওয়া ড্যাশবোর্ড ডিজাইন (সঠিক UID ও ব্যালেন্স সহ)
         dashboard_msg = (
             "╔════════════════════════╗\n"
             "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -185,7 +176,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ আপনার ৬টি অ্যাকাউন্ট ইতিমধ্যে সেভ করা আছে। নতুন করে শুরু করতে /reset দিন।")
         return
 
-    # 💡 ২. আপনার প্রথম দেওয়া বড় ওয়েলকাম মেসেজ
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -269,7 +259,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             balance = float(state.get('balance', '0.00'))
             stop_at = balance + target_amount
             
-            # 💡 ৩. আপনার শেষ দেওয়া TARGET SET ডিজাইন
             target_set_msg = (
                 "╔════════════════════════╗\n"
                 "║   🎯 TARGET SET 🎯   ║\n"
