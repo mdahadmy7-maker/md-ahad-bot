@@ -10,7 +10,7 @@ from playwright.async_api import async_playwright
 # ১. 🔧 CONFIG 
 # ⚠️ এখানে আপনার টেলিগ্রাম বটের টোকেন বসান
 # ═══════════════════════════════════════════
-BOT_TOKEN = "8850232346:AAHdpHDCFqCJkku3JcfnjNmU3PylHiY5FwY" 
+BOT_TOKEN = "8850232346:AAErjalxskS6UxedoFXoWTDsl1Q2XA28eys" 
 SITE_URL = "https://www.hgnice.vip" 
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -22,8 +22,7 @@ def get_state(uid):
     if uid not in user_state:
         user_state[uid] = {
             "logged_in": False, "awaiting": None, "phone": "", "password": "",
-            "running": False, "task": None, "steps": [], "step_idx": 0, 
-            "target": 0, "profit": 0, "bet_choice": "RANDOM",
+            "running": False, "task": None,
             "balance": "0.00", "account_uid": "Unknown"
         }
     return user_state[uid]
@@ -44,7 +43,7 @@ async def check_login_success(page):
             if await page.locator('text="UID"').first.is_visible():
                 return True, "Success"
                 
-        return False, "Timeout: Website dashboard did not load. Maybe Number is wrong."
+        return False, "Timeout: Website dashboard did not load."
     except Exception as e:
         return False, f"Error: {str(e)[:50]}"
 
@@ -66,19 +65,15 @@ async def get_account_info(page):
         return "0.00", "Unknown"
 
 # ───────────────────────────────────────────
-# মূল অটো-বেট লুপ (রিয়েল ক্লিক ও টাইপিং)
+# মূল লগইন লজিক (অটোমেটিক টাইপিং)
 # ───────────────────────────────────────────
 async def auto_bet_loop(uid, ctx, loading_msg_id):
     state = get_state(uid)
     
     async with async_playwright() as p:
-        # পিসিতে টেস্ট করতে False করুন, সার্ভারে True রাখুন
         browser = await p.chromium.launch(headless=True) 
-        
-        # ব্রাউজারকে মোবাইল হিসেবে সাজানো (যাতে ওয়েবসাইট মোবাইল ভার্সন লোড করে)
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
-            viewport={"width": 412, "height": 915}
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         page = await context.new_page()
         
@@ -86,6 +81,7 @@ async def auto_bet_loop(uid, ctx, loading_msg_id):
             await page.goto(SITE_URL, timeout=60000)
             await page.wait_for_timeout(5000) 
             
+            # যদি সরাসরি লগইন পেজ না থাকে
             try:
                 await page.locator('text="Log in"').first.click(timeout=3000)
                 await page.wait_for_timeout(2000)
@@ -96,41 +92,36 @@ async def auto_bet_loop(uid, ctx, loading_msg_id):
             if login_phone.startswith("880"): login_phone = login_phone[3:]
             elif login_phone.startswith("88"): login_phone = login_phone[2:]
 
-            # 💡 ১. ফোন নাম্বার বক্সে মাউস ক্লিক করে টাইপ করা
+            # 💡 ১. প্রথম ইনপুট বক্সে ক্লিক করে টাইপ করা
             try:
-                # প্রথম ইনপুট বক্সটি খুঁজে সেখানে ক্লিক করবে এবং টাইপ করবে
-                phone_input = page.locator('input[type="text"], input[type="tel"], input[type="number"]').first
+                phone_input = page.locator('input[type="text"], input[type="tel"]').first
                 await phone_input.click(timeout=5000)
-                await phone_input.fill(login_phone) # সরাসরি ভ্যালু বসানো
-                await page.keyboard.press("Enter") # কীবোর্ডের এন্টার চাপা
+                await page.keyboard.type(login_phone, delay=50) # মানুষের মতো টাইপ করবে
                 await page.wait_for_timeout(1000)
             except Exception as e:
-                logger.error(f"Phone fill error: {e}")
+                logger.error(f"Phone error: {e}")
 
-            # 💡 ২. পাসওয়ার্ড বক্সে মাউস ক্লিক করে টাইপ করা
+            # 💡 ২. পাসওয়ার্ড বক্সে ক্লিক করে টাইপ করা
             try:
-                # পাসওয়ার্ড ইনপুট বক্সটি খুঁজে সেখানে ক্লিক করবে এবং টাইপ করবে
                 pass_input = page.locator('input[type="password"]').first
                 await pass_input.click(timeout=5000)
-                await pass_input.fill(state["password"])
+                await page.keyboard.type(state["password"], delay=50)
                 await page.wait_for_timeout(1000)
             except Exception as e:
-                logger.error(f"Password fill error: {e}")
+                logger.error(f"Pass error: {e}")
             
-            # 💡 ৩. লগইন বাটনে ক্লিক করা (আসল মাউস ক্লিক)
+            # 💡 ৩. লগইন বাটনে ক্লিক করা
             try:
-                # বাটনের লেখা 'Log in' বা 'Login' খুঁজে সেখানে ক্লিক করবে
                 await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=5000)
             except:
                 try:
-                    await page.locator('text="Log in"').last.click(timeout=5000)
+                    await page.locator('div:has-text("Log in")').last.click(timeout=5000)
                 except:
-                    await page.locator('div[class*="btn"]').last.click(timeout=5000) # ব্যাকআপ বাটন
+                    await page.keyboard.press("Enter")
             
-            # --- লগইন রেজাল্ট চেক ---
+            # --- রেজাল্ট চেক ---
             login_success, login_msg = await check_login_success(page)
             
-            # লোডিং মেসেজ ডিলিট করা
             if loading_msg_id:
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
@@ -141,7 +132,6 @@ async def auto_bet_loop(uid, ctx, loading_msg_id):
                 await browser.close()
                 return
             
-            # সফল লগইন
             bal, user_uid = await get_account_info(page)
             state["balance"] = bal
             state["account_uid"] = user_uid
@@ -158,7 +148,7 @@ async def auto_bet_loop(uid, ctx, loading_msg_id):
                 f"💰 **Balance:** ৳ {state['balance']}\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
             )
-            reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]]
+            reply_keyboard = [[KeyboardButton("🚪 LOGOUT")]]
             await ctx.bot.send_message(chat_id=uid, text=login_msg_text, parse_mode="Markdown", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
             
         except Exception as e:
@@ -170,7 +160,7 @@ async def auto_bet_loop(uid, ctx, loading_msg_id):
             await browser.close()
 
 # ───────────────────────────────────────────
-# টেলিগ্রাম হ্যান্ডলার
+# টেলিগ্রাম হ্যান্ডলার (পাসওয়ার্ড চাওয়ার লজিক)
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     get_state(update.effective_user.id)["running"] = False
@@ -181,6 +171,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     text = update.message.text.strip()
 
+    # 💡 নাম্বার নেওয়ার পর পাসওয়ার্ড চাওয়া
     if state.get("awaiting") == "phone":
         state["phone"] = text
         state["awaiting"] = "password"
