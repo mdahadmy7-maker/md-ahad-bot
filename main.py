@@ -8,12 +8,13 @@ from http.server import HTTPServer, BaseHTTPRequestHandler
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from playwright.async_api import async_playwright
+from playwright_stealth import stealth_async
 
 # ═══════════════════════════════════════════
 # ১. 🔧 CONFIG
 # ═══════════════════════════════════════════
-# ⚠️⚠️⚠️ এখানে আপনার বট টোকেনটি বসান ⚠️⚠️⚠️
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAGbO6zilJIPKrOyPpuCatWDuGzc5ryc94c") 
+# ⚠️ এখানে আপনার বট টোকেন বসান
+BOT_TOKEN = "8850232346:AAGbO6zilJIPKrOyPpuCatWDuGzc5ryc94c" 
 
 SITE_URL = "https://www.hgnice.vip"
 
@@ -33,7 +34,29 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# ২. হেল্পার: স্ক্রিন থেকে আসল ব্যালেন্স ও UID বের করা
+# ২. হেল্পার: লগইন সফল হয়েছে কিনা চেক করা
+# ───────────────────────────────────────────
+async def check_login_success(page):
+    try:
+        await page.wait_for_timeout(8000) 
+        
+        error_popup = page.locator('text="Wrong account or password"').first
+        if await error_popup.is_visible():
+            return False, "Wrong account or password"
+            
+        error_text_locator = page.locator('text=/Error/i').first
+        if await error_text_locator.is_visible():
+             error_msg = await error_text_locator.inner_text()
+             return False, error_msg
+             
+        return True, "Success"
+        
+    except Exception as e:
+        logger.error(f"Login check error: {e}")
+        return True, "Assume Success"
+
+# ───────────────────────────────────────────
+# ৩. হেল্পার: স্ক্রিন থেকে আসল ব্যালেন্স ও UID বের করা
 # ───────────────────────────────────────────
 async def get_account_info(page):
     try:
@@ -50,7 +73,6 @@ async def get_account_info(page):
             balance_match = re.search(r'(?:Total\s*)?[Bb]alance\s*[৳:]?\s*([\d.]+)', page_text)
             if balance_match:
                 balance = balance_match.group(1)
-                
         except Exception as e:
             logger.error(f"Scraping regex error: {e}")
             
@@ -60,7 +82,7 @@ async def get_account_info(page):
         return "0.00", "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. হেল্পার: বাজি ধরা এবং রেজাল্ট চেক
+# ৪. হেল্পার: বাজি ধরা এবং রেজাল্ট চেক
 # ───────────────────────────────────────────
 async def place_bet_and_check_win(page, bet_mode, amount):
     try:
@@ -92,7 +114,7 @@ async def place_bet_and_check_win(page, bet_mode, amount):
         return False
 
 # ───────────────────────────────────────────
-# ৪. মূল অটো-বেট লুপ
+# ৫. মূল অটো-বেট লুপ
 # ───────────────────────────────────────────
 async def auto_bet_loop(uid, ctx, loading_msg):
     state = get_state(uid)
@@ -100,22 +122,24 @@ async def auto_bet_loop(uid, ctx, loading_msg):
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-setuid-sandbox"]
+            args=["--no-sandbox", "--disable-setuid-sandbox", "--disable-blink-features=AutomationControlled"]
         ) 
         page = await browser.new_page()
         
         try:
+            # Stealth মোড চালু করা হলো
+            await stealth_async(page)
+            
             await page.goto(SITE_URL, timeout=60000)
             await page.wait_for_timeout(5000) 
             
-            # ব্রাউজারে নাম্বার ও পাসওয়ার্ড বসানো
             await page.get_by_placeholder("Please enter the phone number").fill(state["phone"])
+            await page.wait_for_timeout(500)
             await page.get_by_placeholder("Password").fill(state["password"])
+            await page.wait_for_timeout(500)
             
-            # লগইন বাটনে ক্লিক
             await page.locator('text="Log in"').last.click()
             
-            # ⚠️ এখানে আমরা লগইন সফল হওয়ার জন্য সরাসরি অপেক্ষা করছি
             try:
                 await page.wait_for_selector('text=/Balance|UID|Account/i', timeout=15000)
                 login_success = True
@@ -136,19 +160,16 @@ async def auto_bet_loop(uid, ctx, loading_msg):
                 await browser.close()
                 return
             
-            # আসল ব্যালেন্স ও UID বের করা
             await page.wait_for_timeout(2000)
             bal, user_uid = await get_account_info(page)
             state["balance"] = bal
             state["account_uid"] = user_uid
             state["logged_in"] = True
             
-            # লোডিং মেসেজটি ডিলিট করা হচ্ছে
             if loading_msg:
                 try: await loading_msg.delete()
                 except: pass
             
-            # আপনার স্ক্রিনশটের মতো ড্যাশবোর্ড মেসেজ
             login_msg_text = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -173,11 +194,9 @@ async def auto_bet_loop(uid, ctx, loading_msg):
             markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
             await ctx.bot.send_message(chat_id=uid, text=login_msg_text, parse_mode="Markdown", reply_markup=markup)
             
-            # গেমে ঢোকা
             await page.locator('text="WinGo 30sec"').first.click(timeout=5000)
             await page.wait_for_timeout(3000)
             
-            # বেটিং লজিক
             while state["running"]:
                 if not state["steps"]:
                     await asyncio.sleep(2)
@@ -227,7 +246,7 @@ async def auto_bet_loop(uid, ctx, loading_msg):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৫. টেলিগ্রাম হ্যান্ডলার
+# ৬. টেলিগ্রাম হ্যান্ডলার
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -401,7 +420,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🛑 **AUTO BETTING STOPPED**", parse_mode="Markdown")
 
 # ───────────────────────────────────────────
-# ৬. Railway Healthcheck Server
+# ৭. Railway Healthcheck Server
 # ───────────────────────────────────────────
 def start_health_server():
     port = int(os.environ.get("PORT", 8080))
@@ -416,11 +435,10 @@ def start_health_server():
     threading.Thread(target=server.serve_forever, daemon=True).start()
 
 # ───────────────────────────────────────────
-# ৭. মেইন ফাংশন
+# ৮. মেইন ফাংশন
 # ───────────────────────────────────────────
 def main():
-    # ⚠️ আপনি যদি কোডের উপরে টোকেন না বসান, তবে এখানেও চেক করা হবে
-    if BOT_TOKEN == "8850232346:AAGqRw1Mnj30rhr3N233Il4U8Huccz1mwVk" or not BOT_TOKEN:
+    if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or not BOT_TOKEN:
         print("❌ Error: BOT_TOKEN সেট করা নেই!")
         return
 
