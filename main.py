@@ -117,9 +117,9 @@ async def api_login(uid, ctx, loading_msg_id):
             logger.error(f"Token decode error: {e}")
 
         state["balance"] = balance
-        masked_phone = f"****{state['phone'][-4:]}"
+        masked_phone = f"***{state['phone'][-4:]}" # আপনার ডিজাইন অনুযায়ী ***5095
         
-        # 💡 আপনার দেওয়া হুবহু ড্যাশবোর্ড ফরম্যাট
+        # 💡 আপনার দেওয়া ১ম ডিজাইন
         dashboard_msg = (
             "╔════════════════════════╗\n"
             "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -187,11 +187,9 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     text = update.message.text.strip()
 
-    # ১. ফোন নাম্বার নেওয়া
     if state.get("awaiting") == "phone":
         state["phone"] = text
         state["awaiting"] = "password"
-        # 💡 আপনার দেওয়া ২ নাম্বার স্ক্রিনশটের ফরম্যাট
         await update.message.reply_text(
             "╔════════════════════════╗\n"
             "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
@@ -203,7 +201,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         return
 
-    # ২. পাসওয়ার্ড নেওয়া
     if state.get("awaiting") == "password":
         state["password"] = text
         state["awaiting"] = None 
@@ -220,24 +217,25 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await api_login(uid, ctx, loading_msg.message_id)
         return
 
-    # ৩. START YOUR TARGET বাটনে ক্লিক করলে (আপনার ৪ নাম্বার স্ক্রিনশট)
     if text == "🚀 START YOUR TARGET":
         state["awaiting"] = "target"
+        # 💡 আপনার দেওয়া ২য় ডিজাইন
         target_msg = (
             "╔════════════════════════╗\n"
             "║   🚀 START YOUR TARGET 🚀   ║\n"
-            "╚════════════════════════╝\n\n"
+            "╚════════════════════════╝\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "💰 **YOUR BALANCE**\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💰 YOUR BALANCE\n"
             f"৳ {state.get('balance', '0.00')}\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "🎯 **Enter your TARGET profit amount:**\n"
-            "_How much do you want to earn? (in ৳)_"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🎯 Enter your TARGET profit amount:\n"
+            "How much do you want to earn? (in ৳)"
         )
         await update.message.reply_text(target_msg, parse_mode="Markdown")
         return
 
-    # ৪. টার্গেট প্রফিট নেওয়া
     if state.get("awaiting") == "target":
         try:
             target_amount = float(text)
@@ -248,7 +246,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ **ভুল ফরম্যাট!** দয়া করে শুধু সংখ্যা লিখুন (যেমন: 50)।")
         return
 
-    # ৫. STOP TRADE এবং LOGOUT বাটন
     if text == "🛑 STOP TRADE":
         await update.message.reply_text("🛑 **TRADE STOPPED**", parse_mode="Markdown")
         return
@@ -266,7 +263,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     
     if query.data == "start_login":
         state["awaiting"] = "phone"
-        # 💡 আপনার দেওয়া ১ নাম্বার স্ক্রিনশটের ফরম্যাট
         login_msg = (
             "╔════════════════════════╗\n"
             "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
