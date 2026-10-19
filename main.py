@@ -27,8 +27,8 @@ def get_state(uid):
             "awaiting": None, 
             "temp_phone": "", 
             "temp_password": "",
-            "accounts": [], # 💡 একাধিক অ্যাকাউন্ট সেভ করার লিস্ট
-            "active_account_index": 0, # বর্তমানে কোন অ্যাকাউন্টে কাজ করছে
+            "accounts": [], 
+            "active_account_index": 0, 
             "balance": "0.00", 
             "target": 0,
             "steps": 0
@@ -38,7 +38,7 @@ def get_state(uid):
 # ───────────────────────────────────────────
 # 💡 লগইন এবং ব্যালেন্স আনার ফাংশন
 # ───────────────────────────────────────────
-async def api_login(uid, ctx, loading_msg_id, phone, password, is_bulk=False):
+async def api_login(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
     
     headers = {
@@ -122,16 +122,11 @@ async def api_login(uid, ctx, loading_msg_id, phone, password, is_bulk=False):
         except Exception as e:
             logger.error(f"Token decode error: {e}")
 
-        # অ্যাকাউন্ট লিস্টে সেভ করা
         account_info = {
-            "phone": phone,
-            "password": password,
-            "uid": uid_val,
-            "balance": balance,
-            "token": token
+            "phone": phone, "password": password, "uid": uid_val,
+            "balance": balance, "token": token
         }
         
-        # ডুপ্লিকেট চেক করে লিস্টে যোগ করা
         existing = False
         for acc in state["accounts"]:
             if acc["phone"] == phone:
@@ -144,7 +139,7 @@ async def api_login(uid, ctx, loading_msg_id, phone, password, is_bulk=False):
         state["balance"] = balance
         masked_phone = f"***{phone[-4:]}"
         
-        # 💡 আপনার দেওয়া ড্যাশবোর্ড ডিজাইন
+        # 💡 ১. আপনার প্রথম দেওয়া ড্যাশবোর্ড ডিজাইন
         dashboard_msg = (
             "╔════════════════════════╗\n"
             "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -170,7 +165,6 @@ async def api_login(uid, ctx, loading_msg_id, phone, password, is_bulk=False):
         
         await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=markup)
         
-        # যদি ৬টি অ্যাকাউন্ট লগইন করার মেসেজ হয়, তবে ইউজারকে জানানো
         if len(state["accounts"]) < 6:
             await ctx.bot.send_message(chat_id=uid, text=f"✅ অ্যাকাউন্ট সেভ হয়েছে ({len(state['accounts'])}/6)। পরবর্তী অ্যাকাউন্ট যোগ করতে /start দিন।")
 
@@ -187,23 +181,34 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
     
-    # যদি ইতিমধ্যে ৬টি অ্যাকাউন্ট সেভ করা থাকে
     if len(state["accounts"]) >= 6:
         await update.message.reply_text("✅ আপনার ৬টি অ্যাকাউন্ট ইতিমধ্যে সেভ করা আছে। নতুন করে শুরু করতে /reset দিন।")
         return
 
+    # 💡 ২. আপনার প্রথম দেওয়া বড় ওয়েলকাম মেসেজ
     welcome_text = (
-        "🧠 BD=WIN~GO=AUTO~BET 💥\n"
+        "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 Mode    : Auto Analyse & bet\n"
         "🔐 Access  : Private · Authorized Members\n"
         "🔴 Status  : Not Logged In\n"
-        f"👥 Accounts: {len(state['accounts'])}/6\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 Prediction Engine — 9 Layers\n"
+        "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
+        "🔍 Manipulation · 🎨 Colour · 🔢 Frequency\n"
+        "🔄 Markov · ♻️ Cycle · 💠 Momentum\n"
+        "🔁 Every layer is back-tested live so its vote\n"
+        "weight follows its real hit-rate\n"
+        "🔴 Confidence below 30% → sit out\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🎬 4-second 🧠 generating prediction animation\n"
+        "🚀 Analysis → auto bet every 30s period\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "👇 Press the button below to LOGIN"
     )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
     
-    await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -261,11 +266,10 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         try:
             target_amount = float(text)
             state["target"] = target_amount
-            
-            # 💡 আপনার দেওয়া নতুন ডিজাইন (TARGET SET)
             balance = float(state.get('balance', '0.00'))
             stop_at = balance + target_amount
             
+            # 💡 ৩. আপনার শেষ দেওয়া TARGET SET ডিজাইন
             target_set_msg = (
                 "╔════════════════════════╗\n"
                 "║   🎯 TARGET SET 🎯   ║\n"
@@ -326,7 +330,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
 
-# 💡 রিসেট কমান্ড (সব অ্যাকাউন্ট মুছে ফেলার জন্য)
 async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     user_state[uid] = {
