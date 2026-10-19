@@ -53,7 +53,7 @@ async def get_account_info(page):
         return "0.00", "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. মূল অটো-বেট লুপ (লগইন ও পপ-আপ হ্যান্ডলার)
+# ৩. মূল অটো-বেট লুপ
 # ───────────────────────────────────────────
 async def auto_bet_loop(uid, ctx, loading_msg):
     state = get_state(uid)
@@ -76,21 +76,20 @@ async def auto_bet_loop(uid, ctx, loading_msg):
             # লগইন বাটনে ক্লিক
             await page.locator('text="Log in"').last.click()
             
-            # ⚠️ লগইন ও পেজ লোড হওয়ার জন্য অপেক্ষা
+            # লগইন ও পেজ লোড হওয়ার জন্য অপেক্ষা
             await page.wait_for_timeout(8000)
             
             # ব্যালেন্স ও UID বের করা
             bal, user_uid = await get_account_info(page)
             
-            # ⚠️ যদি UID না পাওয়া যায়, তার মানে পপ-আপ বা অন্য কিছু আটকে আছে
+            # যদি UID না পাওয়া যায়, পপ-আপ চেক করা
             if user_uid == "Unknown":
-                # পপ-আপ থাকলে কনফার্ম বাটনে ক্লিক করার চেষ্টা
                 try:
                     confirm_btn = page.locator('text="Confirm"').first
                     if await confirm_btn.is_visible(timeout=2000):
                         await confirm_btn.click()
-                        await page.wait_for_timeout(4000) # পপ-আপ বন্ধ হওয়ার পর অপেক্ষা
-                        bal, user_uid = await get_account_info(page) # আবার চেক
+                        await page.wait_for_timeout(4000)
+                        bal, user_uid = await get_account_info(page)
                 except:
                     pass
             
@@ -152,7 +151,7 @@ async def auto_bet_loop(uid, ctx, loading_msg):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৪. টেলিগ্রাম হ্যান্ডলার (বড় ওয়েলকাম মেসেজ)
+# ৪. টেলিগ্রাম হ্যান্ডলার (বড় ওয়েলকাম মেসেজ ও পাসওয়ার্ড চেক)
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -160,7 +159,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state["running"] = False
     if state.get("task"): state["task"].cancel()
     
-    # ⚠️ আপনার প্রথম কোডের হুবহু বড় ওয়েলকাম মেসেজ
+    # বড় ওয়েলকাম মেসেজ
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -189,7 +188,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     text = update.message.text.strip()
 
-    # নাম্বার নেওয়ার পর
+    # ⚠️ ১. ফোন নম্বর নেওয়ার পর
     if state.get("awaiting") == "phone":
         state["phone"] = text
         state["awaiting"] = "password"
@@ -197,18 +196,19 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "╔════════════════════════╗\n"
             "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
             "╚════════════════════════╝\n"
-            f"📱 Number: {text}\n\n"
+            f"📱 Number: {state['phone']}\n\n" # ⚠️ এখানে পুরো নাম্বার দেখাবে
             "🔑 **Now enter your password:**\n"
             "_Your message will be deleted immediately for security._",
             parse_mode="Markdown"
         )
         return
 
-    # পাসওয়ার্ড নেওয়ার পর
+    # ⚠️ ২. পাসওয়ার্ড নেওয়ার পর (ডিলিট করে লগইন)
     if state.get("awaiting") == "password":
         state["password"] = text
         state["awaiting"] = None 
         
+        # পাসওয়ার্ড মেসেজ ডিলিট
         try: 
             await update.message.delete()
         except: 
