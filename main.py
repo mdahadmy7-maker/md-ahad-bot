@@ -10,7 +10,7 @@ from playwright.async_api import async_playwright
 # ═══════════════════════════════════════════
 # ১. 🔧 CONFIG
 # ═══════════════════════════════════════════
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAGqRw1Mnj30rhr3N233Il4U8Huccz1mwVk") 
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "8850232346:AAGbO6zilJIPKrOyPpuCatWDuGzc5ryc94c") 
 
 SITE_URL = "https://www.hgnice.vip"
 
@@ -410,7 +410,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 # ৭. মেইন ফাংশন
 # ───────────────────────────────────────────
 def main():
-    if BOT_TOKEN == "8850232346:AAGbO6zilJIPKrOyPpuCatWDuGzc5ryc94c" or not BOT_TOKEN:
+    if BOT_TOKEN == "YOUR_BOT_TOKEN_HERE" or not BOT_TOKEN:
         print("❌ Error: BOT_TOKEN সেট করা নেই!")
         return
 
