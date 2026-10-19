@@ -11,7 +11,7 @@ from playwright.async_api import async_playwright
 # ১. 🔧 CONFIG 
 # ⚠️ এখানে আপনার টেলিগ্রাম বটের টোকেন বসান
 # ═══════════════════════════════════════════
-BOT_TOKEN = "8850232346:AAFxrxOHHdFzS560JepDpxgj2oqS0tr6nPo" 
+BOT_TOKEN = "8850232346:AAHdpHDCFqCJkku3JcfnjNmU3PylHiY5FwY" 
 
 # সরাসরি লগইন পেজের সঠিক লিংক
 SITE_URL = "https://www.hgnice.vip/#/login"
@@ -268,7 +268,7 @@ async def auto_bet_loop(uid, ctx, loading_msg_id):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৬. টেলিগ্রাম হ্যান্ডলার (চ্যানেল জয়েনের কোনো কোড নেই)
+# ৬. টেলিগ্রাম হ্যান্ডলার (কোনো চ্যানেল জয়েন নেই)
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -305,7 +305,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     text = update.message.text.strip()
 
-    # ১. ফোন নম্বর গ্রহণ (এখানে কোনো চ্যানেল চেক নেই, সরাসরি পাসওয়ার্ড চাইবে)
+    # ১. ফোন নম্বর গ্রহণ (সরাসরি পাসওয়ার্ড চাইবে)
     if state.get("awaiting") == "phone":
         state["phone"] = text
         state["awaiting"] = "password"
