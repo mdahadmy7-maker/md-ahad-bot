@@ -24,15 +24,21 @@ user_state = {}
 def get_state(uid):
     if uid not in user_state:
         user_state[uid] = {
-            "awaiting": None, "phone": "", "password": "", 
-            "balance": "0.00", "target": 0
+            "awaiting": None, 
+            "temp_phone": "", 
+            "temp_password": "",
+            "accounts": [], # 💡 একাধিক অ্যাকাউন্ট সেভ করার লিস্ট
+            "active_account_index": 0, # বর্তমানে কোন অ্যাকাউন্টে কাজ করছে
+            "balance": "0.00", 
+            "target": 0,
+            "steps": 0
         }
     return user_state[uid]
 
 # ───────────────────────────────────────────
 # 💡 লগইন এবং ব্যালেন্স আনার ফাংশন
 # ───────────────────────────────────────────
-async def api_login(uid, ctx, loading_msg_id):
+async def api_login(uid, ctx, loading_msg_id, phone, password, is_bulk=False):
     state = get_state(uid)
     
     headers = {
@@ -53,8 +59,8 @@ async def api_login(uid, ctx, loading_msg_id):
     }
 
     login_payload = {
-        "username": state["phone"],
-        "pwd": state["password"],
+        "username": phone,
+        "pwd": password,
         "phonetype": 0,
         "logintype": "mobile",
         "packId": "",
@@ -80,7 +86,7 @@ async def api_login(uid, ctx, loading_msg_id):
 
         if data.get("code") != 0:
             err_msg = data.get("msg", "Wrong account or password")
-            await ctx.bot.send_message(chat_id=uid, text=f"❌ LOGIN FAILED\n\n{err_msg}")
+            await ctx.bot.send_message(chat_id=uid, text=f"❌ LOGIN FAILED ({phone})\n\n{err_msg}")
             return
 
         user_data = data.get("data", {})
@@ -116,10 +122,29 @@ async def api_login(uid, ctx, loading_msg_id):
         except Exception as e:
             logger.error(f"Token decode error: {e}")
 
-        state["balance"] = balance
-        masked_phone = f"***{state['phone'][-4:]}"
+        # অ্যাকাউন্ট লিস্টে সেভ করা
+        account_info = {
+            "phone": phone,
+            "password": password,
+            "uid": uid_val,
+            "balance": balance,
+            "token": token
+        }
         
-        # 💡 parse_mode বাদ দেওয়া হয়েছে যাতে কোনো এরর না আসে
+        # ডুপ্লিকেট চেক করে লিস্টে যোগ করা
+        existing = False
+        for acc in state["accounts"]:
+            if acc["phone"] == phone:
+                acc.update(account_info)
+                existing = True
+                break
+        if not existing:
+            state["accounts"].append(account_info)
+
+        state["balance"] = balance
+        masked_phone = f"***{phone[-4:]}"
+        
+        # 💡 আপনার দেওয়া ড্যাশবোর্ড ডিজাইন
         dashboard_msg = (
             "╔════════════════════════╗\n"
             "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -144,6 +169,10 @@ async def api_login(uid, ctx, loading_msg_id):
         markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
         
         await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=markup)
+        
+        # যদি ৬টি অ্যাকাউন্ট লগইন করার মেসেজ হয়, তবে ইউজারকে জানানো
+        if len(state["accounts"]) < 6:
+            await ctx.bot.send_message(chat_id=uid, text=f"✅ অ্যাকাউন্ট সেভ হয়েছে ({len(state['accounts'])}/6)। পরবর্তী অ্যাকাউন্ট যোগ করতে /start দিন।")
 
     except Exception as e:
         if loading_msg_id:
@@ -156,25 +185,19 @@ async def api_login(uid, ctx, loading_msg_id):
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    get_state(uid)
+    state = get_state(uid)
     
+    # যদি ইতিমধ্যে ৬টি অ্যাকাউন্ট সেভ করা থাকে
+    if len(state["accounts"]) >= 6:
+        await update.message.reply_text("✅ আপনার ৬টি অ্যাকাউন্ট ইতিমধ্যে সেভ করা আছে। নতুন করে শুরু করতে /reset দিন।")
+        return
+
     welcome_text = (
         "🧠 BD=WIN~GO=AUTO~BET 💥\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🧠 Mode    : Auto Analyse & bet\n"
         "🔐 Access  : Private · Authorized Members\n"
         "🔴 Status  : Not Logged In\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🧠 Prediction Engine — 9 Layers\n"
-        "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
-        "🔍 Manipulation · 🎨 Colour · 🔢 Frequency\n"
-        "🔄 Markov · ♻️ Cycle · 💠 Momentum\n"
-        "🔁 Every layer is back-tested live so its vote\n"
-        "weight follows its real hit-rate\n"
-        "🔴 Confidence below 30% → sit out\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🎬 4-second 🧠 generating prediction animation\n"
-        "🚀 Analysis → auto bet every 30s period\n\n"
+        f"👥 Accounts: {len(state['accounts'])}/6\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "👇 Press the button below to LOGIN"
     )
@@ -188,7 +211,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip()
 
     if state.get("awaiting") == "phone":
-        state["phone"] = text
+        state["temp_phone"] = text
         state["awaiting"] = "password"
         await update.message.reply_text(
             "╔════════════════════════╗\n"
@@ -201,7 +224,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
     if state.get("awaiting") == "password":
-        state["password"] = text
+        state["temp_password"] = text
         state["awaiting"] = None 
         
         try: await update.message.delete()
@@ -213,12 +236,11 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             try: await loading_msg.edit_text(f"🔄 CONNECTING... [{'█'*i}{'░'*(10-i)}] {i*10}%")
             except: pass
         
-        await api_login(uid, ctx, loading_msg.message_id)
+        await api_login(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"])
         return
 
     if text == "🚀 START YOUR TARGET":
         state["awaiting"] = "target"
-        # 💡 parse_mode বাদ দেওয়া হয়েছে
         target_msg = (
             "╔════════════════════════╗\n"
             "║   🚀 START YOUR TARGET 🚀   ║\n"
@@ -239,19 +261,50 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         try:
             target_amount = float(text)
             state["target"] = target_amount
-            state["awaiting"] = None
-            await update.message.reply_text(f"✅ TARGET SET: ৳ {target_amount}\n\nবট এখন কাজ শুরু করবে (লজিক পরবর্তীতে যোগ হবে)।")
+            
+            # 💡 আপনার দেওয়া নতুন ডিজাইন (TARGET SET)
+            balance = float(state.get('balance', '0.00'))
+            stop_at = balance + target_amount
+            
+            target_set_msg = (
+                "╔════════════════════════╗\n"
+                "║   🎯 TARGET SET 🎯   ║\n"
+                "╚════════════════════════╝\n\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"💰 Balance  : ৳ {balance:.2f}\n"
+                f"🎯 Target   : ৳ {target_amount:.2f} profit\n"
+                f"🏦 Stop At  : ৳ {stop_at:.2f}\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "🚀 Enter your STEP COUNT:\n"
+                "How many steps? (e.g. 5, max 50)"
+            )
+            state["awaiting"] = "steps"
+            await update.message.reply_text(target_set_msg)
         except ValueError:
             await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 50)।")
+        return
+        
+    if state.get("awaiting") == "steps":
+        try:
+            steps = int(text)
+            if steps > 50 or steps < 1:
+                raise ValueError("Steps must be between 1 and 50")
+            state["steps"] = steps
+            state["awaiting"] = None
+            await update.message.reply_text(f"✅ STEP COUNT SET: {steps}\n\nবট এখন কাজ শুরু করবে (অটো-বেট লজিক পরবর্তী ধাপে যোগ হবে)।")
+        except ValueError:
+            await update.message.reply_text("❌ ভুল ফরম্যাট! ১ থেকে ৫০ এর মধ্যে একটি সংখ্যা দিন (যেমন: 5)।")
         return
 
     if text == "🛑 STOP TRADE":
         await update.message.reply_text("🛑 TRADE STOPPED")
         return
     if text == "🚪 LOGOUT":
-        state["phone"] = ""
-        state["password"] = ""
-        await update.message.reply_text("🚪 LOGGED OUT\n/start দিয়ে আবার লগইন করুন।")
+        state["temp_phone"] = ""
+        state["temp_password"] = ""
+        await update.message.reply_text("🚪 LOGGED OUT\n/start দিয়ে আবার লগইন করুন।")
         return
 
 async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -273,9 +326,20 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
 
+# 💡 রিসেট কমান্ড (সব অ্যাকাউন্ট মুছে ফেলার জন্য)
+async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    user_state[uid] = {
+        "awaiting": None, "temp_phone": "", "temp_password": "",
+        "accounts": [], "active_account_index": 0, 
+        "balance": "0.00", "target": 0, "steps": 0
+    }
+    await update.message.reply_text("🔄 সব ডেটা রিসেট হয়েছে। /start দিন।")
+
 def main():
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     print("🤖 Bot started...")
