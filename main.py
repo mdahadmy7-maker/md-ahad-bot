@@ -11,7 +11,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 # ১. 🔧 CONFIG 
 # ⚠️ এখানে আপনার টেলিগ্রাম বটের টোকেন বসান
 # ═══════════════════════════════════════════
-BOT_TOKEN = "8850232346:AAEUh-lBN2hW0i3WRqR_CJUsGi3CSmSU7HU" 
+BOT_TOKEN = "8850232346:AAFSa0GMt5KPoH-L4ZexuJqRR4XPmgw-8Zg" 
 
 LOGIN_URL = "https://api.hgnicepayapi.com/api/webapi/Login"
 USER_INFO_URL = "https://api.hgnicepayapi.com/api/webapi/GetUserInfo"
