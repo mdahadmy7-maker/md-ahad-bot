@@ -25,103 +25,125 @@ def get_state(uid):
         }
     return user_state[uid]
 
+# ───────────────────────────────────────────
+# 💡 Playwright দিয়ে ডাইনামিক লগইন এবং API ডেটা রিড
+# ───────────────────────────────────────────
 async def playwright_login(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
     login_phone = phone[3:] if phone.startswith("880") else phone
     
     async with async_playwright() as p:
+        # হেডলেস ব্রাউজার চালু (headless=True)
         browser = await p.chromium.launch(headless=True) 
+        
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
             viewport={"width": 412, "height": 915}
         )
         page = await context.new_page()
         
+        # 💡 স্পিড বাড়ানোর জন্য ছবি এবং ফন্ট ব্লক করা
+        await page.route("**/*", lambda route: route.abort() if route.request.resource_type in ["image", "media", "font"] else route.continue_())
+        
         try:
             await page.goto(SITE_URL, timeout=60000)
-            await page.wait_for_timeout(4000) 
+            # ইনপুট বক্স লোড হওয়া পর্যন্ত অপেক্ষা
+            await page.wait_for_selector('input[type="text"], input[type="tel"]', timeout=15000)
             
+            # ফর্ম ফিলাপ
+            await page.fill('input[type="text"], input[type="tel"]', login_phone)
+            await page.wait_for_timeout(500)
+            await page.fill('input[type="password"]', password)
+            await page.wait_for_timeout(500)
+            
+            # 💡 লগইন বাটনে ক্লিক করা এবং GetUserInfo API রেসপন্স ধরা
             try:
-                await page.fill('input[type="text"], input[type="tel"]', login_phone, timeout=5000)
-                await page.wait_for_timeout(1000)
-                await page.fill('input[type="password"]', password, timeout=5000)
-                await page.wait_for_timeout(1000)
-                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=5000)
-            except:
-                await page.evaluate(f"""
-                    let inputs = document.querySelectorAll('input');
-                    if(inputs.length > 0) inputs[0].value = '{login_phone}';
-                    if(inputs.length > 1) inputs[1].value = '{password}';
-                    let btns = document.querySelectorAll('button, div');
-                    for (let b of btns) {{ if(b.innerText.toLowerCase().includes('log in')) b.click(); }}
-                """)
-            
-            await page.wait_for_timeout(8000)
-            page_text = await page.inner_text("body")
-            
-            if loading_msg_id:
-                try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
-                except: pass
+                # লগইন বাটনে ক্লিক করার আগে রেসপন্স লিসেনার চালু
+                async with page.expect_response(lambda response: "GetUserInfo" in response.url, timeout=20000) as response_info:
+                    await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=5000)
+                
+                # রেসপন্স ডেটা পার্স করা
+                response = await response_info.value
+                json_data = await response.json()
+                
+                # ডেটা এক্সট্রাক্ট করা
+                if json_data.get("code") == 0 and "data" in json_data:
+                    user_data = json_data["data"]
+                    uid_val = user_data.get("userId", "Unknown")
+                    balance = user_data.get("amount", "0.00")
+                    
+                    # সফল লগইন
+                    if loading_msg_id:
+                        try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
+                        except: pass
+                    
+                    # অ্যাকাউন্ট সেভ করা
+                    account_info = {"phone": phone, "password": password, "uid": uid_val, "balance": balance}
+                    existing = False
+                    for acc in state["accounts"]:
+                        if acc["phone"] == phone:
+                            acc.update(account_info)
+                            existing = True
+                            break
+                    if not existing:
+                        state["accounts"].append(account_info)
+                        
+                    state["balance"] = balance
+                    masked_phone = f"***{phone[-4:]}"
+                    
+                    # ড্যাশবোর্ড মেসেজ
+                    dashboard_msg = (
+                        "╔════════════════════════╗\n"
+                        "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
+                        "╚════════════════════════╝\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"☎️ Phone Number\n{masked_phone}\n\n"
+                        f"👤 Account UID\n{uid_val}\n\n"
+                        f"💰 Account Balance\n৳ {balance}\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        "🧠 Analysis Engine:  READY\n"
+                        "🚀 AutoTrade System: READY\n\n"
+                        "👇 Press START YOUR TARGET to begin"
+                    )
+                    
+                    reply_keyboard = [
+                        [KeyboardButton("🚀 START YOUR TARGET")],
+                        [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]
+                    ]
+                    markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
+                    await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=markup)
+                    
+                    if len(state["accounts"]) < 6:
+                        await ctx.bot.send_message(chat_id=uid, text=f"✅ অ্যাকাউন্ট সেভ হয়েছে ({len(state['accounts'])}/6)। নতুন অ্যাকাউন্ট যোগ করতে /start দিন।")
+                    return
 
-            if "Wrong account or password" in page_text:
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ LOGIN FAILED ({phone})\n\nWrong account or password.")
-                await browser.close()
+            except Exception as e:
+                logger.error(f"Network intercept error: {e}")
+                # যদি API রেসপন্স না ধরা পড়ে, তবে এরর মেসেজ দেখানো
+                page_text = await page.inner_text("body")
+                if "Wrong account or password" in page_text:
+                    if loading_msg_id:
+                        try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
+                        except: pass
+                    await ctx.bot.send_message(chat_id=uid, text=f"❌ LOGIN FAILED ({phone})\n\nWrong account or password.")
+                else:
+                    if loading_msg_id:
+                        try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
+                        except: pass
+                    await ctx.bot.send_message(chat_id=uid, text=f"⚠️ LOGIN TIMEOUT ({phone})\n\nসার্ভার রেসপন্স দিতে দেরি করছে।")
                 return
-                
-            uid_val = "Unknown"
-            balance = "0.00"
-            
-            uid_match = re.search(r'UID\s*\|\s*(\d+)', page_text, re.IGNORECASE)
-            if uid_match: uid_val = uid_match.group(1)
-                
-            balance_match = re.search(r'Total balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
-            if balance_match: balance = balance_match.group(1)
-
-            account_info = {"phone": phone, "password": password, "uid": uid_val, "balance": balance}
-            existing = False
-            for acc in state["accounts"]:
-                if acc["phone"] == phone:
-                    acc.update(account_info)
-                    existing = True
-                    break
-            if not existing:
-                state["accounts"].append(account_info)
-                
-            state["balance"] = balance
-            masked_phone = f"***{phone[-4:]}"
-            
-            dashboard_msg = (
-                "╔════════════════════════╗\n"
-                "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
-                "╚════════════════════════╝\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"☎️ Phone Number\n{masked_phone}\n\n"
-                f"👤 Account UID\n{uid_val}\n\n"
-                f"💰 Account Balance\n৳ {balance}\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "🧠 Analysis Engine:  READY\n"
-                "🚀 AutoTrade System: READY\n\n"
-                "👇 Press START YOUR TARGET to begin"
-            )
-            
-            reply_keyboard = [
-                [KeyboardButton("🚀 START YOUR TARGET")],
-                [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]
-            ]
-            markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
-            await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=markup)
-            
-            if len(state["accounts"]) < 6:
-                await ctx.bot.send_message(chat_id=uid, text=f"✅ অ্যাকাউন্ট সেভ হয়েছে ({len(state['accounts'])}/6)। নতুন অ্যাকাউন্ট যোগ করতে /start দিন।")
 
         except Exception as e:
             if loading_msg_id:
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
-            await ctx.bot.send_message(chat_id=uid, text=f"⚠️ Error: {str(e)[:100]}")
+            await ctx.bot.send_message(chat_id=uid, text=f"⚠️ Browser Error: {str(e)[:100]}")
         finally:
             await browser.close()
 
+# ───────────────────────────────────────────
+# টেলিগ্রাম হ্যান্ডলার
+# ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
@@ -130,12 +152,25 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ আপনার ৬টি অ্যাকাউন্ট ইতিমধ্যে সেভ করা আছে। নতুন করে শুরু করতে /reset দিন।")
         return
 
+    # 💡 আপনার পছন্দের বড় ওয়েলকাম মেসেজ
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 Mode    : Auto Analyse & bet\n"
         "🔐 Access  : Private · Authorized Members\n"
         "🔴 Status  : Not Logged In\n"
         f"👥 Accounts: {len(state['accounts'])}/6\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 Prediction Engine — 9 Layers\n"
+        "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
+        "🔍 Manipulation · 🎨 Colour · 🔢 Frequency\n"
+        "🔄 Markov · ♻️ Cycle · 💠 Momentum\n"
+        "🔁 Every layer is back-tested live so its vote\n"
+        "weight follows its real hit-rate\n"
+        "🔴 Confidence below 30% → sit out\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🎬 4-second 🧠 generating prediction animation\n"
+        "🚀 Analysis → auto bet every 30s period\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "👇 Press the button below to LOGIN"
     )
