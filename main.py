@@ -73,27 +73,29 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             except:
                 await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
-            await page.wait_for_timeout(4000) # লগইন প্রসেস এবং পপ-আপ আসার জন্য অপেক্ষা
+            # 💡 ৪. পপ-আপ আসার জন্য ৫ সেকেন্ড অপেক্ষা
+            await page.wait_for_timeout(5000) 
 
-            # 💡 ৪. পপ-আপ আসলে Confirm বাটনে ক্লিক করা
+            # 💡 ৫. 'Confirm' বাটনে ক্লিক করা
             try:
-                confirm_btn = page.locator('text="Confirm"').last
-                if await confirm_btn.is_visible(timeout=3000):
+                confirm_btn = page.locator('text="Confirm"').first
+                if await confirm_btn.is_visible(timeout=5000):
                     await confirm_btn.click()
-                    await page.wait_for_timeout(2000)
+                    await page.wait_for_timeout(2000) # পপ-আপ বন্ধ হওয়ার জন্য অপেক্ষা
             except:
                 pass # পপ-আপ না থাকলে স্কিপ করবে
 
-            # 💡 ৫. নিচের ডান কোণে থাকা Account বাটনে ক্লিক করা
+            # 💡 ৬. নিচের ডান কোণে থাকা 'Account' বাটনে ক্লিক করা
             try:
+                # আমরা 'Account' লেখাটি খুঁজব এবং একদম শেষেরটি (নিচের নেভিগেশন বারে) ক্লিক করব
                 account_btn = page.locator('text="Account"').last
-                if await account_btn.is_visible(timeout=3000):
+                if await account_btn.is_visible(timeout=5000):
                     await account_btn.click()
-                    await page.wait_for_timeout(3000) # ড্যাশবোর্ড লোড হওয়ার জন্য অপেক্ষা
+                    await page.wait_for_timeout(3000) # অ্যাকাউন্ট পেজ লোড হওয়ার জন্য অপেক্ষা
             except:
                 pass
 
-            # ৬. ড্যাশবোর্ড থেকে UID এবং Balance খোঁজা
+            # ৭. ড্যাশবোর্ড থেকে UID এবং Balance খোঁজা
             login_status = "unknown"
             uid_val = "Unknown"
             balance = "0.00"
@@ -122,7 +124,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
 
-            # ৭. রেজাল্ট চেক
+            # ৮. রেজাল্ট চেক
             if login_status == "failed":
                 await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\n\nWrong account or password.", parse_mode="Markdown")
                 await browser.close()
@@ -132,7 +134,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                 screenshot_path = f"error_{uid}.png"
                 await page.screenshot(path=screenshot_path)
                 with open(screenshot_path, "rb") as photo:
-                    await ctx.bot.send_photo(chat_id=uid, photo=photo, caption="⚠️ লগইন হয়েছে কিনা বা UID পাওয়া যায়নি।")
+                    await ctx.bot.send_photo(chat_id=uid, photo=photo, caption="⚠️ লগইন হয়েছে কিনা বা UID পাওয়া যায়নি। স্ক্রিনশটে পপ-আপ বা এরর দেখুন।")
                 await browser.close()
                 return
 
@@ -150,7 +152,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             state["balance"] = balance
             masked_phone = f"***{phone[-4:]}"
             
-            # 💡 ৮. ড্যাশবোর্ড মেসেজ
+            # 💡 ৯. ড্যাশবোর্ড মেসেজ
             dashboard_msg = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -244,7 +246,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         try: await update.message.delete()
         except: pass
         
-        # 💡 ১০০% লোডিং (যা আপনার পছন্দমতো আস্তে আস্তে এগোবে)
+        # ১০০% লোডিং
         loading_msg = await update.message.reply_text("🔄 **CONNECTING...** [░░░░░░░░░░] 0%", parse_mode="Markdown")
         for i in range(1, 101):
             if i % 10 == 0: 
