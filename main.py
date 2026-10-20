@@ -48,20 +48,24 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
 
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             
-            # ইন্টারনেট স্লো হলে ৫ সেকেন্ড অপেক্ষা
+            # লোড হওয়ার জন্য ৫ সেকেন্ড অপেক্ষা
             await page.wait_for_timeout(5000) 
             
-            # নাম্বার ও পাসওয়ার্ড বসানো (আপনার স্ক্রিনশটের লেখা দিয়ে)
+            # 💡 নাম্বার ও পাসওয়ার্ড বসানোর নতুন এবং নিশ্চিত পদ্ধতি
             if loading_msg_id:
                 try: await ctx.bot.edit_message_text(chat_id=uid, message_id=loading_msg_id, text="📝 **নাম্বার ও পাসওয়ার্ড বসানো হচ্ছে...**", parse_mode="Markdown")
                 except: pass
 
             try:
-                await page.get_by_placeholder("Please enter the phone number").fill(login_phone, timeout=15000)
+                # ১. প্রথমে ইনপুট টাইপ 'text' বা 'tel' দিয়ে ফোন নাম্বার বক্সটি খোঁজা
+                await page.locator('input[type="text"], input[type="tel"]').first.fill(login_phone, timeout=15000)
                 await page.wait_for_timeout(1000)
-                await page.get_by_placeholder("Password").fill(password, timeout=15000)
+                
+                # ২. এরপর সরাসরি ইনপুট টাইপ 'password' দিয়ে পাসওয়ার্ড বক্সটি খোঁজা (এটি ১০০% কাজ করবে)
+                await page.locator('input[type="password"]').first.fill(password, timeout=15000)
+                
             except Exception as e:
-                # যদি বক্স না পায়, তবে ছবি তুলে টেলিগ্রামে পাঠাবে
+                # যদি এরপরও না পায়, তবে ছবি তুলে টেলিগ্রামে পাঠাবে
                 screenshot_path = f"error_{uid}.png"
                 await page.screenshot(path=screenshot_path)
                 if loading_msg_id:
@@ -83,7 +87,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
 
             await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=15000)
             
-            # ৮ সেকেন্ড অপেক্ষা
+            # রেসপন্সের জন্য ৮ সেকেন্ড অপেক্ষা
             await page.wait_for_timeout(8000)
             
             # রেজাল্ট চেক
@@ -113,6 +117,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                  await browser.close()
                  return
 
+            # অ্যাকাউন্ট সেভ
             account_info = {"phone": phone, "password": password, "uid": uid_val, "balance": balance}
             existing = False
             for acc in state["accounts"]:
@@ -170,7 +175,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ আপনার ৬টি অ্যাকাউন্ট ইতিমধ্যে সেভ করা আছে। নতুন করে শুরু করতে /reset দিন।")
         return
 
-    # আপনার প্রথম দেওয়া ওয়েলকাম মেসেজ
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
