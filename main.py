@@ -47,32 +47,43 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             # ফর্ম লোড হওয়ার জন্য অপেক্ষা করা
             await page.wait_for_timeout(5000) 
 
-            # ২. আপনার স্ক্রিনশটের লেখা 'Please enter the phone number' দিয়ে বক্স খোঁজা
+            # ২. ফোন নাম্বার বসানো (স্ক্রিনশটের লেখা দিয়ে)
             try:
                 phone_input = page.get_by_placeholder("Please enter the phone number")
                 await phone_input.click(timeout=10000)
-                await page.keyboard.type(login_phone, delay=100) # মানুষের মতো টাইপ
-                await page.wait_for_timeout(1000)
-                
-                # পাসওয়ার্ড বক্স খোঁজা
-                pass_input = page.get_by_placeholder("Password")
+                await page.keyboard.type(login_phone, delay=50)
+                await page.wait_for_timeout(500)
+            except:
+                pass
+
+            # ৩. পাসওয়ার্ড বসানো (সবচেয়ে নিশ্চিত পদ্ধতি: সরাসরি ইনপুট টাইপ 'password' দিয়ে খোঁজা)
+            try:
+                pass_input = page.locator('input[type="password"]').first
                 await pass_input.click(timeout=10000)
-                await page.keyboard.type(password, delay=100)
+                await pass_input.fill(password) # সরাসরি ভ্যালু বসানো
+                
+                # Vue.js কে বোঝানোর জন্য ইভেন্ট ট্রিগার করা
+                await page.evaluate(f"""
+                    let passInput = document.querySelector('input[type="password"]');
+                    if (passInput) {{
+                        passInput.value = '{password}';
+                        passInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        passInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    }}
+                """)
                 await page.wait_for_timeout(1000)
             except Exception as e:
-                # যদি উপরের লেখা না পায়, তবে ইনপুট টাইপ দিয়ে চেষ্টা করবে
-                try:
-                    await page.locator('input[type="text"], input[type="tel"]').first.fill(login_phone, timeout=10000)
-                    await page.locator('input[type="password"]').first.fill(password, timeout=10000)
-                except:
-                    pass
+                logger.error(f"Password fill error: {e}")
 
-            # ৩. লগইন বাটনে ক্লিক
-            await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=15000)
+            # ৪. লগইন বাটনে ক্লিক
+            try:
+                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000)
+            except:
+                await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
-            # 💡 ৪. ড্যাশবোর্ড লোড হওয়া বা এরর আসা পর্যন্ত অপেক্ষা
+            # 💡 ৫. ড্যাশবোর্ড লোড হওয়া বা এরর আসা পর্যন্ত অপেক্ষা (সর্বোচ্চ ৩০ সেকেন্ড)
             login_status = "unknown"
-            for _ in range(20): 
+            for _ in range(30): 
                 await page.wait_for_timeout(1000)
                 page_text = await page.inner_text("body")
                 
@@ -98,7 +109,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                 screenshot_path = f"error_{uid}.png"
                 await page.screenshot(path=screenshot_path)
                 with open(screenshot_path, "rb") as photo:
-                    await ctx.bot.send_photo(chat_id=uid, photo=photo, caption="⚠️ লগইন হয়েছে কিনা বোঝা যাচ্ছে না। সার্ভার স্লো হতে পারে।")
+                    await ctx.bot.send_photo(chat_id=uid, photo=photo, caption="⚠️ সার্ভার রেসপন্স দিতে দেরি করছে বা পাসওয়ার্ড বসানো যায়নি।")
                 await browser.close()
                 return
 
@@ -171,7 +182,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ আপনার ৬টি অ্যাকাউন্ট ইতিমধ্যে সেভ করা আছে। নতুন করে শুরু করতে /reset দিন।")
         return
 
-    # 💡 আপনার ১ নম্বর স্ক্রিনশটের হুবহু ওয়েলকাম মেসেজ
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -225,12 +235,12 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         # 💡 ১% থেকে ১০০% লোডিং (যা ৩-৪ সেকেন্ডে শেষ হবে)
         loading_msg = await update.message.reply_text("🔄 **CONNECTING...** [░░░░░░░░░░] 0%", parse_mode="Markdown")
         for i in range(1, 101):
-            if i % 10 == 0: # প্রতি ১০% পর পর মেসেজ আপডেট হবে (যেমন: 10%, 20%...)
+            if i % 10 == 0: 
                 filled = "█" * (i//10)
                 empty = "░" * (10 - (i//10))
                 try: await loading_msg.edit_text(f"🔄 **CONNECTING...** [{filled}{empty}] {i}%", parse_mode="Markdown")
                 except: pass
-            await asyncio.sleep(0.04) # টাইমিং কন্ট্রোল
+            await asyncio.sleep(0.04) 
         
         # লোডিং ১০০% হওয়া মাত্রই লগইন ফাংশন কল হবে
         await playwright_login(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"])
