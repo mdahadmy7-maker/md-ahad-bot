@@ -73,35 +73,50 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             except:
                 await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
-            # 💡 ৪. পপ-আপ হ্যান্ডলিং (Confirm এবং Receive)
-            # লগইন হওয়ার পর পরপর কয়েকটি পপ-আপ আসতে পারে, তাই আমরা লুপ ব্যবহার করছি
-            for i in range(4):
+            # 💡 ৪. পপ-আপ হ্যান্ডলিং (Confirm এবং Receive বারবার চেক করবে)
+            # লগইন হওয়ার পর পরপর কয়েকটি পপ-আপ আসতে পারে, তাই ৬ বার লুপ চালানো হচ্ছে
+            for _ in range(6):
                 await page.wait_for_timeout(2000) # পপ-আপ লোড হওয়ার অপেক্ষা
-                
-                # ক) Confirm বাটনে ক্লিক
-                try:
-                    confirm_btn = page.locator('text="Confirm"').first
-                    if await confirm_btn.is_visible(timeout=2000):
-                        await confirm_btn.click()
-                        await page.wait_for_timeout(1000)
-                except:
-                    pass
 
-                # খ) Receive বাটনে ক্লিক (আপনার ২য় ছবির মতো)
-                try:
-                    receive_btn = page.locator('text="Receive"').first
-                    if await receive_btn.is_visible(timeout=2000):
-                        await receive_btn.click()
-                        await page.wait_for_timeout(1000)
-                except:
-                    pass
+                # জাভাস্ক্রিপ্ট দিয়ে Confirm বা Receive বাটন খোঁজা এবং রিয়েল ক্লিক করা
+                clicked = await page.evaluate("""
+                    (function() {
+                        let elements = document.querySelectorAll('button, div, span, a');
+                        for (let el of elements) {
+                            let text = (el.innerText || el.textContent || '').trim().toLowerCase();
+                            // Confirm, Receive, বা Close লেখা থাকলে ক্লিক করবে
+                            if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok') {
+                                // আসল মাউস ইভেন্ট তৈরি করে ক্লিক করা হচ্ছে (Vue.js এর জন্য)
+                                let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
+                                el.dispatchEvent(event);
+                                return true; // ক্লিক সফল হলে true রিটার্ন করবে
+                            }
+                        }
+                        return false; // কোনো বাটন না পেলে false রিটার্ন করবে
+                    })();
+                """)
+                
+                # যদি কোনো পপ-আপ না থাকে, তবে লুপ থেকে বের হয়ে যাবে
+                if not clicked:
+                    await page.wait_for_timeout(1000)
 
             # 💡 ৫. নিচের ডান কোণে থাকা 'Account' বাটনে ক্লিক করা
             try:
-                account_btn = page.locator('text="Account"').last
-                if await account_btn.is_visible(timeout=5000):
-                    await account_btn.click()
-                    await page.wait_for_timeout(3000) # অ্যাকাউন্ট পেজ লোড হওয়ার অপেক্ষা
+                # 'Account' লেখাটি খুঁজে সেখানে জোর করে ক্লিক করবে
+                await page.evaluate("""
+                    (function() {
+                        let elements = document.querySelectorAll('div, span, a');
+                        for (let el of elements) {
+                            if (el.innerText && el.innerText.trim().toLowerCase() === 'account') {
+                                let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
+                                el.dispatchEvent(event);
+                                return true;
+                            }
+                        }
+                        return false;
+                    })();
+                """)
+                await page.wait_for_timeout(4000) # অ্যাকাউন্ট পেজ লোড হওয়ার অপেক্ষা
             except:
                 pass
 
@@ -110,7 +125,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             uid_val = "Unknown"
             balance = "0.00"
 
-            for _ in range(15): 
+            for _ in range(10): 
                 page_text = await page.inner_text("body")
                 
                 if "Wrong account or password" in page_text or "Wrong signature" in page_text:
@@ -162,7 +177,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             state["balance"] = balance
             masked_phone = f"***{phone[-4:]}"
             
-            # 💡 ৯. ড্যাশবোর্ড মেসেজ
+            # 💡 ৯. ড্যাশবোর্ড মেসেজ (১০০% শেষে সরাসরি এটি আসবে)
             dashboard_msg = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
