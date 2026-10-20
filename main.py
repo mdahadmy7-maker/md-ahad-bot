@@ -43,26 +43,18 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
         try:
             # ১. ওয়েবসাইটে ঢোকা
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            
-            # ফর্ম লোড হওয়ার জন্য অপেক্ষা করা
             await page.wait_for_timeout(5000) 
 
-            # ২. ফোন নাম্বার বসানো (স্ক্রিনশটের লেখা দিয়ে)
+            # ২. নাম্বার ও পাসওয়ার্ড বসানো
             try:
                 phone_input = page.get_by_placeholder("Please enter the phone number")
                 await phone_input.click(timeout=10000)
                 await page.keyboard.type(login_phone, delay=50)
                 await page.wait_for_timeout(500)
-            except:
-                pass
-
-            # ৩. পাসওয়ার্ড বসানো (সবচেয়ে নিশ্চিত পদ্ধতি: সরাসরি ইনপুট টাইপ 'password' দিয়ে খোঁজা)
-            try:
+                
                 pass_input = page.locator('input[type="password"]').first
                 await pass_input.click(timeout=10000)
-                await pass_input.fill(password) # সরাসরি ভ্যালু বসানো
-                
-                # Vue.js কে বোঝানোর জন্য ইভেন্ট ট্রিগার করা
+                await pass_input.fill(password)
                 await page.evaluate(f"""
                     let passInput = document.querySelector('input[type="password"]');
                     if (passInput) {{
@@ -72,57 +64,77 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                     }}
                 """)
                 await page.wait_for_timeout(1000)
-            except Exception as e:
-                logger.error(f"Password fill error: {e}")
+            except:
+                pass
 
-            # ৪. লগইন বাটনে ক্লিক
+            # ৩. লগইন বাটনে ক্লিক
             try:
                 await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000)
             except:
                 await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
-            # 💡 ৫. ড্যাশবোর্ড লোড হওয়া বা এরর আসা পর্যন্ত অপেক্ষা (সর্বোচ্চ ৩০ সেকেন্ড)
+            await page.wait_for_timeout(4000) # লগইন প্রসেস এবং পপ-আপ আসার জন্য অপেক্ষা
+
+            # 💡 ৪. পপ-আপ আসলে Confirm বাটনে ক্লিক করা
+            try:
+                confirm_btn = page.locator('text="Confirm"').last
+                if await confirm_btn.is_visible(timeout=3000):
+                    await confirm_btn.click()
+                    await page.wait_for_timeout(2000)
+            except:
+                pass # পপ-আপ না থাকলে স্কিপ করবে
+
+            # 💡 ৫. নিচের ডান কোণে থাকা Account বাটনে ক্লিক করা
+            try:
+                account_btn = page.locator('text="Account"').last
+                if await account_btn.is_visible(timeout=3000):
+                    await account_btn.click()
+                    await page.wait_for_timeout(3000) # ড্যাশবোর্ড লোড হওয়ার জন্য অপেক্ষা
+            except:
+                pass
+
+            # ৬. ড্যাশবোর্ড থেকে UID এবং Balance খোঁজা
             login_status = "unknown"
-            for _ in range(30): 
-                await page.wait_for_timeout(1000)
+            uid_val = "Unknown"
+            balance = "0.00"
+
+            for _ in range(15): 
                 page_text = await page.inner_text("body")
                 
                 if "Wrong account or password" in page_text or "Wrong signature" in page_text:
                     login_status = "failed"
                     break
-                if "UID" in page_text or "Total balance" in page_text:
+                    
+                uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
+                balance_match = re.search(r'Total balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
+                
+                if uid_match:
+                    uid_val = uid_match.group(1)
+                    if balance_match:
+                        balance = balance_match.group(1)
                     login_status = "success"
                     break
+                    
+                await page.wait_for_timeout(1000)
 
             # লোডিং মেসেজ ডিলিট করা
             if loading_msg_id:
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
 
-            # ৬. রেজাল্ট চেক
+            # ৭. রেজাল্ট চেক
             if login_status == "failed":
                 await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\n\nWrong account or password.", parse_mode="Markdown")
                 await browser.close()
                 return
                 
-            elif login_status == "unknown":
+            elif login_status == "unknown" or uid_val == "Unknown":
                 screenshot_path = f"error_{uid}.png"
                 await page.screenshot(path=screenshot_path)
                 with open(screenshot_path, "rb") as photo:
-                    await ctx.bot.send_photo(chat_id=uid, photo=photo, caption="⚠️ সার্ভার রেসপন্স দিতে দেরি করছে বা পাসওয়ার্ড বসানো যায়নি।")
+                    await ctx.bot.send_photo(chat_id=uid, photo=photo, caption="⚠️ লগইন হয়েছে কিনা বা UID পাওয়া যায়নি।")
                 await browser.close()
                 return
-
-            # ৭. সফল লগইন হলে UID এবং Balance বের করা
-            page_text = await page.inner_text("body")
-            uid_val = "Unknown"
-            balance = "0.00"
-            
-            uid_match = re.search(r'UID\s*\|\s*(\d+)', page_text, re.IGNORECASE)
-            if uid_match: uid_val = uid_match.group(1)
-                
-            balance_match = re.search(r'Total balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
-            if balance_match: balance = balance_match.group(1)
 
             # অ্যাকাউন্ট সেভ করা
             account_info = {"phone": phone, "password": password, "uid": uid_val, "balance": balance}
@@ -138,7 +150,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             state["balance"] = balance
             masked_phone = f"***{phone[-4:]}"
             
-            # 💡 ৮. ড্যাশবোর্ড মেসেজ (১০০% শেষে সরাসরি এটি আসবে)
+            # 💡 ৮. ড্যাশবোর্ড মেসেজ
             dashboard_msg = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -232,7 +244,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         try: await update.message.delete()
         except: pass
         
-        # 💡 ১% থেকে ১০০% লোডিং (যা ৩-৪ সেকেন্ডে শেষ হবে)
+        # 💡 ১০০% লোডিং (যা আপনার পছন্দমতো আস্তে আস্তে এগোবে)
         loading_msg = await update.message.reply_text("🔄 **CONNECTING...** [░░░░░░░░░░] 0%", parse_mode="Markdown")
         for i in range(1, 101):
             if i % 10 == 0: 
@@ -240,9 +252,8 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 empty = "░" * (10 - (i//10))
                 try: await loading_msg.edit_text(f"🔄 **CONNECTING...** [{filled}{empty}] {i}%", parse_mode="Markdown")
                 except: pass
-            await asyncio.sleep(0.04) 
+            await asyncio.sleep(0.05) 
         
-        # লোডিং ১০০% হওয়া মাত্রই লগইন ফাংশন কল হবে
         await playwright_login(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"])
         return
 
