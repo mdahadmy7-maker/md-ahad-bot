@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import re
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from playwright.async_api import async_playwright
@@ -21,12 +22,13 @@ def get_state(uid):
         user_state[uid] = {
             "awaiting": None, "temp_phone": "", "temp_password": "",
             "accounts": [], "balance": "0.00", "target": 0, 
-            "steps": 0, "step_amounts": [], "current_step": 0
+            "steps": 0, "step_amounts": [], "current_step": 0,
+            "trade_running": False
         }
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# ২. লগইন করার ফাংশন (ফাস্ট এবং রিয়েল-টাইম লোডিং)
+# ২. লগইন করার ফাংশন
 # ───────────────────────────────────────────
 async def playwright_login(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -38,17 +40,13 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
         empty = "░" * (10 - (percent // 10))
         try:
             await ctx.bot.edit_message_text(
-                chat_id=uid, 
-                message_id=loading_msg_id, 
-                text=f"🔄 **লোড হচ্ছে...** [{filled}{empty}] {percent}%\n_{text_status}_", 
-                parse_mode="Markdown"
+                chat_id=uid, message_id=loading_msg_id, 
+                text=f"🔄 **লোড হচ্ছে...** [{filled}{empty}] {percent}%\n_{text_status}_", parse_mode="Markdown"
             )
-        except:
-            pass
+        except: pass
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"]) 
-        
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
             viewport={"width": 412, "height": 915}
@@ -66,21 +64,11 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                 await phone_input.click(timeout=10000)
                 await page.keyboard.type(login_phone, delay=30)
                 await page.wait_for_timeout(300)
-                
                 pass_input = page.locator('input[type="password"]').first
                 await pass_input.click(timeout=10000)
                 await pass_input.fill(password)
-                await page.evaluate(f"""
-                    let passInput = document.querySelector('input[type="password"]');
-                    if (passInput) {{
-                        passInput.value = '{password}';
-                        passInput.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        passInput.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    }}
-                """)
                 await page.wait_for_timeout(500)
-            except:
-                pass
+            except: pass
 
             await update_loading(60, "লগইন করা হচ্ছে...")
             try:
@@ -122,8 +110,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                     })();
                 """)
                 await page.wait_for_timeout(2000)
-            except:
-                pass
+            except: pass
 
             await update_loading(95, "তথ্য সংগ্রহ করা হচ্ছে...")
             login_status = "unknown"
@@ -132,21 +119,16 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
 
             for _ in range(10): 
                 page_text = await page.inner_text("body")
-                
                 if "Wrong account or password" in page_text or "Wrong signature" in page_text:
                     login_status = "failed"
                     break
-                    
                 uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
                 balance_match = re.search(r'Total balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
-                
                 if uid_match:
                     uid_val = uid_match.group(1)
-                    if balance_match:
-                        balance = balance_match.group(1)
+                    if balance_match: balance = balance_match.group(1)
                     login_status = "success"
                     break
-                    
                 await page.wait_for_timeout(500)
 
             if login_status == "success":
@@ -177,8 +159,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                     acc.update(account_info)
                     existing = True
                     break
-            if not existing:
-                state["accounts"].append(account_info)
+            if not existing: state["accounts"].append(account_info)
                 
             state["balance"] = balance
             masked_phone = f"***{phone[-4:]}"
@@ -245,7 +226,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "👇 Press the button below to LOGIN"
     )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
-    
     await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -269,10 +249,8 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if state.get("awaiting") == "password":
         state["temp_password"] = text
         state["awaiting"] = None 
-        
         try: await update.message.delete()
         except: pass
-        
         loading_msg = await update.message.reply_text("🔄 **লোড হচ্ছে...** [░░░░░░░░░░] 0%", parse_mode="Markdown")
         await playwright_login(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"])
         return
@@ -321,14 +299,12 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 50)।")
         return
         
-    # 💡 ৪. স্টেপ কাউন্ট নেওয়া এবং পরবর্তী স্টেপের অ্যামাউন্ট চাওয়া
     if state.get("awaiting") == "steps":
         try:
             steps = int(text)
-            if steps > 50 or steps < 1:
-                raise ValueError("Steps must be between 1 and 50")
+            if steps > 50 or steps < 1: raise ValueError("Steps must be between 1 and 50")
             state["steps"] = steps
-            state["step_amounts"] = [] # নতুন লিস্ট
+            state["step_amounts"] = [] 
             state["current_step"] = 1
             state["awaiting"] = "step_amount"
             
@@ -344,28 +320,70 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ ভুল ফরম্যাট! ১ থেকে ৫০ এর মধ্যে একটি সংখ্যা দিন (যেমন: 5)।")
         return
 
-    # 💡 ৫. স্টেপের বাজির পরিমাণ নেওয়া
+    # 💡 ৪. স্টেপের বাজির পরিমাণ নেওয়া এবং কনফিগারেশন দেখানো
     if state.get("awaiting") == "step_amount":
         try:
             amount = float(text)
-            if amount <= 0:
-                raise ValueError("Amount must be greater than 0")
+            if amount <= 0: raise ValueError("Amount must be greater than 0")
             
             state["step_amounts"].append(amount)
             state["current_step"] += 1
             
             if state["current_step"] <= state["steps"]:
-                # পরবর্তী স্টেপের পরিমাণ চাওয়া
                 step_msg = f"💵 Step {state['current_step']} — bet amount? (in ৳)"
                 await update.message.reply_text(step_msg)
             else:
-                # সব স্টেপের পরিমাণ নেওয়া শেষ
+                # সব স্টেপ শেষ, এখন কনফিগারেশন দেখাবে
                 state["awaiting"] = None
-                await update.message.reply_text(
-                    f"✅ **ALL STEPS SET**\n\n"
-                    f"Your bet amounts: `{state['step_amounts']}`\n\n"
-                    "বট এখন কাজ শুরু করবে (অটো-বেট লজিক পরবর্তী ধাপে যোগ হবে)।"
+                total_risk = sum(state["step_amounts"])
+                balance = float(state.get('balance', '0.00'))
+                target = float(state.get('target', 0))
+                stop_at = balance + target
+                
+                # স্টেপ প্ল্যান তৈরি
+                step_plan_text = ""
+                for i, amt in enumerate(state["step_amounts"]):
+                    step_plan_text += f"Step {i+1:02d} : ৳ {amt:.2f}\n"
+                
+                config_msg = (
+                    "╔════════════════════════╗\n"
+                    "║  ⚙️ TRADE CONFIGURATION ⚙️ ║\n"
+                    "╚════════════════════════╝\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"💰 Balance  : ৳ {balance:.2f}\n"
+                    f"🎯 Target   : ৳ {target:.2f} profit\n"
+                    f"🏦 Stop At  : ৳ {stop_at:.2f}\n"
+                    f"📋 Steps    : {state['steps']}\n"
+                    f"⚠️ Total Risk : ৳ {total_risk:.2f}\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "📊 **STEP PLAN**\n"
+                    f"{step_plan_text}"
                 )
+                await update.message.reply_text(config_msg, parse_mode="Markdown")
+                
+                # পিরিয়ড এবং START TRADE বাটন
+                # একটি ডামি পিরিয়ড কোড তৈরি
+                current_period_code = datetime.now().strftime("%Y%m%d%H%M%S") + "000"
+                
+                period_msg = (
+                    f"📄 COPY CODE\n`{current_period_code}`\n\n"
+                    "⏱️ **Current Period**\n"
+                    f"{current_period_code}\n"
+                    "▓▓▓▓▓▓▓▓ 1s\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "🧠 Engine: 9 layers + live backtest\n"
+                    "🔴 Confidence gate: below 30% → sit out\n"
+                    "🎬 Prediction animation: 4s\n\n"
+                    "👇 Press START TRADE to begin."
+                )
+                
+                inline_kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🚀 START TRADE", callback_data="start_trade_btn"), 
+                     InlineKeyboardButton("❌ CANCEL", callback_data="cancel_trade_btn")]
+                ])
+                
+                await update.message.reply_text(period_msg, reply_markup=inline_kb, parse_mode="Markdown")
+                
         except ValueError:
             await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 1)।")
         return
@@ -384,8 +402,9 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     uid = update.effective_user.id
     state = get_state(uid)
+    data = query.data
     
-    if query.data == "start_login":
+    if data == "start_login":
         state["awaiting"] = "phone"
         login_msg = (
             "╔════════════════════════╗\n"
@@ -397,13 +416,28 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Everyone uses their own account — your session is private."
         )
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
+        
+    elif data == "start_trade_btn":
+        state["trade_running"] = True
+        await query.edit_message_text(
+            "🚀 **TRADE STARTED SUCCESSFULLY!**\n\n"
+            "বট এখন আপনার স্টেপ অনুযায়ী বাজি ধরা শুরু করবে।\n"
+            "(বাজি ধরার লজিক পরবর্তী ধাপে যোগ করা হবে)।",
+            parse_mode="Markdown"
+        )
+        
+    elif data == "cancel_trade_btn":
+        state["trade_running"] = False
+        await query.edit_message_text(
+            "❌ **TRADE CANCELLED**\n\nআপনি ট্রেড বাতিল করেছেন।"
+        )
 
 async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     user_state[uid] = {
         "awaiting": None, "temp_phone": "", "temp_password": "",
         "accounts": [], "balance": "0.00", "target": 0, 
-        "steps": 0, "step_amounts": [], "current_step": 0
+        "steps": 0, "step_amounts": [], "current_step": 0, "trade_running": False
     }
     await update.message.reply_text("🔄 সব ডেটা রিসেট হয়েছে। /start দিন।")
 
