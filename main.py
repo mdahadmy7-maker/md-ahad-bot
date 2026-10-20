@@ -25,7 +25,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# ২. লগইন করার ফাংশন
+# ২. লগইন করার ফাংশন (পপ-আপ হ্যান্ডলিং সহ)
 # ───────────────────────────────────────────
 async def playwright_login(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -73,41 +73,35 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             except:
                 await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
-            # 💡 ৪. পপ-আপ আসার জন্য অপেক্ষা এবং Confirm বাটনে ক্লিক (জাভাস্ক্রিপ্ট দিয়ে জোর করে)
-            await page.wait_for_timeout(4000)
-            try:
-                # এই জাভাস্ক্রিপ্ট কোডটি পেজের সব টেক্সট স্ক্যান করে Confirm লেখা পেলেই ক্লিক করবে
-                await page.evaluate("""
-                    (function() {
-                        let elements = document.querySelectorAll('button, div, span, a');
-                        for (let el of elements) {
-                            if (el.innerText && el.innerText.trim().toLowerCase() === 'confirm') {
-                                el.click();
-                                return true;
-                            }
-                        }
-                        return false;
-                    })();
-                """)
-                await page.wait_for_timeout(3000) # পপ-আপ বন্ধ হওয়ার অপেক্ষা
-            except:
-                pass
+            # 💡 ৪. পপ-আপ হ্যান্ডলিং (Confirm এবং Receive)
+            # লগইন হওয়ার পর পরপর কয়েকটি পপ-আপ আসতে পারে, তাই আমরা লুপ ব্যবহার করছি
+            for i in range(4):
+                await page.wait_for_timeout(2000) # পপ-আপ লোড হওয়ার অপেক্ষা
+                
+                # ক) Confirm বাটনে ক্লিক
+                try:
+                    confirm_btn = page.locator('text="Confirm"').first
+                    if await confirm_btn.is_visible(timeout=2000):
+                        await confirm_btn.click()
+                        await page.wait_for_timeout(1000)
+                except:
+                    pass
 
-            # 💡 ৫. Account বাটনে ক্লিক (জাভাস্ক্রিপ্ট দিয়ে জোর করে)
+                # খ) Receive বাটনে ক্লিক (আপনার ২য় ছবির মতো)
+                try:
+                    receive_btn = page.locator('text="Receive"').first
+                    if await receive_btn.is_visible(timeout=2000):
+                        await receive_btn.click()
+                        await page.wait_for_timeout(1000)
+                except:
+                    pass
+
+            # 💡 ৫. নিচের ডান কোণে থাকা 'Account' বাটনে ক্লিক করা
             try:
-                await page.evaluate("""
-                    (function() {
-                        let elements = document.querySelectorAll('div, span, a');
-                        for (let el of elements) {
-                            if (el.innerText && el.innerText.trim().toLowerCase() === 'account') {
-                                el.click();
-                                return true;
-                            }
-                        }
-                        return false;
-                    })();
-                """)
-                await page.wait_for_timeout(4000) # অ্যাকাউন্ট পেজ লোড হওয়ার অপেক্ষা
+                account_btn = page.locator('text="Account"').last
+                if await account_btn.is_visible(timeout=5000):
+                    await account_btn.click()
+                    await page.wait_for_timeout(3000) # অ্যাকাউন্ট পেজ লোড হওয়ার অপেক্ষা
             except:
                 pass
 
@@ -116,7 +110,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             uid_val = "Unknown"
             balance = "0.00"
 
-            for _ in range(10): 
+            for _ in range(15): 
                 page_text = await page.inner_text("body")
                 
                 if "Wrong account or password" in page_text or "Wrong signature" in page_text:
@@ -135,7 +129,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                     
                 await page.wait_for_timeout(1000)
 
-            # 💡 ৭. লোডিং মেসেজ ডিলিট করা (লগইন শেষ হওয়া মাত্রই মুছে যাবে)
+            # ৭. লোডিং মেসেজ ডিলিট করা
             if loading_msg_id:
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
@@ -168,7 +162,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             state["balance"] = balance
             masked_phone = f"***{phone[-4:]}"
             
-            # 💡 ৯. আপনার চাওয়া ড্যাশবোর্ড মেসেজ
+            # 💡 ৯. ড্যাশবোর্ড মেসেজ
             dashboard_msg = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -270,7 +264,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 empty = "░" * (10 - (i//10))
                 try: await loading_msg.edit_text(f"🔄 **CONNECTING...** [{filled}{empty}] {i}%", parse_mode="Markdown")
                 except: pass
-            await asyncio.sleep(0.03) # খুব দ্রুত লোডিং হবে
+            await asyncio.sleep(0.03) 
         
         await playwright_login(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"])
         return
