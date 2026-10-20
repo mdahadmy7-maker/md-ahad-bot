@@ -52,6 +52,7 @@ async def api_login(uid, ctx, loading_msg_id, phone, password):
         "user-agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Safari/537.36"
     }
 
+    # 💡 আপনার নতুন পাওয়া ডেটা এখানে বসানো হলো
     login_payload = {
         "username": phone,
         "pwd": password,
@@ -65,13 +66,12 @@ async def api_login(uid, ctx, loading_msg_id, phone, password):
         "fbp": "",
         "adId": "",
         "language": 0,
-        "random": "f6dd624a23b343ee9d7e53fd01b8cc66",
-        "signature": "F9FF4A78B3914639BB25FCD184E650C8", # আপনার প্রথম সফল সিগনেচার
-        "timestamp": 1792437970 # আপনার প্রথম সফল টাইমস্ট্যাম্প
+        "random": "9110ceba265941dba15ebc3196f735d0", # নতুন random
+        "signature": "6672C0E9F437A8C401819857EE702F49", # নতুন সিগনেচার
+        "timestamp": 1792481515 # নতুন টাইমস্ট্যাম্প
     }
 
     try:
-        # --- ধাপ ১: লগইন রিকোয়েস্ট ---
         response = requests.post(LOGIN_URL, json=login_payload, headers=headers, timeout=15)
         data = response.json()
         
@@ -84,11 +84,11 @@ async def api_login(uid, ctx, loading_msg_id, phone, password):
             await ctx.bot.send_message(chat_id=uid, text=f"❌ LOGIN FAILED ({phone})\n\n{err_msg}")
             return
 
-        # --- ধাপ ২: টোকেন নিয়ে ডেটা আনা ---
         user_data = data.get("data", {})
         token = user_data.get("token", "")
         
         headers["authorization"] = f"Bearer {token}"
+        # GetUserInfo এর জন্যও নতুন সিগনেচার দরকার হতে পারে, তবে আপাতত আগেরটাই রাখছি
         info_payload = {
             "language": 0,
             "random": "5f8cc6db4f79466498af393f4cefa024",
@@ -109,7 +109,6 @@ async def api_login(uid, ctx, loading_msg_id, phone, password):
         except Exception as e:
             logger.error(f"Info API error: {e}")
 
-        # ব্যাকআপ (যদি উপরেরটা ফেইল করে)
         try:
             payload_b64 = token.split('.')[1]
             payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
@@ -136,18 +135,14 @@ async def api_login(uid, ctx, loading_msg_id, phone, password):
         state["balance"] = balance
         masked_phone = f"***{phone[-4:]}"
         
-        # 💡 আপনার পছন্দের ড্যাশবোর্ড ডিজাইন
         dashboard_msg = (
             "╔════════════════════════╗\n"
             "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
             "╚════════════════════════╝\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"☎️ Phone Number\n"
-            f"{masked_phone}\n\n"
-            f"👤 Account UID\n"
-            f"{uid_val}\n\n"
-            f"💰 Account Balance\n"
-            f"৳ {balance}\n"
+            f"☎️ Phone Number\n{masked_phone}\n\n"
+            f"👤 Account UID\n{uid_val}\n\n"
+            f"💰 Account Balance\n৳ {balance}\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
             "🧠 Analysis Engine:  READY\n"
             "🚀 AutoTrade System: READY\n\n"
