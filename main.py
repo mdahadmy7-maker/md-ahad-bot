@@ -20,7 +20,8 @@ def get_state(uid):
     if uid not in user_state:
         user_state[uid] = {
             "awaiting": None, "temp_phone": "", "temp_password": "",
-            "accounts": [], "balance": "0.00", "target": 0, "steps": 0
+            "accounts": [], "balance": "0.00", "target": 0, 
+            "steps": 0, "step_amounts": [], "current_step": 0
         }
     return user_state[uid]
 
@@ -55,12 +56,10 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
         page = await context.new_page()
         
         try:
-            # ১. ওয়েবসাইটে ঢোকা (দ্রুত)
             await update_loading(20, "সাইটে ঢুকছে...")
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000)
 
-            # ২. নাম্বার ও পাসওয়ার্ড বসানো
             await update_loading(40, "লগইন তথ্য দেওয়া হচ্ছে...")
             try:
                 phone_input = page.get_by_placeholder("Please enter the phone number")
@@ -83,14 +82,12 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             except:
                 pass
 
-            # ৩. লগইন বাটনে ক্লিক
             await update_loading(60, "লগইন করা হচ্ছে...")
             try:
                 await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000)
             except:
                 await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
-            # 💡 ৪. পপ-আপ হ্যান্ডলিং (Confirm এবং Receive) - খুব দ্রুত লুপ
             await update_loading(80, "পপ-আপ বন্ধ করা হচ্ছে...")
             for _ in range(10):
                 clicked = await page.evaluate("""
@@ -107,12 +104,8 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                         return false;
                     })();
                 """)
-                if clicked:
-                    await page.wait_for_timeout(500)
-                else:
-                    await page.wait_for_timeout(500)
+                await page.wait_for_timeout(500)
 
-            # 💡 ৫. নিচের ডান কোণে থাকা 'Account' বাটনে ক্লিক করা
             await update_loading(90, "অ্যাকাউন্ট পেজে যাওয়া হচ্ছে...")
             try:
                 await page.evaluate("""
@@ -132,7 +125,6 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             except:
                 pass
 
-            # ৬. ড্যাশবোর্ড থেকে UID এবং Balance খোঁজা
             await update_loading(95, "তথ্য সংগ্রহ করা হচ্ছে...")
             login_status = "unknown"
             uid_val = "Unknown"
@@ -157,7 +149,6 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                     
                 await page.wait_for_timeout(500)
 
-            # 💡 ৭. লোডিং ১০০% করা এবং সাথে সাথে মেসেজটি ডিলিট করা
             if login_status == "success":
                 await update_loading(100, "সফলভাবে সম্পন্ন হয়েছে!")
                 await asyncio.sleep(0.3)
@@ -166,7 +157,6 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
 
-            # ৮. রেজাল্ট চেক
             if login_status == "failed":
                 await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\n\nWrong account or password.", parse_mode="Markdown")
                 await browser.close()
@@ -180,7 +170,6 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                 await browser.close()
                 return
 
-            # অ্যাকাউন্ট সেভ করা
             account_info = {"phone": phone, "password": password, "uid": uid_val, "balance": balance}
             existing = False
             for acc in state["accounts"]:
@@ -194,7 +183,6 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             state["balance"] = balance
             masked_phone = f"***{phone[-4:]}"
             
-            # 💡 ৯. ড্যাশবোর্ড মেসেজ (শুধু এটিই আসবে, কোনো এক্সট্রা মেসেজ নেই)
             dashboard_msg = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -333,14 +321,53 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 50)।")
         return
         
+    # 💡 ৪. স্টেপ কাউন্ট নেওয়া এবং পরবর্তী স্টেপের অ্যামাউন্ট চাওয়া
     if state.get("awaiting") == "steps":
         try:
             steps = int(text)
+            if steps > 50 or steps < 1:
+                raise ValueError("Steps must be between 1 and 50")
             state["steps"] = steps
-            state["awaiting"] = None
-            await update.message.reply_text(f"✅ STEP COUNT SET: {steps}\n\nবট এখন কাজ শুরু করবে।")
+            state["step_amounts"] = [] # নতুন লিস্ট
+            state["current_step"] = 1
+            state["awaiting"] = "step_amount"
+            
+            step_msg = (
+                "╔════════════════════════╗\n"
+                "║   💵 STEP AMOUNTS 💵   ║\n"
+                "╚════════════════════════╝\n\n"
+                f"You chose {steps} steps.\n\n"
+                f"💵 Step {state['current_step']} — bet amount? (in ৳)"
+            )
+            await update.message.reply_text(step_msg)
         except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট!")
+            await update.message.reply_text("❌ ভুল ফরম্যাট! ১ থেকে ৫০ এর মধ্যে একটি সংখ্যা দিন (যেমন: 5)।")
+        return
+
+    # 💡 ৫. স্টেপের বাজির পরিমাণ নেওয়া
+    if state.get("awaiting") == "step_amount":
+        try:
+            amount = float(text)
+            if amount <= 0:
+                raise ValueError("Amount must be greater than 0")
+            
+            state["step_amounts"].append(amount)
+            state["current_step"] += 1
+            
+            if state["current_step"] <= state["steps"]:
+                # পরবর্তী স্টেপের পরিমাণ চাওয়া
+                step_msg = f"💵 Step {state['current_step']} — bet amount? (in ৳)"
+                await update.message.reply_text(step_msg)
+            else:
+                # সব স্টেপের পরিমাণ নেওয়া শেষ
+                state["awaiting"] = None
+                await update.message.reply_text(
+                    f"✅ **ALL STEPS SET**\n\n"
+                    f"Your bet amounts: `{state['step_amounts']}`\n\n"
+                    "বট এখন কাজ শুরু করবে (অটো-বেট লজিক পরবর্তী ধাপে যোগ হবে)।"
+                )
+        except ValueError:
+            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 1)।")
         return
 
     if text == "🛑 STOP TRADE":
@@ -375,7 +402,8 @@ async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     user_state[uid] = {
         "awaiting": None, "temp_phone": "", "temp_password": "",
-        "accounts": [], "balance": "0.00", "target": 0, "steps": 0
+        "accounts": [], "balance": "0.00", "target": 0, 
+        "steps": 0, "step_amounts": [], "current_step": 0
     }
     await update.message.reply_text("🔄 সব ডেটা রিসেট হয়েছে। /start দিন।")
 
