@@ -25,7 +25,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# ২. লগইন করার ফাংশন (জাভাস্ক্রিপ্ট দিয়ে)
+# ২. লগইন করার ফাংশন (রিয়েল ক্লিক ও টাইপিং)
 # ───────────────────────────────────────────
 async def playwright_login(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -44,71 +44,68 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             # ১. ওয়েবসাইটে ঢোকা
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             
-            # ফর্ম লোড হওয়ার জন্য ৫ সেকেন্ড অপেক্ষা
+            # লোড হওয়ার জন্য অপেক্ষা করা
             await page.wait_for_timeout(5000) 
 
-            # ২. জাভাস্ক্রিপ্ট দিয়ে ইনপুট বক্সে তথ্য বসানো (সবচেয়ে নিশ্চিত পদ্ধতি)
-            js_fill = f"""
-            (function() {{
-                let inputs = document.querySelectorAll('input');
-                if (inputs.length >= 2) {{
-                    inputs[0].value = '{login_phone}';
-                    inputs[0].dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    inputs[0].dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    inputs[1].value = '{password}';
-                    inputs[1].dispatchEvent(new Event('input', {{ bubbles: true }}));
-                    inputs[1].dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    return true;
-                }}
-                return false;
-            }})();
-            """
-            filled = await page.evaluate(js_fill)
-            
-            # যদি জাভাস্ক্রিপ্টে না হয়, তবে প্লেরাইট দিয়ে চেষ্টা করবে
-            if not filled:
-                await page.locator('input').nth(0).fill(login_phone, timeout=10000)
-                await page.locator('input').nth(1).fill(password, timeout=10000)
-            
-            await page.wait_for_timeout(1000)
+            # ২. আসল মাউস ক্লিক এবং কীবোর্ড টাইপিং (যাতে 0000 না হয়ে আসল নাম্বার বসে)
+            try:
+                phone_input = page.locator('input[type="text"], input[type="tel"]').first
+                await phone_input.click(timeout=10000) # বক্সে ক্লিক
+                await page.keyboard.type(login_phone, delay=100) # মানুষের মতো টাইপ
+                await page.wait_for_timeout(1000)
+                
+                pass_input = page.locator('input[type="password"]').first
+                await pass_input.click(timeout=10000) # পাসওয়ার্ড বক্সে ক্লিক
+                await page.keyboard.type(password, delay=100) # পাসওয়ার্ড টাইপ
+                await page.wait_for_timeout(1000)
+            except Exception as e:
+                screenshot_path = f"error_{uid}.png"
+                await page.screenshot(path=screenshot_path)
+                if loading_msg_id:
+                    try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
+                    except: pass
+                with open(screenshot_path, "rb") as photo:
+                    await ctx.bot.send_photo(chat_id=uid, photo=photo, caption=f"⚠️ ইনপুট বক্সে ক্লিক বা টাইপ করতে সমস্যা হয়েছে।")
+                await browser.close()
+                return
 
-            # ৩. লগইন বাটনে ক্লিক (জাভাস্ক্রিপ্ট দিয়ে)
-            js_click = """
-            (function() {
-                let btns = document.querySelectorAll('button, div, span');
-                for (let i = 0; i < btns.length; i++) {
-                    let text = btns[i].innerText.toLowerCase();
-                    if (text.includes('log in') && !btns[i].disabled) {
-                        btns[i].click();
-                        return true;
-                    }
-                }
-                return false;
-            })();
-            """
-            await page.evaluate(js_click)
-
-            # ৪. রেসপন্সের জন্য অপেক্ষা (সর্বোচ্চ ১৫ সেকেন্ড)
-            for _ in range(15):
+            # ৩. লগইন বাটনে ক্লিক
+            await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=15000)
+            
+            # 💡 ৪. ড্যাশবোর্ড লোড হওয়া বা এরর আসা পর্যন্ত অপেক্ষা
+            login_status = "unknown"
+            for _ in range(20): # ২০ সেকেন্ড পর্যন্ত অপেক্ষা করবে
                 await page.wait_for_timeout(1000)
                 page_text = await page.inner_text("body")
-                if "Wrong account or password" in page_text or "UID" in page_text or "Total balance" in page_text:
+                
+                if "Wrong account or password" in page_text or "Wrong signature" in page_text:
+                    login_status = "failed"
+                    break
+                if "UID" in page_text or "Total balance" in page_text:
+                    login_status = "success"
                     break
 
-            # ৫. লোডিং মেসেজ ডিলিট করা
+            # 💡 ৫. ১০০% লোডিং শেষ হওয়া মাত্রই এই মেসেজটি ডিলিট হবে
             if loading_msg_id:
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
 
-            page_text = await page.inner_text("body")
-
-            # ভুল পাসওয়ার্ড চেক
-            if "Wrong account or password" in page_text:
+            # ৬. রেজাল্ট চেক
+            if login_status == "failed":
                 await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\n\nWrong account or password.", parse_mode="Markdown")
                 await browser.close()
                 return
                 
-            # UID এবং Balance খোঁজা
+            elif login_status == "unknown":
+                screenshot_path = f"error_{uid}.png"
+                await page.screenshot(path=screenshot_path)
+                with open(screenshot_path, "rb") as photo:
+                    await ctx.bot.send_photo(chat_id=uid, photo=photo, caption="⚠️ লগইন হয়েছে কিনা বোঝা যাচ্ছে না। সার্ভার স্লো হতে পারে।")
+                await browser.close()
+                return
+
+            # ৭. সফল লগইন হলে UID এবং Balance বের করা
+            page_text = await page.inner_text("body")
             uid_val = "Unknown"
             balance = "0.00"
             
@@ -117,15 +114,6 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                 
             balance_match = re.search(r'Total balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
             if balance_match: balance = balance_match.group(1)
-
-            # যদি UID না পাওয়া যায়, তবে এরর মেসেজ ও স্ক্রিনশট পাঠাবে
-            if uid_val == "Unknown":
-                 screenshot_path = f"error_{uid}.png"
-                 await page.screenshot(path=screenshot_path)
-                 with open(screenshot_path, "rb") as photo:
-                    await ctx.bot.send_photo(chat_id=uid, photo=photo, caption="⚠️ লগইন হয়েছে কিন্তু ড্যাশবোর্ড থেকে UID পাওয়া যায়নি।")
-                 await browser.close()
-                 return
 
             # অ্যাকাউন্ট সেভ করা
             account_info = {"phone": phone, "password": password, "uid": uid_val, "balance": balance}
@@ -141,7 +129,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             state["balance"] = balance
             masked_phone = f"***{phone[-4:]}"
             
-            # 💡 আপনার চাওয়া ড্যাশবোর্ড মেসেজ
+            # 💡 ৮. ড্যাশবোর্ড মেসেজ (১০০% লোডিং শেষে সরাসরি এটি আসবে)
             dashboard_msg = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -170,19 +158,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             if loading_msg_id:
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
-            
-            # এরর হলে স্ক্রিনশট পাঠাবে
-            screenshot_path = f"error_{uid}.png"
-            try: await page.screenshot(path=screenshot_path)
-            except: pass
-            
-            with open(screenshot_path, "rb") as photo:
-                await ctx.bot.send_photo(
-                    chat_id=uid, 
-                    photo=photo, 
-                    caption=f"⚠️ **সার্ভার সমস্যা:**\n`{str(e)[:150]}`", 
-                    parse_mode="Markdown"
-                )
+            await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **Browser Error:**\n`{str(e)[:150]}`", parse_mode="Markdown")
         finally:
             await browser.close()
 
@@ -197,6 +173,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ আপনার ৬টি অ্যাকাউন্ট ইতিমধ্যে সেভ করা আছে। নতুন করে শুরু করতে /reset দিন।")
         return
 
+    # 💡 আপনার প্রথম ছবির মতো হুবহু ওয়েলকাম মেসেজ
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -247,14 +224,13 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         try: await update.message.delete()
         except: pass
         
-        # 💡 শুধু ১০০% লোডিং মেসেজ
-        loading_msg = await update.message.reply_text("🔄 **লোড হচ্ছে...** [░░░░░░░░░░] ০%", parse_mode="Markdown")
+        # 💡 আস্তে আস্তে ১০০% হওয়া লোডিং অ্যানিমেশন
+        loading_msg = await update.message.reply_text("🔄 **CONNECTING...** [░░░░░░░░░░] 0%", parse_mode="Markdown")
         for i in range(1, 11):
-            await asyncio.sleep(0.1)
-            try: await loading_msg.edit_text(f"🔄 **লোড হচ্ছে...** [{'█'*i}{'░'*(10-i)}] {i*10}%", parse_mode="Markdown")
+            await asyncio.sleep(0.3) # ০.৩ সেকেন্ড করে অপেক্ষা করবে যাতে অ্যানিমেশন সুন্দর লাগে
+            try: await loading_msg.edit_text(f"🔄 **CONNECTING...** [{'█'*i}{'░'*(10-i)}] {i*10}%", parse_mode="Markdown")
             except: pass
         
-        # এরপর সরাসরি লগইন প্রসেস শুরু হবে
         await playwright_login(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"])
         return
 
