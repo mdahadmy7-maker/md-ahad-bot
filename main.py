@@ -320,7 +320,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ ভুল ফরম্যাট! ১ থেকে ৫০ এর মধ্যে একটি সংখ্যা দিন (যেমন: 5)।")
         return
 
-    # 💡 ৪. স্টেপের বাজির পরিমাণ নেওয়া এবং কনফিগারেশন দেখানো
+    # 💡 ৪. স্টেপের বাজির পরিমাণ নেওয়া এবং একসাথে পুরো কনফিগারেশন দেখানো
     if state.get("awaiting") == "step_amount":
         try:
             amount = float(text)
@@ -333,22 +333,23 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 step_msg = f"💵 Step {state['current_step']} — bet amount? (in ৳)"
                 await update.message.reply_text(step_msg)
             else:
-                # সব স্টেপ শেষ, এখন কনফিগারেশন দেখাবে
+                # সব স্টেপ শেষ, এখন পুরো কনফিগারেশন একসাথে দেখাবে
                 state["awaiting"] = None
                 total_risk = sum(state["step_amounts"])
                 balance = float(state.get('balance', '0.00'))
                 target = float(state.get('target', 0))
                 stop_at = balance + target
                 
-                # স্টেপ প্ল্যান তৈরি
                 step_plan_text = ""
                 for i, amt in enumerate(state["step_amounts"]):
                     step_plan_text += f"Step {i+1:02d} : ৳ {amt:.2f}\n"
                 
-                config_msg = (
-                    "╔════════════════════════╗\n"
-                    "║  ⚙️ TRADE CONFIGURATION ⚙️ ║\n"
-                    "╚════════════════════════╝\n"
+                # একটি ডামি পিরিয়ড কোড তৈরি
+                current_period_code = datetime.now().strftime("%Y%m%d%H%M%S") + "000"
+                
+                # 💡 আপনার দেওয়া হুবহু ফরম্যাটে সবকিছু একসাথে
+                combined_msg = (
+                    "⚙️ TRADE CONFIGURATION ⚙️\n"
                     "━━━━━━━━━━━━━━━━━━━━━━━\n"
                     f"💰 Balance  : ৳ {balance:.2f}\n"
                     f"🎯 Target   : ৳ {target:.2f} profit\n"
@@ -356,18 +357,12 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     f"📋 Steps    : {state['steps']}\n"
                     f"⚠️ Total Risk : ৳ {total_risk:.2f}\n"
                     "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    "📊 **STEP PLAN**\n"
+                    "📊 STEP PLAN\n"
                     f"{step_plan_text}"
-                )
-                await update.message.reply_text(config_msg, parse_mode="Markdown")
-                
-                # পিরিয়ড এবং START TRADE বাটন
-                # একটি ডামি পিরিয়ড কোড তৈরি
-                current_period_code = datetime.now().strftime("%Y%m%d%H%M%S") + "000"
-                
-                period_msg = (
-                    f"📄 COPY CODE\n`{current_period_code}`\n\n"
-                    "⏱️ **Current Period**\n"
+                    "\n"
+                    "📄 COPY CODE\n"
+                    f"`{current_period_code}`\n\n"
+                    "⏱️ Current Period\n"
                     f"{current_period_code}\n"
                     "▓▓▓▓▓▓▓▓ 1s\n"
                     "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -382,7 +377,8 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                      InlineKeyboardButton("❌ CANCEL", callback_data="cancel_trade_btn")]
                 ])
                 
-                await update.message.reply_text(period_msg, reply_markup=inline_kb, parse_mode="Markdown")
+                # parse_mode বাদ দেওয়া হয়েছে যাতে কোনো এরর না আসে
+                await update.message.reply_text(combined_msg, reply_markup=inline_kb)
                 
         except ValueError:
             await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 1)।")
@@ -419,6 +415,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         
     elif data == "start_trade_btn":
         state["trade_running"] = True
+        # এখানে আপনার পরবর্তী কাজ (অটো-বেট লজিক) যোগ হবে
         await query.edit_message_text(
             "🚀 **TRADE STARTED SUCCESSFULLY!**\n\n"
             "বট এখন আপনার স্টেপ অনুযায়ী বাজি ধরা শুরু করবে।\n"
