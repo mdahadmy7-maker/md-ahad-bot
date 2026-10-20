@@ -58,7 +58,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             # ১. ওয়েবসাইটে ঢোকা (দ্রুত)
             await update_loading(20, "সাইটে ঢুকছে...")
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(2000) # অপেক্ষা কমানো হয়েছে
+            await page.wait_for_timeout(2000)
 
             # ২. নাম্বার ও পাসওয়ার্ড বসানো
             await update_loading(40, "লগইন তথ্য দেওয়া হচ্ছে...")
@@ -92,8 +92,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             
             # 💡 ৪. পপ-আপ হ্যান্ডলিং (Confirm এবং Receive) - খুব দ্রুত লুপ
             await update_loading(80, "পপ-আপ বন্ধ করা হচ্ছে...")
-            for _ in range(10): # ১০ বার চেক করবে (মোট ৫ সেকেন্ড)
-                # জাভাস্ক্রিপ্ট দিয়ে যেকোনো পপ-আপের বাটন খোঁজা
+            for _ in range(10):
                 clicked = await page.evaluate("""
                     (function() {
                         let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
@@ -109,12 +108,12 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                     })();
                 """)
                 if clicked:
-                    await page.wait_for_timeout(500) # পপ-আপ বন্ধ হওয়ার পর ০.৫ সেকেন্ড অপেক্ষা
+                    await page.wait_for_timeout(500)
                 else:
-                    await page.wait_for_timeout(500) # না পেলে ০.৫ সেকেন্ড পর আবার চেক
+                    await page.wait_for_timeout(500)
 
             # 💡 ৫. নিচের ডান কোণে থাকা 'Account' বাটনে ক্লিক করা
-            await update_loading(90, "অ্যাকাউন্ট পেজে যাওয়া হচ্ছে...")
+            await update_loading(90, "অ্যাকাউন্ট পেজে যাওয়া হচ্ছে...")
             try:
                 await page.evaluate("""
                     (function() {
@@ -129,7 +128,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                         return false;
                     })();
                 """)
-                await page.wait_for_timeout(2000) # অপেক্ষা কমানো হয়েছে
+                await page.wait_for_timeout(2000)
             except:
                 pass
 
@@ -156,12 +155,12 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                     login_status = "success"
                     break
                     
-                await page.wait_for_timeout(500) # ০.৫ সেকেন্ড পর পর চেক
+                await page.wait_for_timeout(500)
 
             # 💡 ৭. লোডিং ১০০% করা এবং সাথে সাথে মেসেজটি ডিলিট করা
             if login_status == "success":
-                await update_loading(100, "সফলভাবে সম্পন্ন হয়েছে!")
-                await asyncio.sleep(0.3) # খুব দ্রুত ডিলিট হবে
+                await update_loading(100, "সফলভাবে সম্পন্ন হয়েছে!")
+                await asyncio.sleep(0.3)
 
             if loading_msg_id:
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
@@ -177,7 +176,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
                 screenshot_path = f"error_{uid}.png"
                 await page.screenshot(path=screenshot_path)
                 with open(screenshot_path, "rb") as photo:
-                    await ctx.bot.send_photo(chat_id=uid, photo=photo, caption="⚠️ UID পাওয়া যায়নি। স্ক্রিনশটে দেখুন বট কোথায় আটকে আছে।")
+                    await ctx.bot.send_photo(chat_id=uid, photo=photo, caption="⚠️ UID পাওয়া যায়নি। স্ক্রিনশটে দেখুন বট কোথায় আটকে আছে।")
                 await browser.close()
                 return
 
@@ -195,7 +194,7 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             state["balance"] = balance
             masked_phone = f"***{phone[-4:]}"
             
-            # 💡 ৯. ড্যাশবোর্ড মেসেজ
+            # 💡 ৯. ড্যাশবোর্ড মেসেজ (শুধু এটিই আসবে, কোনো এক্সট্রা মেসেজ নেই)
             dashboard_msg = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -216,9 +215,6 @@ async def playwright_login(uid, ctx, loading_msg_id, phone, password):
             ]
             markup = ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)
             await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=markup)
-            
-            if len(state["accounts"]) < 6:
-                await ctx.bot.send_message(chat_id=uid, text=f"✅ অ্যাকাউন্ট সেভ হয়েছে ({len(state['accounts'])}/6)। নতুন অ্যাকাউন্ট যোগ করতে /start দিন।")
 
         except Exception as e:
             if loading_msg_id:
@@ -289,7 +285,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         try: await update.message.delete()
         except: pass
         
-        # সরাসরি লোডিং শুরু হবে এবং ফাংশনে পাঠানো হবে
         loading_msg = await update.message.reply_text("🔄 **লোড হচ্ছে...** [░░░░░░░░░░] 0%", parse_mode="Markdown")
         await playwright_login(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"])
         return
@@ -335,7 +330,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             state["awaiting"] = "steps"
             await update.message.reply_text(target_set_msg)
         except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 50)।")
+            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 50)।")
         return
         
     if state.get("awaiting") == "steps":
