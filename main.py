@@ -9,7 +9,7 @@ from playwright.async_api import async_playwright
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন (এখানে টোকেন বসান)
 # ═══════════════════════════════════════════
-BOT_TOKEN = "8850232346:AAGhKvEHu8V2X5CONTsHi5tv3NyVc634XYk" 
+BOT_TOKEN = "এখানে_আপনার_টেলিগ্রাম_বটের_টোকেন_বসান" 
 SITE_URL = "https://www.hgnice.vip/#/login"
 WINGO_URL = "https://www.hgnice.vip/#/WinGo"
 
