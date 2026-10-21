@@ -7,6 +7,9 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKe
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from playwright.async_api import async_playwright
 
+# ═══════════════════════════════════════════
+# ১. কনফিগারেশন
+# ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 SITE_URL = "https://www.hgnice.vip/#/login"
 WINGO_URL = "https://www.hgnice.vip/#/WinGo"
@@ -27,6 +30,9 @@ def get_state(uid):
         }
     return user_state[uid]
 
+# ───────────────────────────────────────────
+# ২. লগইন এবং অটো-বেট ফাংশন
+# ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
     login_phone = phone[3:] if phone.startswith("880") else phone
@@ -53,7 +59,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         try:
             await update_loading(20, "সাইটে ঢুকছে...")
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(3000)
 
             await update_loading(40, "লগইন তথ্য দেওয়া হচ্ছে...")
             try:
@@ -202,8 +208,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
+                    # 💡 WinGo পেজে যাওয়া এবং অপেক্ষা করা
                     await page.goto(WINGO_URL, timeout=60000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(4000)
+                    await page.wait_for_timeout(8000) # অপেক্ষা ৪ থেকে ৮ সেকেন্ড করা হয়েছে
 
                     current_period = "Unknown"
                     try:
@@ -277,56 +284,60 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     await asyncio.sleep(1)
 
+                    # 💡 বেট বসানো এবং ক্লিক করার টাইমআউট বাড়ানো হয়েছে (১৫ সেকেন্ড)
                     try:
                         input_box = page.locator('input[type="number"], input[type="text"]').last
-                        await input_box.fill(str(bet_amount))
+                        await input_box.fill(str(bet_amount), timeout=15000)
                     except: pass
-
-                    if choice == "BIG":
-                        await page.locator('text="Big"').last.click(timeout=5000)
-                    else:
-                        await page.locator('text="Small"').last.click(timeout=5000)
-                    await page.wait_for_timeout(1500)
 
                     try:
-                        await page.locator('text="Confirm"').last.click(timeout=3000)
-                    except: pass
+                        if choice == "BIG":
+                            await page.locator('text="Big"').last.click(timeout=15000)
+                        else:
+                            await page.locator('text="Small"').last.click(timeout=15000)
+                        await page.wait_for_timeout(2000)
 
+                        await page.locator('text="Confirm"').last.click(timeout=10000)
+                    except Exception as e:
+                        logger.error(f"Click error: {e}")
+                        pass
+
+                    # 💡 আপনার দেওয়া হুবহু ফরম্যাট
                     analysis_report = (
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "🤖 **NEW TRADE PLACED**\n"
+                        "🤖 NEW TRADE PLACED\n"
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"⏱️ **Period**    : {current_period}\n"
-                        "⏱️ **Timer**     : 27s remaining\n"
-                        "📊 **Market**    : MIXED 📊\n"
-                        "🔬 **Stability** : 🔴 VOLATILE (0/100)\n"
-                        "🧨 **Hostility** : 🟡 UNSTABLE (60/100)\n"
-                        "💡 **Gut Score** : 25/100\n"
-                        "🧠 **Mind State**: 😌 Calm & focused\n"
+                        f"⏱️ Period    : {current_period}\n"
+                        "⏱️ Timer     : 27s remaining\n"
+                        "📊 Market       : MIXED 📊\n"
+                        "🔬 Stability    : 🔴 VOLATILE (0/100)\n"
+                        "🧨 Hostility    : 🟡 UNSTABLE (60/100)\n"
+                        "💡 Gut Score    : 25/100\n"
+                        "🧠 Mind State   : 😌 Calm & focused\n"
                         "╔══════════════════════════════════╗\n"
-                        "║ 🧠 **ANALYSIS REPORT**  ║\n"
+                        "║ 🧠 ANALYSIS REPORT  ║\n"
                         "╚══════════════════════════════════╝\n"
-                        "⚠️ _Only 10 draws available (need 40) — preliminary signal_\n"
+                        "⚠️ Only 10 draws available (need 40) — preliminary signal\n"
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "📊 **Confidence** : ████░░░░░░ 45%\n"
-                        "🎯 **Consensus**  :\n"
-                        "✅ **Gate**       : 🔴 VOLATILE (25/100)\n"
-                        "✓ _hostility 60/100 ✓ gut 25/100_\n"
-                        "⚡ **Analyzed in**: 217ms\n"
+                        "📊 Confidence : ████░░░░░░ 45%\n"
+                        "🎯 Consensus  :\n"
+                        "✅ Gate       : 🔴 VOLATILE (25/100)\n"
+                        "✓ hostility 60/100 ✓ gut 25/100\n"
+                        "⚡ Analyzed in: 217ms\n"
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"🔵 **PREDICTION : {choice}**\n\n"
-                        f"🚀 **Step**       : 🟢 Normal — Step {current_step_idx+1}\n"
-                        f"💵 **Amount**     : ৳ {bet_amount:.2f}\n"
-                        f"💰 **Balance**    : ৳ {current_bal:.2f}\n"
+                        f"🔵 PREDICTION : {choice} ❮❮❮\n\n"
+                        f"🚀 Step       : 🟢 Normal — Step {current_step_idx+1}\n"
+                        f"💵 Amount     : ৳ {bet_amount:.2f}\n"
+                        f"💰 Balance    : ৳ {current_bal:.2f}\n"
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "⏳ _Waiting for result..._"
+                        "⏳ Waiting for result..."
                     )
-                    await ctx.bot.send_message(chat_id=uid, text=analysis_report, parse_mode="Markdown")
+                    await ctx.bot.send_message(chat_id=uid, text=analysis_report)
 
                     await asyncio.sleep(32)
 
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
-                    await page.wait_for_timeout(2000)
+                    await page.wait_for_timeout(3000)
                     new_page_text = await page.inner_text("body")
                     new_balance_match = re.search(r'Total balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
                     
@@ -343,28 +354,29 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             p_l = bet_amount * 0.96
                             
                             win_rate = (state['wins'] / state['total_trades'] * 100)
+                            # 💡 আপনার দেওয়া WIN ড্যাশবোর্ড ফরম্যাট
                             result_msg = (
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "—\n"
-                                "🟢 **TRADE RESULT**\n"
+                                "🟢 TRADE RESULT\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "—\n"
-                                f"⏰ **Period** : {current_period}\n"
-                                f"🔵 **Side**   : {choice}\n"
-                                f"🚀 **Step**   : {current_step_idx+1}\n"
-                                f"💵 **Amount** : ৳ {bet_amount:.2f}\n\n"
-                                "📊 **Result** : WIN ✅\n"
-                                f"💹 **P/L**    : +৳ {p_l:.2f}\n"
-                                f"💰 **Balance**: ৳ {new_balance:.2f}\n"
+                                f"⏰ Period : {current_period}\n"
+                                f"🔵 Side : {choice} ❮❮❮\n"
+                                f"🚀 Step : {current_step_idx+1}\n"
+                                f"💵 Amount : ৳ {bet_amount:.2f}\n\n"
+                                "📊 Result : WIN ✅\n"
+                                f"💹 P/L : +৳ {p_l:.2f}\n"
+                                f"💰 Balance : ৳ {new_balance:.2f}\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "—\n"
-                                f"🏆 **Wins** : {state['wins']} 🔴 **Losses** : {state['losses']} 📈 **Rate** :\n"
+                                f"🏆 Wins : {state['wins']} 🔴 Losses : {state['losses']} 📈 Rate :\n"
                                 f"{win_rate:.1f}%\n"
-                                "🧠 **Mind State** : 😌 Calm & focused\n"
+                                "🧠 Mind State : 😌 Calm & focused\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "—\n"
-                                "➡️ **Next Step** : 1\n"
-                                "🟢 _Recovered! Back to Step 1._"
+                                "➡️ Next Step : 1\n"
+                                "🟢 Recovered! Back to Step 1."
                             )
                         else:
                             state["balance"] = new_balance
@@ -377,34 +389,34 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             win_rate = (state['wins'] / state['total_trades'] * 100) if state['total_trades'] > 0 else 0
                             
                             if current_step_idx < len(state['step_amounts']):
-                                next_step_txt = f"➡️ **Next Step** : {current_step_idx+1} (৳ {state['step_amounts'][current_step_idx]})"
+                                next_step_txt = f"➡️ Next Step : {current_step_idx+1} (৳ {state['step_amounts'][current_step_idx]})"
                             else:
-                                next_step_txt = "🛑 _No more steps left._"
+                                next_step_txt = "🛑 No more steps left."
 
                             result_msg = (
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "—\n"
-                                "🔴 **TRADE RESULT**\n"
+                                "🔴 TRADE RESULT\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "—\n"
-                                f"⏰ **Period** : {current_period}\n"
-                                f"🔵 **Side**   : {choice}\n"
-                                f"🚀 **Step**   : {current_step_idx}\n"
-                                f"💵 **Amount** : ৳ {bet_amount:.2f}\n\n"
-                                "📊 **Result** : LOSS ❌\n"
-                                f"💹 **P/L**    : -৳ {bet_amount:.2f}\n"
-                                f"💰 **Balance**: ৳ {new_balance:.2f}\n"
+                                f"⏰ Period : {current_period}\n"
+                                f"🔵 Side : {choice} ❮❮❮\n"
+                                f"🚀 Step : {current_step_idx}\n"
+                                f"💵 Amount : ৳ {bet_amount:.2f}\n\n"
+                                "📊 Result : LOSS ❌\n"
+                                f"💹 P/L : -৳ {bet_amount:.2f}\n"
+                                f"💰 Balance : ৳ {new_balance:.2f}\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "—\n"
-                                f"🏆 **Wins** : {state['wins']} 🔴 **Losses** : {state['losses']} 📈 **Rate** :\n"
+                                f"🏆 Wins : {state['wins']} 🔴 Losses : {state['losses']} 📈 Rate :\n"
                                 f"{win_rate:.1f}%\n"
-                                "🧠 **Mind State** : 😐 Focused\n"
+                                "🧠 Mind State : 😐 Focused\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "—\n"
                                 f"{next_step_txt}"
                             )
 
-                        await ctx.bot.send_message(chat_id=uid, text=result_msg, parse_mode="Markdown")
+                        await ctx.bot.send_message(chat_id=uid, text=result_msg)
 
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
