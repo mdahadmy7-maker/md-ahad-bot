@@ -10,9 +10,7 @@ from playwright.async_api import async_playwright
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন
 # ═══════════════════════════════════════════
-# টোকেনটি Render-এর Environment Variable থেকে নেওয়া হবে
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-
 SITE_URL = "https://www.hgnice.vip/#/login"
 WINGO_URL = "https://www.hgnice.vip/#/WinGo"
 
@@ -60,7 +58,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         page = await context.new_page()
         
         try:
-            # ---------------- ১. লগইন ----------------
             await update_loading(20, "সাইটে ঢুকছে...")
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000)
@@ -170,7 +167,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await browser.close()
                     return
 
-            # ---------------- ২. অটো-বেট লুপ ----------------
             initial_balance = float(balance)
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
@@ -184,7 +180,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     if current_bal >= target_balance:
                         profit = current_bal - initial_balance
                         win_rate = (state['wins'] / state['total_trades'] * 100) if state['total_trades'] > 0 else 0
-                        
                         target_summary = (
                             "━━━━━━━━━━━━━━━━━━━━━━━\n"
                             "🎯 **TARGET REACHED** 🎉\n"
@@ -397,4 +392,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             
                             win_rate = (state['wins'] / state['total_trades'] * 100) if state['total_trades'] > 0 else 0
                             
-                 
+                            if current_step_idx < len(state['step_amounts']):
+                                next_step_txt = f"➡️ **Next Step** : {current_step_idx+1} (৳ {state['step_amounts'][current_step_idx]})"
+   
