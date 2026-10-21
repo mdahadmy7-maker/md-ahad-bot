@@ -7,9 +7,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKe
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from playwright.async_api import async_playwright
 
-# ═══════════════════════════════════════════
-# ১. কনফিগারেশন
-# ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 SITE_URL = "https://www.hgnice.vip/#/login"
 WINGO_URL = "https://www.hgnice.vip/#/WinGo"
@@ -30,9 +27,6 @@ def get_state(uid):
         }
     return user_state[uid]
 
-# ───────────────────────────────────────────
-# ২. লগইন এবং অটো-বেট ফাংশন
-# ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
     login_phone = phone[3:] if phone.startswith("880") else phone
@@ -46,8 +40,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 chat_id=uid, message_id=loading_msg_id, 
                 text=f"🔄 **লোড হচ্ছে...** [{filled}{empty}] {percent}%\n_{text_status}_", parse_mode="Markdown"
             )
-        except: 
-            pass
+        except: pass
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"]) 
@@ -66,8 +59,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             try:
                 await page.get_by_placeholder("Please enter the phone number").fill(login_phone)
                 await page.locator('input[type="password"]').first.fill(password)
-            except: 
-                pass
+            except: pass
 
             await update_loading(60, "লগইন করা হচ্ছে...")
             try:
@@ -104,8 +96,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     })();
                 """)
                 await page.wait_for_timeout(2000)
-            except: 
-                pass
+            except: pass
 
             await update_loading(95, "তথ্য সংগ্রহ করা হচ্ছে...")
             login_status = "unknown"
@@ -132,10 +123,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await asyncio.sleep(0.3)
 
             if loading_msg_id:
-                try: 
-                    await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
-                except: 
-                    pass
+                try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
+                except: pass
 
             if login_status == "failed" or uid_val == "Unknown":
                 await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})")
@@ -222,16 +211,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         period_match = re.search(r'\b\d{17,20}\b', body_text)
                         if period_match: 
                             current_period = period_match.group(0)
-                    except: 
-                        pass
+                    except: pass
 
                     history = []
                     try:
                         hist_elements = await page.locator('text=/^Big$|^Small$/').all_inner_texts()
                         if hist_elements:
                             history = [h.strip() for h in hist_elements if h.strip() in ['Big', 'Small']][:5]
-                    except: 
-                        pass
+                    except: pass
 
                     choice = "SMALL"
                     if len(history) >= 5:
@@ -286,16 +273,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 text=f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[{bar}] {pct}%`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏳ _Running 9 layers + backtest..._",
                                 parse_mode="Markdown"
                             )
-                        except: 
-                            pass
+                        except: pass
                     
                     await asyncio.sleep(1)
 
                     try:
                         input_box = page.locator('input[type="number"], input[type="text"]').last
                         await input_box.fill(str(bet_amount))
-                    except: 
-                        pass
+                    except: pass
 
                     if choice == "BIG":
                         await page.locator('text="Big"').last.click(timeout=5000)
@@ -305,8 +290,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     try:
                         await page.locator('text="Confirm"').last.click(timeout=3000)
-                    except: 
-                        pass
+                    except: pass
 
                     analysis_report = (
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -394,4 +378,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             
                             if current_step_idx < len(state['step_amounts']):
                                 next_step_txt = f"➡️ **Next Step** : {current_step_idx+1} (৳ {state['step_amounts'][current_step_idx]})"
-   
+                            else:
+                                next_step_txt = "🛑 _No more steps left._"
+
+                            result_msg = (
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "—\n"
+                                "🔴 **TRADE RESULT**\n"
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "—\n"
+                              
