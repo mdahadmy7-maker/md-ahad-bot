@@ -1,15 +1,18 @@
 import asyncio
 import logging
 import re
+import os
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন (এখানে টোকেন বসান)
+# ১. কনফিগারেশন
 # ═══════════════════════════════════════════
-BOT_TOKEN = "এখানে_আপনার_টেলিগ্রাম_বটের_টোকেন_বসান" 
+# টোকেনটি Render-এর Environment Variable থেকে নেওয়া হবে
+BOT_TOKEN = os.environ.get("BOT_TOKEN") 
+
 SITE_URL = "https://www.hgnice.vip/#/login"
 WINGO_URL = "https://www.hgnice.vip/#/WinGo"
 
@@ -394,4 +397,4 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             
                             win_rate = (state['wins'] / state['total_trades'] * 100) if state['total_trades'] > 0 else 0
                             
-                            if current_step_idx < len
+                 
