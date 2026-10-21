@@ -37,15 +37,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     login_phone = phone[3:] if phone.startswith("880") else phone
     
     async def update_loading(percent, text_status=""):
-        if not loading_msg_id: 
-            return
+        if not loading_msg_id: return
         filled = "█" * (percent // 10)
         empty = "░" * (10 - (percent // 10))
         try:
             await ctx.bot.edit_message_text(
                 chat_id=uid, message_id=loading_msg_id, 
-                text=f"🔄 **লোড হচ্ছে...** [{filled}{empty}] {percent}%\n_{text_status}_", 
-                parse_mode="Markdown"
+                text=f"🔄 **লোড হচ্ছে...** [{filled}{empty}] {percent}%\n_{text_status}_", parse_mode="Markdown"
             )
         except: 
             pass
@@ -66,14 +64,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(40, "লগইন তথ্য দেওয়া হচ্ছে...")
             try:
-                phone_input = page.get_by_placeholder("Please enter the phone number")
-                await phone_input.click(timeout=10000)
-                await page.keyboard.type(login_phone, delay=30)
-                await page.wait_for_timeout(300)
-                pass_input = page.locator('input[type="password"]').first
-                await pass_input.click(timeout=10000)
-                await pass_input.fill(password)
-                await page.wait_for_timeout(500)
+                await page.get_by_placeholder("Please enter the phone number").fill(login_phone)
+                await page.locator('input[type="password"]').first.fill(password)
             except: 
                 pass
 
@@ -153,7 +145,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             state["balance"] = float(balance)
             masked_phone = f"***{phone[-4:]}"
             
-            # লগইন সফল ড্যাশবোর্ড
             dashboard_msg = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -170,7 +161,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]]
             await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
 
-            # START TRADE এর জন্য অপেক্ষা
             while not state.get("trade_running", False):
                 await asyncio.sleep(1)
                 if state.get("task") != asyncio.current_task():
@@ -188,7 +178,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 try:
                     current_bal = state["balance"]
                     
-                    # টার্গেট পূর্ণ হলে বাজি বন্ধ করে সামারি দেখাবে
                     if current_bal >= target_balance:
                         profit = current_bal - initial_balance
                         win_rate = (state['wins'] / state['total_trades'] * 100) if state['total_trades'] > 0 else 0
@@ -226,11 +215,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
-                    # WinGo পেজে যাওয়া
                     await page.goto(WINGO_URL, timeout=60000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(4000)
 
-                    # পিরিয়ড স্ক্র্যাপ
                     current_period = "Unknown"
                     try:
                         body_text = await page.inner_text("body")
@@ -240,7 +227,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     except: 
                         pass
 
-                    # হিস্ট্রি রিড
                     history = []
                     try:
                         hist_elements = await page.locator('text=/^Big$|^Small$/').all_inner_texts()
@@ -249,7 +235,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     except: 
                         pass
 
-                    # প্রেডিকশন লজিক
                     choice = "SMALL"
                     if len(history) >= 5:
                         if history.count('Big') == 5: 
@@ -269,7 +254,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         elif last_result == "Loss" and last_choice: 
                             choice = "BIG" if last_choice == "SMALL" else "SMALL"
 
-                    # ১. AUTO TRADE ACTIVE মেসেজ
                     step_plan_str = "┌────────────────────────────────┐\n"
                     for i, amt in enumerate(state['step_amounts']):
                         step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
@@ -293,7 +277,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     )
                     await ctx.bot.send_message(chat_id=uid, text=active_msg, parse_mode="Markdown")
 
-                    # ২. GENERATING PREDICTION অ্যানিমেশন
                     pred_msg = await ctx.bot.send_message(chat_id=uid, text="━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[░░░░░░░░░░░░] 0%`", parse_mode="Markdown")
                     
                     for pct in range(10, 101, 20):
@@ -310,7 +293,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     await asyncio.sleep(1)
 
-                    # বেট বসানো
                     try:
                         input_box = page.locator('input[type="number"], input[type="text"]').last
                         await input_box.fill(str(bet_amount))
@@ -328,7 +310,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     except: 
                         pass
 
-                    # ৩. NEW TRADE PLACED (Analysis Report)
                     analysis_report = (
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 **NEW TRADE PLACED**\n"
@@ -360,10 +341,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     )
                     await ctx.bot.send_message(chat_id=uid, text=analysis_report, parse_mode="Markdown")
 
-                    # রেজাল্টের জন্য অপেক্ষা
                     await asyncio.sleep(32)
 
-                    # Win/Loss চেক
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
                     await page.wait_for_timeout(2000)
                     new_page_text = await page.inner_text("body")
@@ -374,7 +353,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state['total_trades'] += 1
                         
                         if new_balance > current_bal:
-                            # WIN
                             state["balance"] = new_balance
                             state["wins"] += 1
                             last_result = "Win"
@@ -399,4 +377,21 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "—\n"
                                 f"🏆 **Wins** : {state['wins']} 🔴 **Losses** : {state['losses']} 📈 **Rate** :\n"
-          
+                                f"{win_rate:.1f}%\n"
+                                "🧠 **Mind State** : 😌 Calm & focused\n"
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "—\n"
+                                "➡️ **Next Step** : 1\n"
+                                "🟢 _Recovered! Back to Step 1._"
+                            )
+                        else:
+                            state["balance"] = new_balance
+                            state["losses"] += 1
+                            last_result = "Loss"
+                            last_choice = choice
+                            current_step_idx += 1
+                            p_l = -bet_amount
+                            
+                            win_rate = (state['wins'] / state['total_trades'] * 100) if state['total_trades'] > 0 else 0
+                            
+                            if current_step_idx < len
