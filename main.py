@@ -30,13 +30,13 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# ২. লগইন এবং অটো-বেট ফাংশন (আল্ট্রা ফাস্ট)
+# ২. লগইন এবং অটো-বেট ফাংশন (রোবাস্ট এবং ফাস্ট)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
     login_phone = phone[3:] if phone.startswith("880") else phone
     
-    # 💡 শুধু লোডিং বার, কোনো এক্সট্রা টেক্সট নেই
+    # শুধু লোডিং বার, কোনো এক্সট্রা টেক্সট নেই
     async def update_loading(percent):
         if not loading_msg_id: return
         filled = "█" * (percent // 10)
@@ -60,12 +60,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             
+            # 💡 ফর্ম লোড হওয়ার জন্য ১৫ সেকেন্ড পর্যন্ত অপেক্ষা করবে (ইন্টারনেট স্লো হলেও কাজ হবে)
             await update_loading(30)
             try:
-                # ফর্ম লোড হওয়ার জন্য সর্বোচ্চ ৫ সেকেন্ড অপেক্ষা
-                await page.wait_for_selector('input[type="text"], input[type="tel"]', timeout=5000) 
-                await page.get_by_placeholder("Please enter the phone number").fill(login_phone, timeout=3000)
-                await page.locator('input[type="password"]').first.fill(password, timeout=3000)
+                await page.wait_for_selector('input[type="text"], input[type="tel"]', timeout=15000) 
+                await page.get_by_placeholder("Please enter the phone number").fill(login_phone, timeout=5000)
+                await page.locator('input[type="password"]').first.fill(password, timeout=5000)
             except Exception as e:
                 logger.error(f"Form fill error: {e}")
                 screenshot_path = f"login_err_{uid}.png"
@@ -74,19 +74,19 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                     except: pass
                 with open(screenshot_path, "rb") as photo:
-                    await ctx.bot.send_photo(chat_id=uid, photo=photo, caption="⚠️ লগইন ফর্ম খুঁজে পাওয়া যায়নি।")
+                    await ctx.bot.send_photo(chat_id=uid, photo=photo, caption="⚠️ লগইন ফর্ম লোড হতে সমস্যা হচ্ছে। আবার চেষ্টা করুন।")
                 await browser.close()
                 return
 
             await update_loading(50)
             try:
-                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=3000)
+                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=5000)
             except:
-                await page.locator('button:has-text("Log in")').last.click(timeout=3000)
+                await page.locator('button:has-text("Log in")').last.click(timeout=5000)
             
             await update_loading(70)
-            # পপ-আপ বন্ধ করা (ফাস্ট লুপ)
-            for _ in range(5):
+            # পপ-আপ বন্ধ করা
+            for _ in range(8):
                 await page.evaluate("""
                     (function() {
                         let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
@@ -99,20 +99,28 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         }
                     })();
                 """)
-                await page.wait_for_timeout(200)
+                await page.wait_for_timeout(500)
 
-            # 💡 Account পেজে গিয়ে ইনস্ট্যান্ট ডেটা নেওয়া (কোনো wait_for_timeout নেই)
+            # 💡 Account পেজে গিয়ে ডেটা নেওয়া
             await update_loading(85)
             try:
-                await page.get_by_text("Account", exact=True).last.click(timeout=3000)
-            except: pass
+                # নেভিগেশন বারে Account এ ক্লিক
+                await page.get_by_text("Account", exact=True).last.click(timeout=5000)
+            except: 
+                pass
+
+            # 💡 লগইন সফল হলে পেজে "Total balance" বা "UID" লেখা আসবে। সেটি লোড হওয়া পর্যন্ত অপেক্ষা করবে।
+            try:
+                await page.wait_for_selector('text="Total balance"', timeout=10000)
+            except:
+                pass # যদি না পায়, তবুও নিচের লজিক চেক করবে
 
             await update_loading(95)
             login_status = "unknown"
             uid_val = "Unknown"
             balance = "0.00"
 
-            # 💡 পেজের টেক্সট সরাসরি রিড করা (১০ বার চেক করবে, প্রতি চেক ০.১ সেকেন্ড)
+            # পেজের টেক্সট সরাসরি রিড করা
             for _ in range(10): 
                 page_text = await page.evaluate("() => document.body.innerText")
                 
@@ -135,17 +143,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     login_status = "success"
                     break
                     
-                await asyncio.sleep(0.1) # খুব দ্রুত চেক করবে
+                await asyncio.sleep(0.5) # ০.৫ সেকেন্ড পর পর চেক করবে
 
             await update_loading(100)
-            await asyncio.sleep(0.1)
+            await asyncio.sleep(0.2)
 
             if loading_msg_id:
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
 
             if login_status == "failed" or uid_val == "Unknown":
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})")
+                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\nWrong account/password অথবা সার্ভার স্লো।")
                 await browser.close()
                 return
 
@@ -174,7 +182,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await browser.close()
                     return
 
-            # ---------------- ৩. অটো-বেট লুপ (সুপার ফাস্ট) ----------------
+            # ---------------- ৩. অটো-বেট লুপ ----------------
             initial_balance = float(balance)
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
@@ -221,16 +229,16 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
-                    # 💡 ৪. নেভিগেশন (Home -> Win Go) - অপেক্ষা ছাড়া
+                    # 💡 ৪. নেভিগেশন (Home -> Win Go)
                     try:
                         await page.get_by_text("Home", exact=True).last.click(timeout=3000)
-                        await page.wait_for_timeout(500) # খুব অল্প অপেক্ষা
+                        await page.wait_for_timeout(500)
                         
                         try:
                             await page.get_by_text("Win Go", exact=False).first.click(timeout=3000)
                         except:
                             await page.locator('text="Win Go"').last.click(timeout=3000)
-                        await page.wait_for_timeout(1500) # গেম লোড হওয়ার জন্য অল্প অপেক্ষা
+                        await page.wait_for_timeout(1500)
                     except Exception as e:
                         logger.error(f"Navigation error: {e}")
                         await page.goto("https://www.hgnice.vip/#/WinGo", wait_until="domcontentloaded")
@@ -358,7 +366,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     # 💡 ৯. রেজাল্ট চেক
                     await page.get_by_text("Account", exact=True).last.click(timeout=3000)
-                    await page.wait_for_timeout(500) # অপেক্ষা অনেক কমিয়ে আনা হয়েছে
+                    await page.wait_for_timeout(1000) 
                     
                     new_page_text = await page.evaluate("() => document.body.innerText")
                     new_balance_match = re.search(r'Total\s*balance\s*[^0-9]*([\d.]+)', new_page_text, re.IGNORECASE)
@@ -458,6 +466,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if len(state["accounts"]) >= 6:
         await update.message.reply_text("✅ আপনার ৬টি অ্যাকাউন্ট ইতিমধ্যে সেভ করা আছে। নতুন করে শুরু করতে /reset দিন।")
         return
+    
+    # 💡 ওয়েলকাম মেসেজের শেষে কোনো বাড়তি লাইন (\n) নেই
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
