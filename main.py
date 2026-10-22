@@ -14,7 +14,7 @@ from playwright.async_api import async_playwright
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 SITE_URL = "https://www.hgnice.vip/#/login"
-WINGO_URL = "https://www.hgnice.vip/#/WinGo"
+HOME_URL = "https://www.hgnice.vip/#/"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -34,7 +34,36 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# 💡 ২. API থেকে রেজাল্ট ও প্রেডিকশন বের করার ফাংশন
+# 💡 ২. পপআপ ব্লকার (Confirm বাটনে জোরালো ক্লিক)
+# ───────────────────────────────────────────
+async def kill_popups(page):
+    for _ in range(3):
+        try:
+            confirm_btn = page.locator('button:has-text("Confirm"), div:has-text("Confirm"), span:has-text("Confirm"), button:has-text("OK")').last
+            if await confirm_btn.is_visible(timeout=1000):
+                await confirm_btn.click(force=True, timeout=2000)
+                await page.wait_for_timeout(1000)
+            else:
+                clicked = await page.evaluate("""
+                    (function() {
+                        let els = document.querySelectorAll('button, div, span, a');
+                        for (let el of els) {
+                            let text = (el.innerText || el.textContent || '').trim().toLowerCase();
+                            if (text === 'confirm' || text === 'ok' || text === 'close') {
+                                el.click(); return true;
+                            }
+                        }
+                        return false;
+                    })();
+                """)
+                if clicked:
+                    await page.wait_for_timeout(1000)
+                else:
+                    break
+        except: pass
+
+# ───────────────────────────────────────────
+# 💡 ৩. API থেকে রেজাল্ট ও প্রেডিকশন বের করার ফাংশন
 # ───────────────────────────────────────────
 def get_history_and_prediction():
     try:
@@ -77,7 +106,7 @@ def get_history_and_prediction():
         return "SMALL", "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (ফাস্ট ও স্মার্ট ওয়েট)
+# ৪. লগইন এবং অটো-বেট ফাংশন
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -106,37 +135,31 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(2000) # অপেক্ষা কমানো হয়েছে
+            await page.wait_for_timeout(2000)
 
             await update_loading(30)
             try:
-                await page.wait_for_selector('input[type="text"]', timeout=10000)
-                await page.locator('input[type="text"]').first.fill(login_phone)
-                await page.locator('input[type="password"]').first.fill(password)
+                # মানুষের মতো টাইপিং যাতে সাইট রিয়েল ইউজার ভাবে
+                await page.locator('input[placeholder="Please enter the phone number"]').click()
+                await page.keyboard.type(login_phone, delay=50)
+                await page.wait_for_timeout(300)
+                await page.locator('input[type="password"]').first.click()
+                await page.keyboard.type(password, delay=50)
             except: pass
 
             await update_loading(50)
             try:
-                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=5000)
+                login_btn = page.locator('button:has-text("Log in")').last
+                await login_btn.scroll_into_view_if_needed(timeout=5000)
+                await login_btn.click(force=True, timeout=5000)
             except:
-                await page.locator('button:has-text("Log in")').last.click(timeout=5000)
+                try:
+                    await page.get_by_text("Log in", exact=True).last.click(force=True, timeout=5000)
+                except: pass
             
             await update_loading(70)
-            # লগইনের পর পপআপ ক্লোজ
-            for _ in range(5):
-                await page.evaluate("""
-                    (function() {
-                        let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
-                        for (let el of elements) {
-                            let text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
-                            if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok') {
-                                let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
-                                el.dispatchEvent(event);
-                            }
-                        }
-                    })();
-                """)
-                await page.wait_for_timeout(300)
+            await page.wait_for_timeout(4000) # লগইন প্রসেস হওয়ার জন্য অপেক্ষা
+            await kill_popups(page)
 
             await update_loading(85)
             # Account পেজে গিয়ে ডেটা নেওয়া
@@ -161,7 +184,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             for _ in range(10): 
                 page_text = await page.inner_text("body")
-                if "Wrong account or password" in page_text:
+                if "Wrong account or password" in page_text or "Error: 147" in page_text:
                     login_status = "failed"
                     break
                 
@@ -184,7 +207,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
 
             if login_status == "failed" or uid_val == "Unknown":
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})")
+                ss_path = f"loginfail_{uid}.png"
+                await page.screenshot(path=ss_path)
+                await ctx.bot.send_photo(chat_id=uid, photo=open(ss_path, 'rb'), caption=f"❌ **LOGIN FAILED ({phone})**\n\nসঠিক নাম্বার/পাসওয়ার্ড দিন অথবা স্ক্রিনশটে দেখুন কী সমস্যা।")
                 await browser.close()
                 return
 
@@ -255,48 +280,34 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 WinGo পেজে যাওয়া (ফাস্ট লোড)
-                    await page.goto(WINGO_URL, timeout=60000, wait_until="domcontentloaded")
+                    # 💡 WinGo তে যাওয়ার সঠিক পথ (Home -> Lottery -> Win Go)
+                    await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
+                    await page.wait_for_timeout(2000) 
                     
-                    # স্ক্রিনে ক্লিক করে কোনো পপআপ থাকলে বন্ধ করা
-                    await page.mouse.click(20, 20)
-                    await page.wait_for_timeout(1000) # ১ সেকেন্ড অপেক্ষা
+                    # ১. পপআপ বন্ধ করা
+                    await kill_popups(page)
 
-                    # 💡 Win Go কার্ডে ক্লিক করা (সবচেয়ে শক্তিশালী লজিক)
+                    # ২. Lottery তে ক্লিক করা
                     try:
-                        # Win Go টেক্সটটি খোঁজা (যেকোনো div বা span এর ভেতরে)
-                        win_go_text = page.locator('text="Win Go"').first
-                        # যদি টেক্সটটি দৃশ্যমান হয়, তবে তার প্যারেন্ট বা নিজের ওপর ক্লিক করা
-                        if await win_go_text.is_visible(timeout=5000):
-                            await win_go_text.click(force=True, timeout=5000)
-                        else:
-                            # ব্যাকআপ: সরাসরি ক্লাস বা অন্যান্য টেক্সট দিয়ে খোঁজা
-                            await page.locator('div:has-text("Win Go")').last.click(force=True, timeout=5000)
+                        lottery_btn = page.locator('text="Lottery"').first
+                        await lottery_btn.scroll_into_view_if_needed(timeout=5000)
+                        await lottery_btn.click(force=True, timeout=5000)
+                        await page.wait_for_timeout(2000)
+                    except Exception as e:
+                        logger.error(f"Lottery Click Error: {e}")
+
+                    # ৩. Win Go কার্ডে ক্লিক করা 
+                    try:
+                        # Win Go লেখাটি খুঁজে বের করে ক্লিক করা (স্ক্রল করে)
+                        win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
+                        await win_go_card.scroll_into_view_if_needed(timeout=5000)
+                        await win_go_card.click(force=True, timeout=5000)
+                        await page.wait_for_timeout(4000) # গেম লোড হওয়ার জন্য অপেক্ষা
                     except Exception as e:
                         logger.error(f"WinGo Card Click Error: {e}")
-                    
-                    # গেম লোড হওয়ার জন্য অপেক্ষা (সর্বোচ্চ ৮ সেকেন্ড, যেই মাত্র Big/Small আসবে অমনি এগিয়ে যাবে)
-                    try:
-                        await page.wait_for_selector('text="Big"', timeout=8000)
-                    except:
-                        logger.info("Big/Small not found immediately, waiting a bit more...")
-                        await page.wait_for_timeout(2000)
-
-                    # 💡 পপআপ (Announcement) বন্ধ করা (যদি গেমের ভেতরে আসে)
-                    for _ in range(3):
-                        try:
-                            popup_btn = page.locator('button:has-text("Confirm"), div:has-text("Confirm"), span:has-text("Confirm")').last
-                            if await popup_btn.is_visible(timeout=1000):
-                                await popup_btn.click(force=True, timeout=2000)
-                                await page.wait_for_timeout(500)
-                        except: pass
-
-                    # 💡 WinGo 30sec ট্যাবে ক্লিক করা (যদি প্রয়োজন হয়)
-                    try:
-                        if await page.get_by_text("WinGo 30sec", exact=False).first.is_visible(timeout=1000):
-                            await page.get_by_text("WinGo 30sec", exact=False).first.click(timeout=3000)
-                            await page.wait_for_timeout(1000)
-                    except: pass
+                        
+                    # ৪. গেমের ভেতরে আবার পপআপ থাকলে বন্ধ করা
+                    await kill_popups(page)
 
                     timer_val = "30s"
                     try:
@@ -331,7 +342,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     for pct in [38, 75, 100]:
                         bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
-                        await asyncio.sleep(0.1) # ফাস্ট অ্যানিমেশন
+                        await asyncio.sleep(0.1) 
                         try:
                             await ctx.bot.edit_message_text(
                                 chat_id=uid, message_id=pred_msg.message_id,
@@ -340,15 +351,18 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             )
                         except: pass
 
-                    # 💡 Big / Small ক্লিক করার নিখুঁত লজিক
+                    # 💡 Big / Small ক্লিক করার শক্তিশালী লজিক (Element is not visible ফিক্স)
                     clicked = False
                     try:
                         target_locator = page.get_by_text(choice, exact=True).last
+                        # ক্লিক করার আগে স্ক্রল করে দৃশ্যমান করা
+                        await target_locator.scroll_into_view_if_needed(timeout=5000)
                         await target_locator.wait_for(state="visible", timeout=5000)
-                        await target_locator.click(force=True, timeout=3000)
+                        await target_locator.click(force=True, timeout=5000)
                         clicked = True
                     except Exception as e:
                         logger.error(f"Primary click failed: {e}")
+                        # ব্যাকআপ: জাভাস্ক্রিপ্ট দিয়ে ক্লিক করা
                         try:
                             clicked = await page.evaluate(f"""
                                 (function() {{
@@ -369,14 +383,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     if not clicked:
                         screenshot_path = f"error_{uid}.png"
                         await page.screenshot(path=screenshot_path)
-                        await ctx.bot.send_photo(
-                            chat_id=uid, 
-                            photo=open(screenshot_path, 'rb'), 
-                            caption=f"⚠️ **{choice} বাটনে ক্লিক করা যাচ্ছে না!**\nগেমের পেজটি কেমন দেখাচ্ছে তা স্ক্রিনশটে দেখুন।"
-                        )
+                        await ctx.bot.send_photo(chat_id=uid, photo=open(screenshot_path, 'rb'), caption=f"⚠️ **{choice} বাটনে ক্লিক করা যাচ্ছে না!**")
                         raise Exception(f"{choice} button not found on page.")
 
-                    await page.wait_for_timeout(500) # ক্লিকের পর অপেক্ষা
+                    await page.wait_for_timeout(1000) 
                     
                     try:
                         await page.locator('text="Confirm"').last.click(timeout=2000)
@@ -404,7 +414,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await asyncio.sleep(32)
 
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
-                    await page.wait_for_timeout(1500) 
+                    await page.wait_for_timeout(2000) 
                     
                     new_page_text = await page.evaluate("() => document.body.innerText")
                     new_balance_match = re.search(r'Total\s*balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
