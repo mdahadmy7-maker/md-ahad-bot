@@ -257,14 +257,21 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await page.goto(WINGO_URL, timeout=60000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(4000) 
 
-                    # 💡 ১. হোমপেজ থেকে "Win Go" কার্ডে ক্লিক করা
+                    # 💡 ১. Lottery তে ক্লিক করা (আপনার ২য় স্ক্রিনশট অনুযায়ী)
                     try:
-                        await page.locator('text="Win Go"').last.click(timeout=5000)
+                        await page.locator('text="Lottery"').first.click(timeout=5000)
+                        await page.wait_for_timeout(2000)
+                    except:
+                        pass
+
+                    # 💡 ২. Win Go তে ক্লিক করা (আপনার ২য় স্ক্রিনশট অনুযায়ী)
+                    try:
+                        await page.locator('text="Win Go"').first.click(timeout=5000)
                         await page.wait_for_timeout(3000)
                     except:
-                        logger.info("Could not find 'Win Go' card.")
+                        pass
 
-                    # 💡 ২. পপআপ (Announcement) বন্ধ করা
+                    # 💡 ৩. পপআপ (Announcement) বন্ধ করা
                     for _ in range(5):
                         try:
                             popup_btn = page.locator('button:has-text("Confirm"), div:has-text("Confirm"), span:has-text("Confirm"), button:has-text("OK")').last
@@ -273,7 +280,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 await page.wait_for_timeout(1000)
                         except: pass
 
-                    # 💡 ৩. WinGo 30sec ট্যাবে ক্লিক করা
+                    # 💡 ৪. WinGo 30sec ট্যাবে ক্লিক করা
                     try:
                         await page.get_by_text("WinGo 30sec", exact=False).first.click(timeout=5000)
                         await page.wait_for_timeout(2000)
@@ -321,10 +328,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             )
                         except: pass
 
-                    # 💡 ৪. Big / Small ক্লিক করার লজিক
+                    # 💡 ৫. Big / Small ক্লিক করার লজিক
                     clicked = False
                     try:
-                        # Playwright locator - waits for the exact text and clicks it
                         target_locator = page.get_by_text(choice, exact=True).last
                         await target_locator.wait_for(state="visible", timeout=10000)
                         await target_locator.click(force=True, timeout=5000)
@@ -482,7 +488,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৫. টেলিগ্রাম হ্যান্ডলার (ওয়েলকাম মেসেজ ঠিক করা হয়েছে)
+# ৫. টেলিগ্রাম হ্যান্ডলার (আপনার দেওয়া স্ক্রিনশট অনুযায়ী)
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -491,7 +497,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ আপনার ৬টি অ্যাকাউন্ট ইতিমধ্যে সেভ করা আছে। নতুন করে শুরু করতে /reset দিন।")
         return
     
-    # 💡 আপনার চাওয়া হুবহু ওয়েলকাম মেসেজ
+    # 💡 ১. আপনার প্রথম দেওয়া লম্বা ওয়েলকাম মেসেজ
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -623,7 +629,8 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 step_plan_text = ""
                 for i, amt in enumerate(state["step_amounts"]):
                     step_plan_text += f"Step {i+1:02d} : ৳ {amt:.2f}\n"
-                current_period_code = datetime.now().strftime("%Y%m%d%H%M%S") + "000"
+                
+                # 💡 ২. আপনার দেওয়া TRADE CONFIGURATION ডিজাইন
                 combined_msg = (
                     "⚙️ TRADE CONFIGURATION ⚙️\n"
                     "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -677,6 +684,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
     elif data == "start_trade_btn":
+        # 💡 মেসেজটি ডিলিট হবে না
         state["trade_running"] = True
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
