@@ -257,29 +257,31 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await page.goto(WINGO_URL, timeout=60000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(4000) 
 
+                    # 💡 "Add to Desktop" বা অন্য কোনো পপআপ থাকলে স্ক্রিনে ক্লিক করে বন্ধ করা
+                    try:
+                        await page.mouse.click(10, 10) 
+                        await page.wait_for_timeout(1000)
+                    except: pass
+
                     # 💡 ১. Lottery তে ক্লিক করা 
                     try:
-                        await page.locator('text="Lottery"').first.click(timeout=5000)
+                        await page.locator('text="Lottery"').first.click(timeout=3000)
                         await page.wait_for_timeout(2000)
                     except: pass
 
-                    # 💡 ২. Win Go তে ক্লিক করা (একদম নিখুঁতভাবে কার্ডটি খোঁজা)
+                    # 💡 ২. Win Go তে ক্লিক করা (Playwright Locator দিয়ে শক্তিশালী পদ্ধতি)
                     try:
-                        # Win Go কার্ডটি খুঁজে বের করা (যেখানে Win Go এবং Guess Number লেখা আছে)
-                        card_clicked = await page.evaluate("""
-                            (function() {
-                                let cards = document.querySelectorAll('div');
-                                for (let card of cards) {
-                                    if (card.innerText && card.innerText.includes('Win Go') && card.innerText.includes('Guess Number')) {
-                                        card.click();
-                                        return true;
-                                    }
-                                }
-                                return false;
-                            })();
-                        """)
-                        await page.wait_for_timeout(4000) # গেম লোড হওয়ার জন্য অপেক্ষা
-                    except: pass
+                        # Win Go এবং Guess Number লেখা কার্ডটি খুঁজে সেখানে ক্লিক করা
+                        win_go_card = page.locator('div').filter(has_text="Win Go").filter(has_text="Guess Number").last
+                        await win_go_card.click(force=True, timeout=10000)
+                        logger.info("Clicked Win Go Card")
+                        await page.wait_for_timeout(5000) # গেম লোড হওয়ার জন্য অপেক্ষা
+                    except Exception as e:
+                        logger.error(f"Card click failed: {e}")
+                        try:
+                            await page.get_by_text("Win Go", exact=True).first.click(force=True, timeout=5000)
+                            await page.wait_for_timeout(5000)
+                        except: pass
 
                     # 💡 ৩. পপআপ (Announcement) বন্ধ করা
                     for _ in range(5):
@@ -287,6 +289,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             popup_btn = page.locator('button:has-text("Confirm"), div:has-text("Confirm"), span:has-text("Confirm"), button:has-text("OK")').last
                             if await popup_btn.is_visible(timeout=1000):
                                 await popup_btn.click(force=True, timeout=2000)
+                                await page.wait_for_timeout(1000)
+                            
+                            # Close "Add to Desktop" if it appears again
+                            add_btn = page.locator('text="Add to Desktop"').first
+                            if await add_btn.is_visible(timeout=1000):
+                                await page.mouse.click(10, 10) 
                                 await page.wait_for_timeout(1000)
                         except: pass
 
@@ -498,7 +506,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৫. টেলিগ্রাম হ্যান্ডলার (আপনার দেওয়া স্ক্রিনশট অনুযায়ী)
+# ৫. টেলিগ্রাম হ্যান্ডলার 
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -639,7 +647,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 for i, amt in enumerate(state["step_amounts"]):
                     step_plan_text += f"Step {i+1:02d} : ৳ {amt:.2f}\n"
                 
-                # 💡 আপনার দেওয়া TRADE CONFIGURATION ডিজাইন
                 combined_msg = (
                     "⚙️ TRADE CONFIGURATION ⚙️\n"
                     "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -693,7 +700,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
     elif data == "start_trade_btn":
-        # 💡 মেসেজটি ডিলিট হবে না
         state["trade_running"] = True
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
