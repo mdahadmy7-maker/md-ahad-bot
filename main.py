@@ -34,18 +34,17 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# 💡 ২. পপআপ ব্লকার ফাংশন (Confirm বাটনে অটো ক্লিক)
+# 💡 ২. পপআপ ব্লকার ফাংশন (Confirm বাটনে জোরালো ক্লিক)
 # ───────────────────────────────────────────
 async def kill_popups(page):
     """এই ফাংশনটি 'Platform Name Change' বা যেকোনো পপআপ বন্ধ করবে"""
-    for _ in range(5):
+    for _ in range(3):
         try:
             clicked = await page.evaluate("""
                 (function() {
                     let els = document.querySelectorAll('button, div, span, a');
                     for (let el of els) {
                         let text = (el.innerText || el.textContent || '').trim().toLowerCase();
-                        // Confirm বা OK বা Close লেখা যেকোনো বাটনে ক্লিক করবে
                         if (text === 'confirm' || text === 'ok' || text === 'close' || text.includes('confirm')) {
                             el.click();
                             return true;
@@ -55,7 +54,7 @@ async def kill_popups(page):
                 })();
             """)
             if clicked:
-                await page.wait_for_timeout(1000) # পপআপ বন্ধ হওয়ার পর ১ সেকেন্ড অপেক্ষা
+                await page.wait_for_timeout(1500) # পপআপ মিলিয়ে যাওয়ার জন্য ১.৫ সেকেন্ড অপেক্ষা
             else:
                 break
         except:
@@ -141,9 +140,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await page.wait_for_selector('input[placeholder="Please enter the phone number"]', timeout=20000) 
             await update_loading(30)
             
-            # ফোন নাম্বার ও পাসওয়ার্ড টাইপ করা
+            # ফোন নাম্বার ও পাসওয়ার্ড টাইপ করা (fill ব্যবহার করা হলো)
             phone_input = page.get_by_placeholder("Please enter the phone number")
-            await phone_input.fill(login_phone) # fill ব্যবহার করা হয়েছে যাতে আগের ভুল লেখা মুছে যায়
+            await phone_input.fill(login_phone)
             await page.wait_for_timeout(500)
 
             pass_input = page.locator('input[type="password"]').first
@@ -151,14 +150,19 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await page.wait_for_timeout(500) 
 
             await update_loading(50)
-            # লগইন বাটনে ক্লিক
+            # লগইন বাটনে ক্লিক (স্ক্রল এবং ফোর্স ক্লিক)
             try:
-                await page.locator('button:has-text("Log in")').last.click(timeout=10000, force=True)
+                login_btn = page.locator('button:has-text("Log in")').last
+                await login_btn.scroll_into_view_if_needed(timeout=5000)
+                await login_btn.click(force=True, timeout=5000)
             except:
-                await page.get_by_text("Log in", exact=True).last.click(timeout=10000, force=True)
+                try:
+                    await page.get_by_text("Log in", exact=True).last.click(force=True, timeout=5000)
+                except:
+                    pass
             
             await update_loading(70)
-            # লগইনের পর পপআপ ক্লোজ (এখানেই সেই Platform Name Change পপআপ আসে)
+            # লগইনের পর পপআপ ক্লোজ
             await kill_popups(page)
 
             await update_loading(85)
@@ -292,9 +296,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # ১. হোমপেজে পপআপ থাকলে বন্ধ করা
                     await kill_popups(page)
 
-                    # ২. Lottery তে ক্লিক করা
+                    # ২. Lottery তে ক্লিক করা (স্ক্রল এবং ফোর্স ক্লিক)
                     try:
-                        await page.locator('text="Lottery"').first.click(timeout=5000)
+                        lottery_btn = page.locator('text="Lottery"').first
+                        await lottery_btn.scroll_into_view_if_needed(timeout=3000)
+                        await lottery_btn.click(force=True, timeout=5000)
                         await page.wait_for_timeout(2000)
                     except: pass
 
@@ -360,15 +366,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             )
                         except: pass
 
-                    # 💡 Big / Small ক্লিক করার লজিক
+                    # 💡 Big / Small ক্লিক করার শক্তিশালী লজিক
                     clicked = False
                     try:
+                        # Playwright locator এর মাধ্যমে খোঁজা এবং স্ক্রল করা
                         target_locator = page.get_by_text(choice, exact=True).last
-                        await target_locator.wait_for(state="visible", timeout=5000)
-                        await target_locator.click(force=True, timeout=3000)
+                        await target_locator.scroll_into_view_if_needed(timeout=5000)
+                        await target_locator.click(force=True, timeout=5000)
                         clicked = True
                     except Exception as e:
                         logger.error(f"Primary click failed: {e}")
+                        # ব্যাকআপ: জাভাস্ক্রিপ্ট দিয়ে ক্লিক করা
                         try:
                             clicked = await page.evaluate(f"""
                                 (function() {{
@@ -392,7 +400,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await ctx.bot.send_photo(chat_id=uid, photo=open(screenshot_path, 'rb'), caption=f"⚠️ **{choice} বাটনে ক্লিক করা যাচ্ছে না!**")
                         raise Exception(f"{choice} button not found on page.")
 
-                    await page.wait_for_timeout(500) 
+                    await page.wait_for_timeout(1000) 
                     
                     try:
                         await page.locator('text="Confirm"').last.click(timeout=2000)
@@ -420,7 +428,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await asyncio.sleep(32)
 
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
-                    await page.wait_for_timeout(1500) 
+                    await page.wait_for_timeout(2000) 
                     
                     new_page_text = await page.evaluate("() => document.body.innerText")
                     new_balance_match = re.search(r'Total\s*balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
