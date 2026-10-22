@@ -77,7 +77,7 @@ def get_history_and_prediction():
         return "SMALL", "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন
+# ৩. লগইন এবং অটো-বেট ফাংশন (ফাস্ট ও স্মার্ট ওয়েট)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -106,22 +106,24 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(2000) # অপেক্ষা কমানো হয়েছে
 
             await update_loading(30)
             try:
-                await page.get_by_placeholder("Please enter the phone number").fill(login_phone)
+                await page.wait_for_selector('input[type="text"]', timeout=10000)
+                await page.locator('input[type="text"]').first.fill(login_phone)
                 await page.locator('input[type="password"]').first.fill(password)
             except: pass
 
             await update_loading(50)
             try:
-                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000)
+                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=5000)
             except:
-                await page.locator('button:has-text("Log in")').last.click(timeout=10000)
+                await page.locator('button:has-text("Log in")').last.click(timeout=5000)
             
             await update_loading(70)
-            for _ in range(10):
+            # লগইনের পর পপআপ ক্লোজ
+            for _ in range(5):
                 await page.evaluate("""
                     (function() {
                         let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
@@ -134,10 +136,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         }
                     })();
                 """)
-                await page.wait_for_timeout(400)
+                await page.wait_for_timeout(300)
 
             await update_loading(85)
-            # 💡 Account পেজে গিয়ে ডেটা নেওয়া
+            # Account পেজে গিয়ে ডেটা নেওয়া
             try:
                 await page.evaluate("""
                     (function() {
@@ -149,7 +151,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         }
                     })();
                 """)
-                await page.wait_for_timeout(3000) 
+                await page.wait_for_timeout(2000) 
             except: pass
 
             await update_loading(95)
@@ -253,37 +255,47 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 WinGo পেজে যাওয়া 
+                    # 💡 WinGo পেজে যাওয়া (ফাস্ট লোড)
                     await page.goto(WINGO_URL, timeout=60000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(4000) 
+                    
+                    # স্ক্রিনে ক্লিক করে কোনো পপআপ থাকলে বন্ধ করা
+                    await page.mouse.click(20, 20)
+                    await page.wait_for_timeout(1000) # ১ সেকেন্ড অপেক্ষা
 
-                    # 💡 ১. Lottery তে ক্লিক করা (আপনার ২য় স্ক্রিনশট অনুযায়ী)
+                    # 💡 Win Go কার্ডে ক্লিক করা (সবচেয়ে শক্তিশালী লজিক)
                     try:
-                        await page.locator('text="Lottery"').first.click(timeout=5000)
+                        # Win Go টেক্সটটি খোঁজা (যেকোনো div বা span এর ভেতরে)
+                        win_go_text = page.locator('text="Win Go"').first
+                        # যদি টেক্সটটি দৃশ্যমান হয়, তবে তার প্যারেন্ট বা নিজের ওপর ক্লিক করা
+                        if await win_go_text.is_visible(timeout=5000):
+                            await win_go_text.click(force=True, timeout=5000)
+                        else:
+                            # ব্যাকআপ: সরাসরি ক্লাস বা অন্যান্য টেক্সট দিয়ে খোঁজা
+                            await page.locator('div:has-text("Win Go")').last.click(force=True, timeout=5000)
+                    except Exception as e:
+                        logger.error(f"WinGo Card Click Error: {e}")
+                    
+                    # গেম লোড হওয়ার জন্য অপেক্ষা (সর্বোচ্চ ৮ সেকেন্ড, যেই মাত্র Big/Small আসবে অমনি এগিয়ে যাবে)
+                    try:
+                        await page.wait_for_selector('text="Big"', timeout=8000)
+                    except:
+                        logger.info("Big/Small not found immediately, waiting a bit more...")
                         await page.wait_for_timeout(2000)
-                    except:
-                        pass
 
-                    # 💡 ২. Win Go তে ক্লিক করা (আপনার ২য় স্ক্রিনশট অনুযায়ী)
-                    try:
-                        await page.locator('text="Win Go"').first.click(timeout=5000)
-                        await page.wait_for_timeout(3000)
-                    except:
-                        pass
-
-                    # 💡 ৩. পপআপ (Announcement) বন্ধ করা
-                    for _ in range(5):
+                    # 💡 পপআপ (Announcement) বন্ধ করা (যদি গেমের ভেতরে আসে)
+                    for _ in range(3):
                         try:
-                            popup_btn = page.locator('button:has-text("Confirm"), div:has-text("Confirm"), span:has-text("Confirm"), button:has-text("OK")').last
+                            popup_btn = page.locator('button:has-text("Confirm"), div:has-text("Confirm"), span:has-text("Confirm")').last
                             if await popup_btn.is_visible(timeout=1000):
                                 await popup_btn.click(force=True, timeout=2000)
-                                await page.wait_for_timeout(1000)
+                                await page.wait_for_timeout(500)
                         except: pass
 
-                    # 💡 ৪. WinGo 30sec ট্যাবে ক্লিক করা
+                    # 💡 WinGo 30sec ট্যাবে ক্লিক করা (যদি প্রয়োজন হয়)
                     try:
-                        await page.get_by_text("WinGo 30sec", exact=False).first.click(timeout=5000)
-                        await page.wait_for_timeout(2000)
+                        if await page.get_by_text("WinGo 30sec", exact=False).first.is_visible(timeout=1000):
+                            await page.get_by_text("WinGo 30sec", exact=False).first.click(timeout=3000)
+                            await page.wait_for_timeout(1000)
                     except: pass
 
                     timer_val = "30s"
@@ -319,7 +331,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     for pct in [38, 75, 100]:
                         bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
-                        await asyncio.sleep(0.2)
+                        await asyncio.sleep(0.1) # ফাস্ট অ্যানিমেশন
                         try:
                             await ctx.bot.edit_message_text(
                                 chat_id=uid, message_id=pred_msg.message_id,
@@ -328,12 +340,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             )
                         except: pass
 
-                    # 💡 ৫. Big / Small ক্লিক করার লজিক
+                    # 💡 Big / Small ক্লিক করার নিখুঁত লজিক
                     clicked = False
                     try:
                         target_locator = page.get_by_text(choice, exact=True).last
-                        await target_locator.wait_for(state="visible", timeout=10000)
-                        await target_locator.click(force=True, timeout=5000)
+                        await target_locator.wait_for(state="visible", timeout=5000)
+                        await target_locator.click(force=True, timeout=3000)
                         clicked = True
                     except Exception as e:
                         logger.error(f"Primary click failed: {e}")
@@ -364,10 +376,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         )
                         raise Exception(f"{choice} button not found on page.")
 
-                    await page.wait_for_timeout(1000) 
+                    await page.wait_for_timeout(500) # ক্লিকের পর অপেক্ষা
                     
                     try:
-                        await page.locator('text="Confirm"').last.click(timeout=3000)
+                        await page.locator('text="Confirm"').last.click(timeout=2000)
                     except: pass
 
                     try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
@@ -392,7 +404,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await asyncio.sleep(32)
 
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
-                    await page.wait_for_timeout(2000) 
+                    await page.wait_for_timeout(1500) 
                     
                     new_page_text = await page.evaluate("() => document.body.innerText")
                     new_balance_match = re.search(r'Total\s*balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
@@ -488,7 +500,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৫. টেলিগ্রাম হ্যান্ডলার (আপনার দেওয়া স্ক্রিনশট অনুযায়ী)
+# ৫. টেলিগ্রাম হ্যান্ডলার 
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -497,7 +509,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ আপনার ৬টি অ্যাকাউন্ট ইতিমধ্যে সেভ করা আছে। নতুন করে শুরু করতে /reset দিন।")
         return
     
-    # 💡 ১. আপনার প্রথম দেওয়া লম্বা ওয়েলকাম মেসেজ
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -630,7 +641,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 for i, amt in enumerate(state["step_amounts"]):
                     step_plan_text += f"Step {i+1:02d} : ৳ {amt:.2f}\n"
                 
-                # 💡 ২. আপনার দেওয়া TRADE CONFIGURATION ডিজাইন
                 combined_msg = (
                     "⚙️ TRADE CONFIGURATION ⚙️\n"
                     "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -684,7 +694,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
     elif data == "start_trade_btn":
-        # 💡 মেসেজটি ডিলিট হবে না
         state["trade_running"] = True
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
