@@ -257,19 +257,29 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await page.goto(WINGO_URL, timeout=60000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(4000) 
 
-                    # 💡 ১. Lottery তে ক্লিক করা (আপনার ২য় স্ক্রিনশট অনুযায়ী)
+                    # 💡 ১. Lottery তে ক্লিক করা 
                     try:
                         await page.locator('text="Lottery"').first.click(timeout=5000)
                         await page.wait_for_timeout(2000)
-                    except:
-                        pass
+                    except: pass
 
-                    # 💡 ২. Win Go তে ক্লিক করা (আপনার ২য় স্ক্রিনশট অনুযায়ী)
+                    # 💡 ২. Win Go তে ক্লিক করা (একদম নিখুঁতভাবে কার্ডটি খোঁজা)
                     try:
-                        await page.locator('text="Win Go"').first.click(timeout=5000)
-                        await page.wait_for_timeout(3000)
-                    except:
-                        pass
+                        # Win Go কার্ডটি খুঁজে বের করা (যেখানে Win Go এবং Guess Number লেখা আছে)
+                        card_clicked = await page.evaluate("""
+                            (function() {
+                                let cards = document.querySelectorAll('div');
+                                for (let card of cards) {
+                                    if (card.innerText && card.innerText.includes('Win Go') && card.innerText.includes('Guess Number')) {
+                                        card.click();
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            })();
+                        """)
+                        await page.wait_for_timeout(4000) # গেম লোড হওয়ার জন্য অপেক্ষা
+                    except: pass
 
                     # 💡 ৩. পপআপ (Announcement) বন্ধ করা
                     for _ in range(5):
@@ -497,7 +507,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ আপনার ৬টি অ্যাকাউন্ট ইতিমধ্যে সেভ করা আছে। নতুন করে শুরু করতে /reset দিন।")
         return
     
-    # 💡 ১. আপনার প্রথম দেওয়া লম্বা ওয়েলকাম মেসেজ
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -630,7 +639,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 for i, amt in enumerate(state["step_amounts"]):
                     step_plan_text += f"Step {i+1:02d} : ৳ {amt:.2f}\n"
                 
-                # 💡 ২. আপনার দেওয়া TRADE CONFIGURATION ডিজাইন
+                # 💡 আপনার দেওয়া TRADE CONFIGURATION ডিজাইন
                 combined_msg = (
                     "⚙️ TRADE CONFIGURATION ⚙️\n"
                     "━━━━━━━━━━━━━━━━━━━━━━━\n"
