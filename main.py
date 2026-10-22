@@ -41,14 +41,11 @@ def get_history_and_prediction():
         res = requests.get(HISTORY_API, timeout=10)
         data = res.json()
         
-        # এপিআই রেসপন্স থেকে লিস্ট বের করা
         list_data = data.get("data", {}).get("list", [])
         if not list_data:
             return "SMALL", "Unknown"
             
         latest_period = str(list_data[0].get("issueNumber", "Unknown"))
-        
-        # লিস্টটিকে উল্টে দেওয়া (যাতে পুরনো থেকে নতুন ক্রমানুসারে থাকে)
         reversed_list = list(reversed(list_data))
         
         history = []
@@ -56,7 +53,6 @@ def get_history_and_prediction():
             num = int(item.get("number", 0))
             history.append("SMALL" if num <= 4 else "BIG")
             
-        # প্রেডিকশন লজিক
         if len(history) == 0: return "BIG", latest_period
         if len(history) < 3:
             return ("SMALL" if history[-1] == 'BIG' else "BIG"), latest_period
@@ -219,8 +215,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             initial_balance = float(balance)
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
-            last_choice = None
-            last_result = None 
 
             while state["trade_running"]:
                 active_msg = None
@@ -235,18 +229,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             "━━━━━━━━━━━━━━━━━━━━━━━\n"
                             "🎯 **TARGET REACHED** 🎉\n"
                             "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                            "╔════════════════════════════════╗\n"
-                            "   💎 **SESSION SUMMARY** ║\n"
-                            "╚════════════════════════════════╝\n\n"
                             f"💰 **Start Balance** : ৳ {initial_balance:.2f}\n"
                             f"💵 **Final Balance** : ৳ {current_bal:.2f}\n"
                             f"💸 **Profit Made**   : +৳ {profit:.2f}\n\n"
-                            "━━━━━━━━━━━━━━━━━━━━━━━\n"
                             f"📊 **Trades** : {state['total_trades']} 🟢 **Win** : {state['wins']} 🔴 **Loss** : {state['losses']}\n"
                             f"🏆 **Win Rate** : {win_rate:.1f}%\n"
-                            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                            "✅ **Account auto-logged out.**\n"
-                            "_Type /start to begin a new session._"
                         )
                         await ctx.bot.send_message(chat_id=uid, text=target_summary, parse_mode="Markdown")
                         state["trade_running"] = False
@@ -264,12 +251,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
-                    # 💡 এপিআই থেকে প্রেডিকশন বের করা (পেজ লোড হওয়ার আগেই)
+                    # 💡 এপিআই থেকে প্রেডিকশন বের করা 
                     choice, current_period = get_history_and_prediction()
 
                     # 💡 WinGo পেজে যাওয়া
                     await page.goto(WINGO_URL, timeout=60000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(4000) # গেম লোড হওয়ার জন্য অপেক্ষা
+                    await page.wait_for_timeout(4000) 
 
                     # 💡 ১. পপআপ (Platform Name Change Announcement) বন্ধ করার জোরালো লজিক
                     for _ in range(5):
@@ -280,13 +267,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 await page.wait_for_timeout(1000)
                         except: pass
 
-                    # 💡 ২. WinGo 30sec ট্যাবে ক্লিক করা (যদি প্রয়োজন হয়)
+                    # 💡 ২. WinGo 30sec ট্যাবে ক্লিক করা
                     try:
                         await page.get_by_text("WinGo 30sec", exact=False).first.click(timeout=3000)
                         await page.wait_for_timeout(1500)
                     except: pass
 
-                    # টাইমার স্ক্র্যাপ (যদি পাওয়া যায়)
                     timer_val = "30s"
                     try:
                         body_text = await page.evaluate("() => document.body.innerText")
@@ -317,7 +303,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "🎬 _4-second prediction animation → auto bet every period._"
                     ), parse_mode="Markdown")
 
-                    # 💡 GENERATING PREDICTION (শুধু একবার আসবে)
+                    # 💡 GENERATING PREDICTION
                     pred_msg = await ctx.bot.send_message(chat_id=uid, text="━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[░░░░░░░░░░░░] 0%`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏳ _Running 9 layers + backtest..._", parse_mode="Markdown")
                     
                     for pct in [38, 75, 100]:
@@ -331,17 +317,16 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             )
                         except: pass
 
-                    # 💡 ৩. Big / Small ক্লিক করার ১০০% নিখুঁত লজিক
+                    # 💡 ৩. Big / Small ক্লিক করার লজিক
                     clicked = False
                     try:
-                        # Playwright দিয়ে সরাসরি নিচের বড় বাটনে ক্লিক করা (exact=True এবং .last)
                         target_locator = page.get_by_text(choice, exact=True).last
-                        await target_locator.wait_for(state="visible", timeout=15000)
+                        await target_locator.wait_for(state="visible", timeout=10000) # অপেক্ষা কমানো হলো
                         await target_locator.click(force=True, timeout=5000)
                         clicked = True
                     except Exception as e:
                         logger.error(f"Primary click failed: {e}")
-                        # ব্যাকআপ: জাভাস্ক্রিপ্ট দিয়ে ক্লিক করা (শুধু বড় বাটন খোঁজা)
+                        # ব্যাকআপ: জাভাস্ক্রিপ্ট দিয়ে ক্লিক করা 
                         try:
                             clicked = await page.evaluate(f"""
                                 (function() {{
@@ -349,7 +334,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                     let elements = document.querySelectorAll('div, button, span');
                                     for (let el of elements) {{
                                         let text = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                        // width > 50 দিয়ে নিশ্চিত করা হচ্ছে এটি টেক্সট নয়, বরং একটি বাটন
                                         if (text === target && el.getBoundingClientRect().width > 50) {{
                                             el.click(); 
                                             return true;
@@ -360,17 +344,23 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             """)
                         except: pass
 
+                    # 💡 ৪. যদি ক্লিক না হয়, তবে স্ক্রিনশট নিয়ে টেলিগ্রামে পাঠাবে
                     if not clicked:
+                        screenshot_path = f"error_{uid}.png"
+                        await page.screenshot(path=screenshot_path)
+                        await ctx.bot.send_photo(
+                            chat_id=uid, 
+                            photo=open(screenshot_path, 'rb'), 
+                            caption=f"⚠️ **{choice} বাটনে ক্লিক করা যাচ্ছে না!**\nগেমের পেজটি কেমন দেখাচ্ছে তা স্ক্রিনশটে দেখুন।"
+                        )
                         raise Exception(f"{choice} button not found on page.")
 
                     await page.wait_for_timeout(1000) 
                     
-                    # Confirm বাটন থাকলে ক্লিক করা
                     try:
                         await page.locator('text="Confirm"').last.click(timeout=3000)
                     except: pass
 
-                    # 💡 মেসেজ ডিলিট করা (যাতে ডাবল না আসে)
                     try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
                     except: pass
                     try: await ctx.bot.delete_message(chat_id=uid, message_id=active_msg.message_id)
@@ -407,10 +397,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ))
 
-                    # রেজাল্টের জন্য অপেক্ষা
                     await asyncio.sleep(32)
 
-                    # 💡 রেজাল্ট চেক করা (Account পেজে গিয়ে)
+                    # 💡 রেজাল্ট চেক করা
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
                     await page.wait_for_timeout(2000) 
                     
@@ -489,7 +478,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
-                    # 💡 এরর হলে মেসেজ ডিলিট করে বট বন্ধ করে দেবে, যাতে ডাবল মেসেজ না আসে
+                    # 💡 এরর হলে মেসেজ ডিলিট করে বট বন্ধ করে দেবে
                     if pred_msg:
                         try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
                         except: pass
