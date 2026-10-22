@@ -77,7 +77,7 @@ def get_history_and_prediction():
         return "SMALL", "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (মানুষের মতো টাইপিং)
+# ৩. লগইন এবং অটো-বেট ফাংশন (প্লেসহোল্ডার দিয়ে ১০০% নিখুঁত ফিলাপ)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -107,34 +107,36 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             
-            # ইনপুট বক্স আসা পর্যন্ত অপেক্ষা
-            await page.wait_for_selector('input[type="text"]', timeout=15000) 
+            # 💡 ফোন নাম্বার বক্সটি লোড হওয়া পর্যন্ত অপেক্ষা
+            await page.wait_for_selector('input[placeholder="Please enter the phone number"]', timeout=20000) 
             await update_loading(30)
             
-            # 💡 ১. ফোন নাম্বার বক্সে ক্লিক করে ভেতরের ভুল লেখা মুছে ফেলা এবং নতুন লেখা টাইপ করা
-            phone_input = page.locator('input[type="text"]').first
-            await phone_input.click() # বক্সে ক্লিক
-            await page.keyboard.press("Control+A") # সব সিলেক্ট
-            await page.keyboard.press("Backspace") # মুছে ফেলা
-            await page.keyboard.type(login_phone, delay=50) # মানুষের মতো টাইপ
-            
+            # 💡 ১. ফোন নাম্বার বক্সে ক্লিক করে মানুষের মতো টাইপ করা
+            phone_input = page.get_by_placeholder("Please enter the phone number")
+            await phone_input.click()
             await page.wait_for_timeout(500)
-
-            # 💡 ২. পাসওয়ার্ড বক্সে ক্লিক করে পাসওয়ার্ড টাইপ করা
-            pass_input = page.locator('input[type="password"]').first
-            await pass_input.click()
             await page.keyboard.press("Control+A")
             await page.keyboard.press("Backspace")
-            await page.keyboard.type(password, delay=50)
-            
-            await page.wait_for_timeout(500) # ইনপুট নিশ্চিত হওয়া
+            await page.keyboard.type(login_phone, delay=100) # delay=100 মানে প্রতি অক্ষরে ০.১ সেকেন্ড সময় নিচ্ছে
+            await page.wait_for_timeout(1000)
 
+            # 💡 ২. পাসওয়ার্ড বক্সে ক্লিক করে টাইপ করা
+            pass_input = page.locator('input[type="password"]').first
+            await pass_input.click()
+            await page.wait_for_timeout(500)
+            await page.keyboard.press("Control+A")
+            await page.keyboard.press("Backspace")
+            await page.keyboard.type(password, delay=100)
+            await page.wait_for_timeout(1000) 
+
+            # 💡 লগইন বাটনে ক্লিক (বাটনটি সবুজ/সক্রিয় হওয়ার জন্য অপেক্ষা করে)
             await update_loading(50)
-            # লগইন বাটনে ক্লিক
             try:
-                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000)
+                login_btn = page.get_by_role("button", name=re.compile("Log in", re.IGNORECASE)).last
+                await login_btn.wait_for(state="visible", timeout=10000)
+                await login_btn.click(force=True, timeout=5000)
             except:
-                await page.locator('button:has-text("Log in")').last.click(timeout=10000)
+                await page.locator('button:has-text("Log in")').last.click(force=True, timeout=10000)
             
             await update_loading(70)
             # লগইনের পর পপআপ ক্লোজ
@@ -174,7 +176,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             uid_val = "Unknown"
             balance = "0.00"
 
-            # ডেটা রিডিং লুপ 
+            # ডেটা রিডিং লুপ (১৫ সেকেন্ড অপেক্ষা)
             for _ in range(15): 
                 page_text = await page.inner_text("body")
                 if "Wrong account or password" in page_text or "Error: 147" in page_text:
@@ -291,7 +293,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await page.wait_for_timeout(1000)
                     except: pass
 
-                    # 💡 Win Go কার্ডে ক্লিক করা
+                    # 💡 Win Go কার্ডে ক্লিক করা 
                     try:
                         await page.evaluate("""
                             (function() {
