@@ -73,7 +73,7 @@ def get_history_and_prediction():
         return "SMALL", "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (জাভাস্ক্রিপ্ট ক্লিক সহ)
+# ৩. লগইন এবং অটো-বেট ফাংশন (জাভাস্ক্রিপ্ট ফোর্স ক্লিক)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -102,7 +102,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(2500)
 
             await update_loading(30)
             try:
@@ -117,7 +117,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
             await update_loading(70)
-            for _ in range(10):
+            for _ in range(8):
                 await page.evaluate("""
                     (function() {
                         let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
@@ -144,7 +144,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         }
                     })();
                 """)
-                await page.wait_for_timeout(3000) 
+                await page.wait_for_timeout(2500) 
             except: pass
 
             await update_loading(95)
@@ -167,7 +167,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         balance = balance_match.group(1)
                     login_status = "success"
                     break
-                await page.wait_for_timeout(500)
+                await page.wait_for_timeout(400)
 
             await update_loading(100)
             await asyncio.sleep(0.2)
@@ -256,7 +256,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     # WinGo পেজে যাওয়া
                     await page.goto(WINGO_URL, timeout=60000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(2500) # অপেক্ষা আরও কমানো হয়েছে
+                    await page.wait_for_timeout(2500)
 
                     # টাইমার স্ক্র্যাপ
                     timer_val = "30s"
@@ -291,7 +291,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     # GENERATING PREDICTION (একবারই আসবে)
                     pred_msg = await ctx.bot.send_message(chat_id=uid, text="━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[████░░░░░░░░] 38%`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏳ _Running 9 layers + 10s..._", parse_mode="Markdown")
-                    await asyncio.sleep(1.5) # ১.৫ সেকেন্ড অপেক্ষা করে বাজি ধরবে
+                    await asyncio.sleep(1.5) 
 
                     # 💡 জাভাস্ক্রিপ্ট দিয়ে Big/Small বাটনে ক্লিক করা
                     try:
@@ -328,7 +328,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             }})();
                         """)
                         
-                        await page.wait_for_timeout(800) # ক্লিক হওয়ার পর ০.৮ সেকেন্ড অপেক্ষা
+                        await page.wait_for_timeout(800)
 
                         # ৩. Confirm বাটন থাকলে ক্লিক করা
                         await page.evaluate("""
@@ -352,7 +352,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
                     except: pass
 
-                    # NEW TRADE PLACED মেসেজ (এটি ডিলিট হবে না)
+                    # NEW TRADE PLACED মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
@@ -383,7 +383,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ))
 
-                    # রেজাল্টের জন্য অপেক্ষা (৩২ সেকেন্ড)
                     await asyncio.sleep(32)
 
                     # রেজাল্ট চেক
