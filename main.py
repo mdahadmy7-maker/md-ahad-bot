@@ -664,7 +664,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
     elif data == "start_trade_btn":
-        # 💡 এখানে মেসেজ ডিলিট করার কোড সরিয়ে দেওয়া হয়েছে
+        # 💡 মেসেজ ডিলিট করার কোড সরিয়ে দেওয়া হয়েছে, এখন মেসেজ থাকবে
         state["trade_running"] = True
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
