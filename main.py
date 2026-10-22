@@ -77,7 +77,7 @@ def get_history_and_prediction():
         return "SMALL", "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন 
+# ৩. লগইন এবং অটো-বেট ফাংশন (জাভাস্ক্রিপ্ট ফিলাপ)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -111,24 +111,33 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await page.wait_for_selector('input[type="text"]', timeout=15000) 
             await update_loading(30)
             
-            # 💡 রিয়েল টাইপিং (যাতে ওয়েবসাইট বুঝতে পারে ইউজার আসলেই টাইপ করছে)
-            await page.locator('input[type="text"]').first.click()
-            await page.keyboard.type(login_phone, delay=50) 
-            
-            await page.locator('input[type="password"]').first.click()
-            await page.keyboard.type(password, delay=50)
-            
-            await page.wait_for_timeout(500) # ইনপুট প্রসেস হওয়ার সময়
+            # 💡 জাভাস্ক্রিপ্ট দিয়ে ইনপুট ফিলাপ (সবচেয়ে শক্তিশালী পদ্ধতি, কোনো পপআপ এটাকে ব্লক করতে পারে না)
+            await page.evaluate(f"""
+                (function() {{
+                    let inputs = document.querySelectorAll('input');
+                    if (inputs.length > 0) {{
+                        inputs[0].value = '{login_phone}';
+                        inputs[0].dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        inputs[0].dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    }}
+                    if (inputs.length > 1) {{
+                        inputs[1].value = '{password}';
+                        inputs[1].dispatchEvent(new Event('input', {{ bubbles: true }}));
+                        inputs[1].dispatchEvent(new Event('change', {{ bubbles: true }}));
+                    }}
+                }})();
+            """)
+            await page.wait_for_timeout(1000) 
 
             await update_loading(50)
+            # লগইন বাটনে ক্লিক
             try:
                 await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000)
             except:
                 await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
             await update_loading(70)
-            
-            # লগইনের পর পপআপ ক্লোজ 
+            # লগইনের পর পপআপ ক্লোজ
             for _ in range(3):
                 await page.evaluate("""
                     (function() {
@@ -165,7 +174,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             uid_val = "Unknown"
             balance = "0.00"
 
-            # 💡 স্মার্ট লুপ (১৫ সেকেন্ড পর্যন্ত অপেক্ষা করবে)
+            # ডেটা রিডিং লুপ (১৫ সেকেন্ড অপেক্ষা)
             for _ in range(15): 
                 page_text = await page.inner_text("body")
                 if "Wrong account or password" in page_text or "Error: 147" in page_text:
@@ -191,14 +200,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
 
             if login_status == "failed" or uid_val == "Unknown":
-                # 💡 লগইন ফেল করলে স্ক্রিনশট পাঠাবে
                 ss_path = f"loginfail_{uid}.png"
                 await page.screenshot(path=ss_path)
-                await ctx.bot.send_photo(
-                    chat_id=uid, 
-                    photo=open(ss_path, 'rb'), 
-                    caption=f"❌ **LOGIN FAILED ({phone})**\n\nবট UID বা ব্যালেন্স খুঁজে পায়নি। নিচের স্ক্রিনশটে দেখুন গেমের পেজে আসলে কী অবস্থা।"
-                )
+                await ctx.bot.send_photo(chat_id=uid, photo=open(ss_path, 'rb'), caption="❌ LOGIN FAILED\nসঠিক নাম্বার/পাসওয়ার্ড দিন অথবা স্ক্রিনশটে দেখুন কী সমস্যা।")
                 await browser.close()
                 return
 
@@ -273,7 +277,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await page.goto(WINGO_URL, timeout=60000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(2000) 
 
-                    # পপআপ ক্লোজ
+                    # পপআপ বন্ধ করার জন্য স্ক্রিনে ক্লিক
                     await page.mouse.click(20, 20)
                     await page.wait_for_timeout(500) 
 
@@ -283,7 +287,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await page.wait_for_timeout(1000)
                     except: pass
 
-                    # 💡 Win Go কার্ডে ক্লিক করা
+                    # 💡 Win Go কার্ডে ক্লিক করা (জাভাস্ক্রিপ্ট দিয়ে, যা ১০০% কাজ করে)
                     try:
                         await page.evaluate("""
                             (function() {
@@ -300,7 +304,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     except Exception as e:
                         logger.error(f"WinGo Card Click Error: {e}")
                         
-                    # পপআপ ক্লোজ
+                    # গেমের ভেতরে পপআপ থাকলে বন্ধ করা
                     for _ in range(3):
                         try:
                             popup_btn = page.locator('button:has-text("Confirm"), div:has-text("Confirm"), span:has-text("Confirm")').last
@@ -351,7 +355,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             )
                         except: pass
 
-                    # 💡 Big / Small ক্লিক 
+                    # 💡 Big / Small ক্লিক করার লজিক
                     clicked = False
                     try:
                         target_locator = page.get_by_text(choice, exact=True).last
@@ -380,11 +384,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     if not clicked:
                         screenshot_path = f"error_{uid}.png"
                         await page.screenshot(path=screenshot_path)
-                        await ctx.bot.send_photo(
-                            chat_id=uid, 
-                            photo=open(screenshot_path, 'rb'), 
-                            caption=f"⚠️ **{choice} বাটনে ক্লিক করা যাচ্ছে না!**"
-                        )
+                        await ctx.bot.send_photo(chat_id=uid, photo=open(screenshot_path, 'rb'), caption=f"⚠️ **{choice} বাটনে ক্লিক করা যাচ্ছে না!**")
                         raise Exception(f"{choice} button not found on page.")
 
                     await page.wait_for_timeout(500) 
