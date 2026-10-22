@@ -253,7 +253,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 WinGo পেজে যাওয়া (হোমপেজ থেকে)
+                    # 💡 WinGo পেজে যাওয়া 
                     await page.goto(WINGO_URL, timeout=60000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(4000) 
 
@@ -262,7 +262,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await page.locator('text="Win Go"').last.click(timeout=5000)
                         await page.wait_for_timeout(3000)
                     except:
-                        logger.info("Could not find 'Win Go' card, maybe already inside.")
+                        logger.info("Could not find 'Win Go' card.")
 
                     # 💡 ২. পপআপ (Announcement) বন্ধ করা
                     for _ in range(5):
@@ -324,6 +324,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # 💡 ৪. Big / Small ক্লিক করার লজিক
                     clicked = False
                     try:
+                        # Playwright locator - waits for the exact text and clicks it
                         target_locator = page.get_by_text(choice, exact=True).last
                         await target_locator.wait_for(state="visible", timeout=10000)
                         await target_locator.click(force=True, timeout=5000)
@@ -481,7 +482,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৫. টেলিগ্রাম হ্যান্ডলার
+# ৫. টেলিগ্রাম হ্যান্ডলার (ওয়েলকাম মেসেজ ঠিক করা হয়েছে)
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -490,6 +491,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("✅ আপনার ৬টি অ্যাকাউন্ট ইতিমধ্যে সেভ করা আছে। নতুন করে শুরু করতে /reset দিন।")
         return
     
+    # 💡 আপনার চাওয়া হুবহু ওয়েলকাম মেসেজ
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -498,6 +500,17 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "🔴 Status  : Not Logged In\n"
         f"👥 Accounts: {len(state['accounts'])}/6\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 Prediction Engine — 9 Layers\n"
+        "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
+        "🔍 Manipulation · 🎨 Colour · 🔢 Frequency\n"
+        "🔄 Markov · ♻️ Cycle · 💠 Momentum\n"
+        "🔁 Every layer is back-tested live so its vote\n"
+        "weight follows its real hit-rate\n"
+        "🔴 Confidence below 30% → sit out\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🎬 4-second 🧠 generating prediction animation\n"
+        "🚀 Analysis → auto bet every 30s period\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "👇 Press the button below to LOGIN"
     )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
@@ -664,7 +677,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
     elif data == "start_trade_btn":
-        # 💡 মেসেজ ডিলিট করার কোড সরিয়ে দেওয়া হয়েছে, এখন মেসেজ থাকবে
         state["trade_running"] = True
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
@@ -685,7 +697,7 @@ async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
 def main():
     if not BOT_TOKEN:
-        print("❌ Error: BOT_TOKEN সেট করা নেই! Render-এর Environment Variable চেক করুন।")
+        print("❌ Error: BOT_TOKEN সেট করা নেই!")
         return
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
