@@ -73,7 +73,7 @@ def get_history_and_prediction():
         return "SMALL", "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন
+# ৩. লগইন এবং অটো-বেট ফাংশন (জাভাস্ক্রিপ্ট ক্লিক সহ)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -256,7 +256,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     # WinGo পেজে যাওয়া
                     await page.goto(WINGO_URL, timeout=60000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(4000) 
+                    await page.wait_for_timeout(2500) # অপেক্ষা আরও কমানো হয়েছে
 
                     # টাইমার স্ক্র্যাপ
                     timer_val = "30s"
@@ -289,55 +289,70 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "🎬 _4-second prediction animation → auto bet every period._"
                     ), parse_mode="Markdown")
 
-                    # GENERATING PREDICTION (টাইমার সহ)
-                    pred_msg = await ctx.bot.send_message(chat_id=uid, text="━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[░░░░░░░░░░░░] 0%`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏳ _Running 9 layers + backtest..._", parse_mode="Markdown")
-                    
-                    for pct in range(10, 101, 10):
-                        bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
-                        await asyncio.sleep(1)
-                        try:
-                            await ctx.bot.edit_message_text(
-                                chat_id=uid, message_id=pred_msg.message_id,
-                                text=f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[{bar}] {pct}%`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏳ _Running 9 layers + {10 - (pct//10)}s..._",
-                                parse_mode="Markdown"
-                            )
-                        except: pass
+                    # GENERATING PREDICTION (একবারই আসবে)
+                    pred_msg = await ctx.bot.send_message(chat_id=uid, text="━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[████░░░░░░░░] 38%`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏳ _Running 9 layers + 10s..._", parse_mode="Markdown")
+                    await asyncio.sleep(1.5) # ১.৫ সেকেন্ড অপেক্ষা করে বাজি ধরবে
 
-                    # 💡 বেট বসানো এবং ক্লিক
+                    # 💡 জাভাস্ক্রিপ্ট দিয়ে Big/Small বাটনে ক্লিক করা
                     try:
-                        input_box = page.locator('input[type="number"], input[type="text"]').last
-                        await input_box.fill(str(bet_amount), timeout=5000, force=True)
-                        
-                        if choice == "BIG":
-                            await page.locator('text="Big"').last.click(timeout=5000, force=True)
-                        else:
-                            await page.locator('text="Small"').last.click(timeout=5000, force=True)
-                            
-                        await page.wait_for_timeout(1000)
-                        
-                        confirm_btn = page.locator('text="Confirm"').last
-                        if await confirm_btn.is_visible():
-                            await confirm_btn.click(timeout=3000, force=True)
-                    except Exception as e:
-                        logger.error(f"Click failed: {e}")
+                        # ১. টাকার পরিমাণ বসানো
                         await page.evaluate(f"""
                             (function() {{
-                                let target = '{choice}'.toUpperCase();
-                                let elements = document.querySelectorAll('div, span, button');
-                                for (let el of elements) {{
-                                    if ((el.innerText || '').trim().toUpperCase() === target) {{
-                                        el.click(); return true;
+                                let inputs = document.querySelectorAll('input');
+                                for (let i of inputs) {{
+                                    if (i.type === 'text' || i.type === 'number') {{
+                                         i.value = '{bet_amount}';
+                                         i.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                                         i.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                                         return true;
                                     }}
                                 }}
                                 return false;
                             }})();
                         """)
+                        
+                        # ২. Big বা Small এ ক্লিক করা
+                        await page.evaluate(f"""
+                            (function() {{
+                                let target = '{choice}'.toUpperCase();
+                                let elements = document.querySelectorAll('div, span, button');
+                                for (let el of elements) {{
+                                    let text = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                    if (text === target) {{
+                                        let event = new MouseEvent('click', {{ view: window, bubbles: true, cancelable: true }});
+                                        el.dispatchEvent(event);
+                                        return true;
+                                    }}
+                                }}
+                                return false;
+                            }})();
+                        """)
+                        
+                        await page.wait_for_timeout(800) # ক্লিক হওয়ার পর ০.৮ সেকেন্ড অপেক্ষা
+
+                        # ৩. Confirm বাটন থাকলে ক্লিক করা
+                        await page.evaluate("""
+                            (function() {
+                                let elements = document.querySelectorAll('button, div');
+                                for (let el of elements) {
+                                    let text = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                    if (text === 'CONFIRM') {
+                                        let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
+                                        el.dispatchEvent(event);
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            })();
+                        """)
+                    except Exception as e:
+                        logger.error(f"Click error: {e}")
 
                     # GENERATING PREDICTION মেসেজ ডিলিট করা
                     try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
                     except: pass
 
-                    # NEW TRADE PLACED মেসেজ
+                    # NEW TRADE PLACED মেসেজ (এটি ডিলিট হবে না)
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
@@ -368,11 +383,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ))
 
+                    # রেজাল্টের জন্য অপেক্ষা (৩২ সেকেন্ড)
                     await asyncio.sleep(32)
 
                     # রেজাল্ট চেক
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
-                    await page.wait_for_timeout(2000) 
+                    await page.wait_for_timeout(1500) 
                     
                     new_page_text = await page.evaluate("() => document.body.innerText")
                     new_balance_match = re.search(r'Total\s*balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
@@ -464,8 +480,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
-    
-    # 💡 এখানে ৬টি অ্যাকাউন্টের লিমিটটি মুছে ফেলা হয়েছে
     
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
