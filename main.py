@@ -306,21 +306,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # 💡 নতুন ও নিখুঁত ক্লিক লজিক (Big / Small বাটনের জন্য) 💡
                     clicked = False
                     try:
-                        # গেমের ভেতরে "Big" বা "Small" লেখা বাটনটি খোঁজা (বড় বাটন)
-                        # .last ব্যবহার করা হয়েছে যাতে হিস্ট্রি টেবিলের লেখায় ক্লিক না করে
                         target_locator = page.locator(f'div:text-is("{choice}"), span:text-is("{choice}")').last
-                        
-                        # বাটনটি স্ক্রিনে দৃশ্যমান হওয়া পর্যন্ত অপেক্ষা করা
                         await target_locator.wait_for(state="visible", timeout=10000)
-                        
-                        # জোর করে ক্লিক করা (overlay পপআপ বাইপাস করবে)
                         await target_locator.click(force=True, timeout=5000)
                         clicked = True
                         logger.info(f"Successfully clicked {choice} button.")
                     except Exception as e:
                         logger.error(f"Primary click failed: {e}")
-                        
-                        # 💡 ব্যাকআপ পদ্ধতি: জাভাস্ক্রিপ্ট দিয়ে সরাসরি ক্লিক করা
                         try:
                             clicked = await page.evaluate(f"""
                                 (function() {{
@@ -328,7 +320,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                     let elements = document.querySelectorAll('div, button, span');
                                     for (let el of elements) {{
                                         let text = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                        // নিশ্চিত করা হচ্ছে যেন এটি শুধু লেখা না হয়ে একটি বাটন হয় (width > 50)
                                         if (text === target && el.getBoundingClientRect().width > 50) {{
                                             el.click(); 
                                             return true;
@@ -340,7 +331,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except: pass
 
                     if not clicked:
-                        # যদি ক্লিক না হয়, তবে স্ক্রিনশট নিয়ে টেলিগ্রামে পাঠানো হবে
                         screenshot_path = f"error_{uid}.png"
                         await page.screenshot(path=screenshot_path)
                         await ctx.bot.send_photo(
@@ -352,7 +342,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     await page.wait_for_timeout(1000) 
                     
-                    # Confirm বাটন থাকলে ক্লিক করা
                     try:
                         await page.locator('text="Confirm"').last.click(force=True, timeout=3000)
                     except: pass
