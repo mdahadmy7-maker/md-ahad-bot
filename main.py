@@ -81,14 +81,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
     login_phone = phone[3:] if phone.startswith("880") else phone
     
-    async def update_loading(percent, text="CONNECTING TO HGNICE"):
+    async def update_loading(percent):
         if not loading_msg_id: return
         filled = "█" * (percent // 10)
         empty = "░" * (10 - (percent // 10))
         try:
             await ctx.bot.edit_message_text(
                 chat_id=uid, message_id=loading_msg_id, 
-                text=f"🔄 **{text}**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
+                text=f"🔄 **CONNECTING TO HGNICE**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
             )
         except: pass
 
@@ -102,44 +102,24 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         
         try:
             # ---------------- ১. লগইন ----------------
-            await update_loading(10, "OPENING SITE...")
+            await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            
-            # পপআপ হ্যান্ডেল
-            for _ in range(3):
-                try:
-                    await page.evaluate("""
-                        (function() {
-                            let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
-                            for (let el of elements) {
-                                let text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
-                                if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok') {
-                                    let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
-                                    el.dispatchEvent(event);
-                                }
-                            }
-                        })();
-                    """)
-                    await page.wait_for_timeout(500)
-                except: pass
+            await page.wait_for_timeout(3000)
 
-            await update_loading(30, "ENTERING DETAILS...")
+            await update_loading(30)
             try:
-                await page.wait_for_selector('input[type="text"]', timeout=15000)
                 await page.get_by_placeholder("Please enter the phone number").fill(login_phone)
-                await page.wait_for_timeout(500)
                 await page.locator('input[type="password"]').first.fill(password)
-                await page.wait_for_timeout(500)
             except: pass
 
-            await update_loading(50, "CLICKING LOGIN...")
+            await update_loading(50)
             try:
                 await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000)
             except:
                 await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
-            await update_loading(70, "VERIFYING...")
-            # লগইনের পর আসা পপআপ বন্ধ করা
+            await update_loading(70)
+            # পপআপ হ্যান্ডেল (লগইনের পর)
             for _ in range(3):
                 await page.evaluate("""
                     (function() {
@@ -155,7 +135,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 """)
                 await page.wait_for_timeout(400)
 
-            await update_loading(85, "LOADING DASHBOARD...")
+            await update_loading(85)
+            # Account পেজে যাওয়া
             try:
                 await page.evaluate("""
                     (function() {
@@ -170,6 +151,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.wait_for_timeout(2000) 
             except: pass
 
+            await update_loading(95)
             login_status = "unknown"
             uid_val = "Unknown"
             balance = "0.00"
@@ -191,7 +173,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     break
                 await page.wait_for_timeout(1000)
 
-            await update_loading(100, "COMPLETED")
+            await update_loading(100)
             await asyncio.sleep(0.2)
 
             if loading_msg_id:
@@ -284,7 +266,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # 💡 পপআপ (Platform Name Change Announcement) বন্ধ করার ১০০% শক্তিশালী লজিক
                     for _ in range(5):
                         try:
-                            # Confirm লেখা যেকোনো বাটন বা ডিভে ক্লিক করবে
                             popup_btn = page.locator('button:has-text("Confirm"), div:has-text("Confirm"), span:has-text("Confirm"), button:has-text("OK")').last
                             if await popup_btn.is_visible(timeout=1000):
                                 await popup_btn.click(force=True, timeout=2000)
@@ -337,7 +318,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     clicked = False
                     try:
                         # Playwright এর get_by_text দিয়ে সরাসরি লেখা খোঁজা (exact=True)
-                        # .last ব্যবহার করা হয়েছে যাতে নিচের দিকের বড় বাটনে ক্লিক করে
+                        # .last ব্যবহার করা হয়েছে যাতে নিচের দিকের বড় বাটনে ক্লিক করে, হিস্ট্রি টেবিলে না
                         target_locator = page.get_by_text(choice, exact=True).last
                         await target_locator.wait_for(state="visible", timeout=15000)
                         await target_locator.click(force=True, timeout=5000)
@@ -478,7 +459,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৫. টেলিগ্রাম হ্যান্ডলার (আগের মতোই)
+# ৫. টেলিগ্রাম হ্যান্ডলার (আপনার স্ক্রিনশট অনুযায়ী হুবহু ডিজাইন)
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -515,6 +496,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if state.get("awaiting") == "phone":
         state["temp_phone"] = text
         state["awaiting"] = "password"
+        # 💡 আপনার দেওয়া হুবহু ডিজাইন
         await update.message.reply_text(
             "╔════════════════════════╗\n"
             "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
@@ -529,7 +511,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["temp_password"] = text
         state["awaiting"] = None 
         
-        # 💡 পাসওয়ার্ড মেসেজ সাথে সাথে ডিলিট হয়ে যাবে
         try: 
             await update.message.delete()
         except: 
