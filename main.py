@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import os
+import base64
 import json
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
@@ -31,7 +32,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# ২. লগইন এবং অটো-বেট ফাংশন (ফাস্ট + API Intercept)
+# ২. লগইন এবং অটো-বেট ফাংশন (সুপার ফাস্ট + JWT ডিকোড)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -63,7 +64,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             
             await update_loading(30, "লগইন ফর্ম খোঁজা হচ্ছে...")
             try:
-                await page.wait_for_selector('input[type="text"], input[type="tel"]', timeout=10000)
+                # অপেক্ষা ১০ সেকেন্ড থেকে ৫ সেকেন্ডে কমানো হয়েছে
+                await page.wait_for_selector('input[type="text"], input[type="tel"]', timeout=5000) 
                 await page.get_by_placeholder("Please enter the phone number").fill(login_phone, timeout=3000)
                 await page.locator('input[type="password"]').first.fill(password, timeout=3000)
             except Exception as e:
@@ -80,33 +82,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(50, "লগইন করা হচ্ছে...")
             
-            # 💡 API ইন্টারসেপ্ট (ব্যালেন্স ও UID নিখুঁতভাবে ধরার জন্য)
-            login_status = "unknown"
-            uid_val = "Unknown"
-            balance = "0.00"
-            
+            # 💡 লগইন বাটনে ক্লিক
             try:
-                # লগইন বাটনে ক্লিক করার সাথে সাথে GetUserInfo API রেসপন্স ধরার লিসেনার
-                async with page.expect_response(lambda response: "GetUserInfo" in response.url, timeout=15000) as response_info:
-                    try:
-                        await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=5000)
-                    except:
-                        await page.locator('button:has-text("Log in")').last.click(timeout=5000)
-                
-                # রেসপন্স পাওয়া গেছে
-                response = await response_info.value
-                json_data = await response.json()
-                
-                if json_data.get("code") == 0 and "data" in json_data:
-                    user_data = json_data["data"]
-                    uid_val = user_data.get("userId", "Unknown")
-                    balance = user_data.get("amount", "0.00")
-                    login_status = "success"
-            except Exception as e:
-                logger.error(f"API intercept failed: {e}")
-
+                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=5000)
+            except:
+                await page.locator('button:has-text("Log in")').last.click(timeout=5000)
+            
             await update_loading(70, "পপ-আপ বন্ধ করা হচ্ছে...")
-            for _ in range(5):
+            for _ in range(5): # ১০ থেকে ৫ বার কমানো হয়েছে
                 await page.evaluate("""
                     (function() {
                         let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
@@ -121,9 +104,27 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 """)
                 await page.wait_for_timeout(300)
 
-            # যদি API ইন্টারসেপ্ট কাজ না করে, তবে ব্যাকআপ হিসেবে Account পেজে যাওয়া
+            await update_loading(85, "ব্যালেন্স ও UID সংগ্রহ করা হচ্ছে...")
+            login_status = "unknown"
+            uid_val = "Unknown"
+            balance = "0.00"
+
+            # 💡 ২. JWT টোকেন থেকে ব্যালেন্স এবং UID নেওয়া (১০০% নিখুঁত)
+            try:
+                token = await page.evaluate("() => localStorage.getItem('token') || localStorage.getItem('access_token') || localStorage.getItem('refreshToken')")
+                if token:
+                    payload_b64 = token.split('.')[1]
+                    payload_b64 += "=" * ((4 - len(payload_b64) % 4) % 4)
+                    decoded_payload = json.loads(base64.b64decode(payload_b64).decode('utf-8'))
+                    uid_val = decoded_payload.get("UserId", "Unknown")
+                    balance = decoded_payload.get("Amount", "0.00")
+                    login_status = "success"
+            except Exception as e:
+                logger.error(f"Token decode error: {e}")
+
+            # যদি টোকেন থেকে না পাওয়া যায়, তবে Account পেজে গিয়ে স্ক্র্যাপ করা হবে (ব্যাকআপ)
             if login_status != "success":
-                await update_loading(85, "ব্যালেন্স সংগ্রহ করা হচ্ছে (Backup)...")
+                await update_loading(90, "অ্যাকাউন্ট পেজে যাওয়া হচ্ছে...")
                 try:
                     await page.locator('text="Account"').last.click(timeout=3000)
                     await page.wait_for_timeout(1500)
@@ -222,7 +223,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
-                    # 💡 ৪. নেভিগেশন (Home -> Win Go) - ফাস্ট করা হয়েছে
+                    # 💡 ৪. নেভিগেশন (Home -> Win Go) - সুপার ফাস্ট
                     await page.locator('text="Home"').last.click(timeout=3000)
                     await page.wait_for_timeout(1000)
                     try:
