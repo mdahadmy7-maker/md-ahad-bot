@@ -77,7 +77,7 @@ def get_history_and_prediction():
         return "SMALL", "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (ফাস্ট এবং নির্ভুল)
+# ৩. লগইন এবং অটো-বেট ফাংশন (সুপার ফাস্ট মোড)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -95,6 +95,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
+        # হেডলেস ব্রাউজার চালু
         browser = await p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"]) 
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
@@ -103,12 +104,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         page = await context.new_page()
         
         try:
-            # ---------------- ১. লগইন (ফাস্ট এবং নির্ভুল) ----------------
+            # ---------------- ১. লগইন (ফাস্ট) ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             
-            # ইনপুট বক্স আসার সাথে সাথেই ফিলাপ করা
-            await page.wait_for_selector('input[type="text"]', timeout=15000)
+            # ইনপুট বক্স আসার সাথে সাথেই ফিলাপ (সর্বোচ্চ ১৫ সেকেন্ড অপেক্ষা করবে)
+            await page.wait_for_selector('input[type="text"]', timeout=15000) 
             await update_loading(30)
             
             await page.locator('input[type="text"]').first.fill(login_phone)
@@ -116,9 +117,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(50)
             try:
-                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=5000)
+                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000)
             except:
-                await page.locator('button:has-text("Log in")').last.click(timeout=5000)
+                await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
             await update_loading(70)
             # লগইনের পর পপআপ ক্লোজ (যদি থাকে)
@@ -135,7 +136,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         }
                     })();
                 """)
-                await page.wait_for_timeout(300)
+                await page.wait_for_timeout(500)
 
             await update_loading(85)
             # Account পেজে গিয়ে ডেটা নেওয়া
@@ -183,7 +184,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
 
             if login_status == "failed" or uid_val == "Unknown":
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})")
+                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\nসম্ভবত পাসওয়ার্ড ভুল।")
                 await browser.close()
                 return
 
@@ -254,12 +255,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 WinGo পেজে যাওয়া 
+                    # 💡 WinGo পেজে যাওয়া (ফাস্ট)
                     await page.goto(WINGO_URL, timeout=60000, wait_until="domcontentloaded")
-                    
-                    # পপআপ বন্ধ করার জন্য স্ক্রিনের এক কোণায় ক্লিক
+                    await page.wait_for_timeout(2000) 
+
+                    # স্ক্রিনে ক্লিক করে পপআপ বন্ধ
                     await page.mouse.click(20, 20)
-                    await page.wait_for_timeout(1000)
+                    await page.wait_for_timeout(500) 
 
                     # 💡 Lottery তে ক্লিক করা 
                     try:
@@ -267,9 +269,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await page.wait_for_timeout(1000)
                     except: pass
 
-                    # 💡 Win Go কার্ডে ক্লিক করা (সবচেয়ে নিখুঁত পদ্ধতি)
+                    # 💡 Win Go কার্ডে ক্লিক করা
                     try:
-                        # Win Go লেখাটি খুঁজে বের করে তার ক্লিকেবল প্যারেন্টে ক্লিক করা
                         await page.evaluate("""
                             (function() {
                                 let els = document.querySelectorAll('*');
@@ -281,11 +282,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 }
                             })();
                         """)
-                        await page.wait_for_timeout(3000) # গেম লোড হওয়ার জন্য অপেক্ষা
+                        # Big/Small আসা পর্যন্ত অপেক্ষা করবে (সর্বোচ্চ ১০ সেকেন্ড)
+                        await page.wait_for_selector('text="Big"', timeout=10000) 
                     except Exception as e:
                         logger.error(f"WinGo Card Click Error: {e}")
-
-                    # 💡 গেমের ভেতরে পপআপ থাকলে বন্ধ করা
+                        
+                    # 💡 গেমের ভেতরে পপআপ (Announcement) বন্ধ করা
                     for _ in range(3):
                         try:
                             popup_btn = page.locator('button:has-text("Confirm"), div:has-text("Confirm"), span:has-text("Confirm")').last
@@ -327,7 +329,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     for pct in [38, 75, 100]:
                         bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(0.1) # ফাস্ট অ্যানিমেশন
                         try:
                             await ctx.bot.edit_message_text(
                                 chat_id=uid, message_id=pred_msg.message_id,
