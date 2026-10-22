@@ -77,7 +77,7 @@ def get_history_and_prediction():
         return "SMALL", "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (জাভাস্ক্রিপ্ট ফিলাপ)
+# ৩. লগইন এবং অটো-বেট ফাংশন (মানুষের মতো টাইপিং)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -111,23 +111,23 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await page.wait_for_selector('input[type="text"]', timeout=15000) 
             await update_loading(30)
             
-            # 💡 জাভাস্ক্রিপ্ট দিয়ে ইনপুট ফিলাপ (সবচেয়ে শক্তিশালী পদ্ধতি, কোনো পপআপ এটাকে ব্লক করতে পারে না)
-            await page.evaluate(f"""
-                (function() {{
-                    let inputs = document.querySelectorAll('input');
-                    if (inputs.length > 0) {{
-                        inputs[0].value = '{login_phone}';
-                        inputs[0].dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        inputs[0].dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    }}
-                    if (inputs.length > 1) {{
-                        inputs[1].value = '{password}';
-                        inputs[1].dispatchEvent(new Event('input', {{ bubbles: true }}));
-                        inputs[1].dispatchEvent(new Event('change', {{ bubbles: true }}));
-                    }}
-                }})();
-            """)
-            await page.wait_for_timeout(1000) 
+            # 💡 ১. ফোন নাম্বার বক্সে ক্লিক করে ভেতরের ভুল লেখা মুছে ফেলা এবং নতুন লেখা টাইপ করা
+            phone_input = page.locator('input[type="text"]').first
+            await phone_input.click() # বক্সে ক্লিক
+            await page.keyboard.press("Control+A") # সব সিলেক্ট
+            await page.keyboard.press("Backspace") # মুছে ফেলা
+            await page.keyboard.type(login_phone, delay=50) # মানুষের মতো টাইপ
+            
+            await page.wait_for_timeout(500)
+
+            # 💡 ২. পাসওয়ার্ড বক্সে ক্লিক করে পাসওয়ার্ড টাইপ করা
+            pass_input = page.locator('input[type="password"]').first
+            await pass_input.click()
+            await page.keyboard.press("Control+A")
+            await page.keyboard.press("Backspace")
+            await page.keyboard.type(password, delay=50)
+            
+            await page.wait_for_timeout(500) # ইনপুট নিশ্চিত হওয়া
 
             await update_loading(50)
             # লগইন বাটনে ক্লিক
@@ -174,7 +174,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             uid_val = "Unknown"
             balance = "0.00"
 
-            # ডেটা রিডিং লুপ (১৫ সেকেন্ড অপেক্ষা)
+            # ডেটা রিডিং লুপ 
             for _ in range(15): 
                 page_text = await page.inner_text("body")
                 if "Wrong account or password" in page_text or "Error: 147" in page_text:
@@ -202,7 +202,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             if login_status == "failed" or uid_val == "Unknown":
                 ss_path = f"loginfail_{uid}.png"
                 await page.screenshot(path=ss_path)
-                await ctx.bot.send_photo(chat_id=uid, photo=open(ss_path, 'rb'), caption="❌ LOGIN FAILED\nসঠিক নাম্বার/পাসওয়ার্ড দিন অথবা স্ক্রিনশটে দেখুন কী সমস্যা।")
+                await ctx.bot.send_photo(
+                    chat_id=uid, 
+                    photo=open(ss_path, 'rb'), 
+                    caption=f"❌ **LOGIN FAILED ({phone})**\n\nসঠিক নাম্বার/পাসওয়ার্ড দিন অথবা স্ক্রিনশটে দেখুন কী সমস্যা।"
+                )
                 await browser.close()
                 return
 
@@ -287,7 +291,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await page.wait_for_timeout(1000)
                     except: pass
 
-                    # 💡 Win Go কার্ডে ক্লিক করা (জাভাস্ক্রিপ্ট দিয়ে, যা ১০০% কাজ করে)
+                    # 💡 Win Go কার্ডে ক্লিক করা
                     try:
                         await page.evaluate("""
                             (function() {
