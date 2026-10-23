@@ -369,23 +369,28 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     # 💡 ২. টাইমার 00:00 হওয়া পর্যন্ত অপেক্ষা করা
                     logger.info("Waiting for current round to end (00:00)...")
-                    for _ in range(400): 
-                        try:
-                            body_text = await page.evaluate("() => document.body.innerText")
-                            if re.search(r'0\s*0\s*:\s*0\s*0', body_text):
-                                break
-                        except: pass
-                        await asyncio.sleep(0.1) 
+                    try:
+                        await page.wait_for_function("() => document.body.innerText.includes('00:00')", timeout=35000)
+                    except: pass # টাইমার মিস হলে ইগনোর করবে
                     
                     # 💡 ৩. 00:00 চলে যাওয়া এবং নতুন রাউন্ড শুরু হওয়ার জন্য অপেক্ষা করা
                     logger.info("Waiting for new round to start...")
-                    for _ in range(200): 
-                        try:
-                            body_text = await page.evaluate("() => document.body.innerText")
-                            if not re.search(r'0\s*0\s*:\s*0\s*0', body_text) and re.search(r'0\s*0\s*:\s*([2-3]\d)', body_text):
-                                break
-                        except: pass
-                        await asyncio.sleep(0.1) 
+                    try:
+                        # অপেক্ষা করবে যতক্ষণ না 00:00 থাকে না এবং টাইমার ২৫ থেকে ৩০ এর মধ্যে আসে
+                        await page.wait_for_function("""
+                            () => {
+                                let text = document.body.innerText;
+                                if (text.includes('00:00')) return false;
+                                let match = text.match(/00:(\\d{2})/);
+                                if (match) {
+                                    let sec = parseInt(match[1]);
+                                    return sec >= 25 && sec <= 30;
+                                }
+                                return false;
+                            }
+                        """, timeout=15000)
+                    except Exception as e:
+                        logger.info(f"Timer wait timeout: {e}")
 
                     # টাইমার স্ক্র্যাপ (মেসেজে দেখানোর জন্য)
                     timer_val = "30s"
@@ -396,20 +401,19 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             timer_val = f"{timer_match.group(1)}s"
                     except: pass
 
-                    # 💡 ৪. Big/Small ক্লিক করা (force=True বাদ দেওয়া হয়েছে)
+                    # 💡 ৪. Big/Small ক্লিক করা
                     clicked = False
                     try:
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                         
                         target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
                         
-                        # প্লেরাইট নিজে থেকেই অপেক্ষা করবে 00 ওভারলে সরে যাওয়া পর্যন্ত (force=False)
-                        await target_locator.click(timeout=10000)
+                        # প্লেরাইট নিজে থেকেই অপেক্ষা করবে ওভারলে সরে যাওয়া পর্যন্ত
+                        await target_locator.click(timeout=5000)
                         clicked = True
                     except Exception as e:
                         logger.error(f"Standard click failed: {e}")
                         try:
-                            # জাভাস্ক্রিপ্ট ফলব্যাক, তবে 00 ওভারলে এড়ানোর জন্য শুধু ভিজিবল এলিমেন্টে ক্লিক করবে
                             clicked = await page.evaluate(f"""
                                 (function() {{
                                     let target = '{choice}'.toUpperCase();
@@ -418,7 +422,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                         let text = (el.innerText || el.textContent || '').trim().toUpperCase();
                                         if (text === target) {{
                                             let rect = el.getBoundingClientRect();
-                                            // স্ক্রিনে দৃশ্যমান এবং ডিসেবল নয় কিনা চেক
                                             if (rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).pointerEvents !== 'none') {{
                                                 let clickTarget = el.closest('button, div[role="button"], .btn') || el;
                                                 clickTarget.click();
