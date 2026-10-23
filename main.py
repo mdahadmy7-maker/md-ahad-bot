@@ -331,9 +331,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except: pass
                         await asyncio.sleep(1)
                     
-                    # 💡 ২. নতুন রাউন্ড শুরু হওয়ার জন্য অপেক্ষা করা (বাটন চালু হওয়া পর্যন্ত)
-                    logger.info("Waiting for new round to start...")
-                    await page.wait_for_timeout(3000) # ৩ সেকেন্ড বাফার
+                    # 💡 ২. নতুন রাউন্ড শুরু হওয়ার জন্য অপেক্ষা করা (টাইমার ২৯ বা ৩০ হওয়া পর্যন্ত)
+                    logger.info("Waiting for new round to start (Timer 29/30)...")
+                    for _ in range(15):
+                        try:
+                            body_text = await page.evaluate("() => document.body.innerText")
+                            if re.search(r'0\s*0\s*:\s*([1-3]\d)', body_text):
+                                break
+                        except: pass
+                        await asyncio.sleep(1)
+                    
+                    await page.wait_for_timeout(1000) # বাটন চালু হওয়ার জন্য একটু বাড়তি সময়
 
                     # টাইমার স্ক্র্যাপ (মেসেজে দেখানোর জন্য)
                     timer_val = "30s"
@@ -397,10 +405,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                         await page.wait_for_timeout(1000)
                         
-                        # বাটনটি খুঁজে বের করা
                         target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
-                        
-                        # বাটনটি ক্লিক করার জন্য প্রস্তুত হওয়া পর্যন্ত অপেক্ষা করা
                         await target_locator.wait_for(state="visible", timeout=5000)
                         await target_locator.scroll_into_view_if_needed(timeout=4000)
                         
@@ -426,31 +431,51 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except Exception as coord_e:
                             logger.error(f"Coordinate click failed: {coord_e}")
 
-                    # 💡 ৫. Confirm বাটন খোঁজা এবং ক্লিক করা
-                    confirm_success = False
-                    for _ in range(6): # ৬ সেকেন্ড পর্যন্ত অপেক্ষা করবে Confirm বাটনের জন্য
+                    # 💡 ৫. "Total amount" বাটন খোঁজা এবং ক্লিক করা (Confirm এর বদলে)
+                    popup_success = False
+                    for _ in range(6): # ৬ সেকেন্ড পর্যন্ত অপেক্ষা করবে
                         try:
-                            confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm"), div:has-text("Confirm")').last
-                            if await confirm_btn.count() > 0 and await confirm_btn.is_visible():
-                                await confirm_btn.click(timeout=3000, force=True)
-                                confirm_success = True
+                            # পপআপে "Total amount" লেখা বাটনটি খোঁজা
+                            total_amount_btn = page.locator('text=re.compile(r"Total amount", re.IGNORECASE)').last
+                            if await total_amount_btn.count() > 0 and await total_amount_btn.is_visible():
+                                await total_amount_btn.click(timeout=3000, force=True)
+                                popup_success = True
+                                break
+                            
+                            # যদি টেক্সট দিয়ে না ধরা পড়ে, তবে JS দিয়ে খোঁজা
+                            js_clicked = await page.evaluate("""
+                                (function() {
+                                    let elements = document.querySelectorAll('div, button, span');
+                                    for(let el of elements) {
+                                        let text = (el.innerText || el.textContent || '').trim();
+                                        if(text.includes('Total amount') || text.includes('Total Amount')) {
+                                            let btn = el.closest('div[role="button"], button') || el;
+                                            btn.click();
+                                            return true;
+                                        }
+                                    }
+                                    return false;
+                                })();
+                            """)
+                            if js_clicked:
+                                popup_success = True
                                 break
                         except Exception as e:
                             pass
                         await asyncio.sleep(1)
 
-                    if not confirm_success:
-                        screenshot_path = f"error_confirm_{uid}.png"
+                    if not popup_success:
+                        screenshot_path = f"error_popup_{uid}.png"
                         await page.screenshot(path=screenshot_path)
                         await ctx.bot.send_photo(
                             chat_id=uid, 
                             photo=open(screenshot_path, 'rb'), 
-                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু কোনো Confirm বাটন আসেনি!**\n\nসম্ভবত ক্লিক ঠিকমতো রেজিস্টার হয়নি বা বাটন নিষ্ক্রিয় ছিল। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
+                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু 'Total amount' বাটন পাওয়া যায়নি!**\n\nসম্ভবত পপআপ আসেনি বা বাটন নিষ্ক্রিয় ছিল। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
                         )
                         state["trade_running"] = False
                         break
 
-                    # 💡 ৬. ANALYSIS REPORT মেসেজ (আপনার স্ক্রিনশটের মতো হুবহু)
+                    # 💡 ৬. ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
@@ -770,7 +795,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
     elif data == "start_trade_btn":
         state["trade_running"] = True
-        # 💡 এখানে edit_reply_markup সরিয়ে দেওয়া হয়েছে যাতে মেসেজটি ডিলিট না হয়
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
         await query.edit_message_text("❌ **TRADE CANCELLED**")
