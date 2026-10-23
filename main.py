@@ -249,6 +249,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
+                    # 💡 এখানেই প্রেডিকশন তৈরি হচ্ছে
                     choice, current_period = get_history_and_prediction()
 
                     # 💡 WinGo তে যাওয়ার সঠিক পথ
@@ -443,6 +444,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         logger.info(f"Timer wait timeout: {e}")
 
                     # 💡 ৪. Big/Small ক্লিক করা (force=True ছাড়া)
+                    # এখানে choice এর মান ঠিক BIG অথবা SMALL হবে
+                    logger.info(f"Attempting to click: {choice}")
                     clicked = False
                     try:
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
@@ -455,6 +458,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     except Exception as e:
                         logger.error(f"Standard click failed: {e}")
                         try:
+                            # জাভাস্ক্রিপ্ট ফলব্যাক, তবে 00 ওভারলে এড়ানোর জন্য শুধু ভিজিবল এলিমেন্টে ক্লিক করবে
                             clicked = await page.evaluate(f"""
                                 (function() {{
                                     let target = '{choice}'.toUpperCase();
@@ -475,7 +479,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             """)
                         except: pass
 
-                    # 💡 ৫. "Total amount" বাটন খোঁজা
+                    # 💡 ৫. "Total amount" বা "Confirm" বাটন খোঁজা
                     popup_success = False
                     if clicked:
                         try:
@@ -517,7 +521,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
-                    # ANALYSIS REPORT মেসেজ
+                    # 💡 ৬. ANALYSIS REPORT মেসেজ
+                    # এখানে choice ব্যবহার করা হয়েছে, তাই টেলিগ্রামে যা দেখাবে ঠিক সেটাই ক্লিক করেছে।
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
