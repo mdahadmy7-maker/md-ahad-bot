@@ -78,7 +78,7 @@ def get_history_and_prediction():
         return "SMALL", "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন
+# ৩. লগইন এবং অটো-বেট ফাংশন (আপনার প্রথম ফাইলের হুবহু লজিক)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -104,7 +104,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         page = await context.new_page()
         
         try:
-            # ---------------- ১. লগইন (আপনার প্রথম ফাইলের হুবহু লজিক) ----------------
+            # ---------------- ১. লগইন ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(3000)
@@ -138,7 +138,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.wait_for_timeout(400)
 
             await update_loading(85)
-            # 💡 Account পেজে গিয়ে ডেটা নেওয়া (হুবহু আপনার প্রথম ফাইলের মতো)
+            # 💡 Account পেজে গিয়ে আসল ডেটা নেওয়া
             try:
                 await page.evaluate("""
                     (function() {
@@ -164,6 +164,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     login_status = "failed"
                     break
                 
+                # আপনার প্রথম ফাইলের রেজেক্স
                 uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
                 balance_match = re.search(r'Total\s*balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
                 
@@ -254,7 +255,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 WinGo তে যাওয়ার সঠিক পথ (Home -> Lottery -> Win Go)
+                    # 💡 WinGo তে যাওয়ার সঠিক পথ
                     await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(2000) 
 
@@ -301,7 +302,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         """)
                         await page.wait_for_timeout(500)
 
-                    # টাইমার স্ক্র্যাপ (আসল সময় বের করা)
+                    # টাইমার স্ক্র্যাপ
                     timer_val = "30s"
                     try:
                         body_text = await page.evaluate("() => document.body.innerText")
@@ -356,63 +357,48 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         
                         state["first_bet"] = False 
 
-                    # 💡 ২. Big / Small ক্লিক (স্ক্রিনশটের ওপর ভিত্তি করে সম্পূর্ণ নতুন লজিক)
+                    # 💡 ২. Big / Small ক্লিক (সম্পূর্ণ নতুন এবং শক্তিশালী জাভাস্ক্রিপ্ট লজিক)
                     clicked = False
                     try:
-                        # পেজের একদম নিচে স্ক্রল করা যাতে বাটনগুলো দৃশ্যমান হয়
+                        # পেজের একদম নিচে স্ক্রল করা
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                         await page.wait_for_timeout(1000)
-
-                        # Case-insensitive locator, কারণ সাইটে "Big" লেখা থাকতে পারে আর আমাদের ভ্যারিয়েবলে "BIG"
-                        target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
                         
-                        # বাটনটি স্ক্রিনে নিয়ে আসা
-                        await target_locator.scroll_into_view_if_needed(timeout=5000)
-                        
-                        # মানুষের মতো মাউস দিয়ে সঠিক পজিশনে ক্লিক করা (সবচেয়ে শক্তিশালী উপায়)
-                        box = await target_locator.bounding_box()
-                        if box:
-                            x = box['x'] + box['width'] / 2
-                            y = box['y'] + box['height'] / 2
-                            await page.mouse.move(x, y)
-                            await page.wait_for_timeout(300) # মানুষের মতো সামান্য দেরি
-                            await page.mouse.click(x, y)
-                            clicked = True
-                        else:
-                            # বক্স না পেলে সাধারণ ক্লিক
-                            await target_locator.click(force=True, timeout=5000)
-                            clicked = True
-                            
-                    except Exception as e:
-                        logger.error(f"Standard click failed for {choice}: {e}, trying JS fallback...")
-                        try:
-                            # JS Fallback: React/Vue এর জন্য পয়েন্টার ইভেন্ট পাঠানো
-                            clicked = await page.evaluate(f"""
-                                (function() {{
-                                    let target = '{choice}'.toUpperCase();
-                                    let elements = document.querySelectorAll('div, span, button, p, a');
-                                    for (let el of elements) {{
-                                        let text = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                        if (text === target || (text.includes(target) && text.length < 15)) {{
-                                            let clickTarget = el.closest('button, div[role="button"], .btn') || el;
-                                            let rect = clickTarget.getBoundingClientRect();
-                                            let x = rect.left + (rect.width / 2);
-                                            let y = rect.top + (rect.height / 2);
-                                            let opts = {{ bubbles: true, cancelable: true, clientX: x, clientY: y, view: window }};
-                                            
-                                            clickTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
-                                            clickTarget.dispatchEvent(new MouseEvent('mousedown', opts));
-                                            clickTarget.dispatchEvent(new PointerEvent('pointerup', opts));
-                                            clickTarget.dispatchEvent(new MouseEvent('mouseup', opts));
-                                            clickTarget.dispatchEvent(new MouseEvent('click', opts));
-                                            return true;
-                                        }}
+                        # জাভাস্ক্রিপ্ট দিয়ে এলিমেন্ট খুঁজে বের করা এবং মানুষের মতো ক্লিক করা
+                        clicked = await page.evaluate(f"""
+                            (function() {{
+                                let target = '{choice}'.toUpperCase();
+                                // পেজের সব সম্ভাব্য এলিমেন্ট খোঁজা
+                                let elements = Array.from(document.querySelectorAll('div, span, button, p, a'));
+                                
+                                for (let el of elements) {{
+                                    let text = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                    
+                                    // যদি টেক্সট ঠিক 'BIG' বা 'SMALL' হয়
+                                    if (text === target) {{
+                                        // সবচেয়ে কাছের ক্লিকযোগ্য বাটন বা div খোঁজা
+                                        let clickTarget = el.closest('button, div[role="button"], .btn') || el;
+                                        
+                                        // ইভেন্ট তৈরি করা
+                                        let rect = clickTarget.getBoundingClientRect();
+                                        let x = rect.left + (rect.width / 2);
+                                        let y = rect.top + (rect.height / 2);
+                                        let opts = {{ bubbles: true, cancelable: true, clientX: x, clientY: y, view: window }};
+                                        
+                                        // মানুষের মতো মাউস ইভেন্ট পাঠানো
+                                        clickTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
+                                        clickTarget.dispatchEvent(new MouseEvent('mousedown', opts));
+                                        clickTarget.dispatchEvent(new PointerEvent('pointerup', opts));
+                                        clickTarget.dispatchEvent(new MouseEvent('mouseup', opts));
+                                        clickTarget.dispatchEvent(new MouseEvent('click', opts));
+                                        return true;
                                     }}
-                                    return false;
-                                }})();
-                            """)
-                        except Exception as js_e:
-                            logger.error(f"JS click failed: {js_e}")
+                                }}
+                                return false;
+                            }})();
+                        """)
+                    except Exception as js_e:
+                        logger.error(f"JS click failed: {js_e}")
 
                     # 💡 ৩. যদি ক্লিক না হয়, তবে স্ক্রিনশট নিয়ে টেলিগ্রামে পাঠাবে
                     if not clicked:
@@ -431,7 +417,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await page.locator('text="Confirm"').last.click(timeout=3000)
                     except: pass
 
-                    # 💡 ৪. ANALYSIS REPORT মেসেজ (আপনার প্রথম ফাইলের হুবহু ফরম্যাট)
+                    # 💡 ৪. ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
@@ -554,7 +540,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         finally:
             await browser.close()
 
-# (বাকি হ্যান্ডলারগুলো আপনার প্রথম ফাইলের মতো হুবহু আছে)
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
