@@ -310,7 +310,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # 💡 ২. টাইমার 00:00 হওয়া পর্যন্ত অপেক্ষা করা
                     logger.info("Waiting for 00:00...")
                     try:
-                        await page.wait_for_function("() => document.body.innerText.includes('00:00')", timeout=35000)
+                        await page.wait_for_function("() => document.body.innerText.includes('00:00')", timeout=40000)
                     except: pass 
                     
                     # 💡 ৩. 00 চলে যাওয়া এবং নতুন রাউন্ড (29/30) শুরু হওয়ার জন্য অপেক্ষা করা
@@ -323,28 +323,31 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 let match = text.match(/00:(\\d{2})/);
                                 if (match) {
                                     let sec = parseInt(match[1]);
-                                    return sec >= 28 && sec <= 30;
+                                    return sec >= 29 && sec <= 30;
                                 }
                                 return false;
                             }
-                        """, timeout=15000)
+                        """, timeout=20000)
                     except Exception as e:
                         logger.info(f"Timer wait timeout: {e}")
                     
-                    # 💡 ৪. Big/Small ক্লিক করা (একদম ন্যাচারাল ক্লিক, কোনো force নেই)
+                    # 💡 ৪. ১ সেকেন্ডের বাফার (বাটন চালু হওয়ার জন্য)
+                    await page.wait_for_timeout(1000)
+
+                    # 💡 ৫. Big/Small ক্লিক করা (কোনো force=True নেই, যাতে ওভারলে থাকলে ক্লিক না করে)
                     clicked = False
                     try:
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                         
                         target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
                         
-                        # Playwright নিজে থেকেই অপেক্ষা করবে 00 ওভারলে সরে গিয়ে বাটন চালু হওয়া পর্যন্ত
+                        # প্লেরাইট নিজে থেকেই অপেক্ষা করবে বাটন ক্লিকযোগ্য হওয়া পর্যন্ত
                         await target_locator.click(timeout=15000)
                         clicked = True
                     except Exception as e:
                         logger.error(f"Standard click failed: {e}")
 
-                    # 💡 ৫. "Total amount" বাটন খোঁজা
+                    # 💡 ৬. "Total amount" বাটন খোঁজা
                     popup_success = False
                     if clicked:
                         try:
@@ -366,7 +369,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
-                    # 💡 ৬. ANALYSIS REPORT মেসেজ
+                    # 💡 ৭. ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
