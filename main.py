@@ -290,7 +290,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             except: pass
                         
                         await asyncio.sleep(0.2)
-                        # জেনারেটিং মেসেজ ডিলিট
                         if pred_msg:
                             try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
                             except: pass
@@ -367,30 +366,23 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         """)
                         await page.wait_for_timeout(500)
 
-                    # 💡 ২. টাইমার 00:00 হওয়া পর্যন্ত অপেক্ষা করা
-                    logger.info("Waiting for current round to end (00:00)...")
+                    # 💡 ২. টাইমার 00:00 হওয়া এবং নতুন রাউন্ড (29/30) শুরু হওয়ার জন্য অপেক্ষা করা
+                    logger.info("Waiting for 00:00 and new round to start...")
                     try:
-                        await page.wait_for_function("() => document.body.innerText.includes('00:00')", timeout=35000)
-                    except: pass # টাইমার মিস হলে ইগনোর করবে
-                    
-                    # 💡 ৩. 00:00 চলে যাওয়া এবং নতুন রাউন্ড শুরু হওয়ার জন্য অপেক্ষা করা
-                    logger.info("Waiting for new round to start...")
-                    try:
-                        # অপেক্ষা করবে যতক্ষণ না 00:00 থাকে না এবং টাইমার ২৫ থেকে ৩০ এর মধ্যে আসে
                         await page.wait_for_function("""
                             () => {
                                 let text = document.body.innerText;
-                                if (text.includes('00:00')) return false;
+                                if (text.includes('00:00')) return false; // 00 থাকলে অপেক্ষা করবে
                                 let match = text.match(/00:(\\d{2})/);
                                 if (match) {
                                     let sec = parseInt(match[1]);
-                                    return sec >= 25 && sec <= 30;
+                                    return sec >= 28 && sec <= 30; // ২৮ থেকে ৩০ হলে লুপ ব্রেক করবে
                                 }
                                 return false;
                             }
-                        """, timeout=15000)
+                        """, timeout=45000) # সর্বোচ্চ ৪৫ সেকেন্ড অপেক্ষা
                     except Exception as e:
-                        logger.info(f"Timer wait timeout: {e}")
+                        logger.info(f"Timer wait error: {e}")
 
                     # টাইমার স্ক্র্যাপ (মেসেজে দেখানোর জন্য)
                     timer_val = "30s"
@@ -401,15 +393,15 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             timer_val = f"{timer_match.group(1)}s"
                     except: pass
 
-                    # 💡 ৪. Big/Small ক্লিক করা
+                    # 💡 ৩. Big/Small ক্লিক করা (force=True ছাড়া)
                     clicked = False
                     try:
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                         
                         target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
                         
-                        # প্লেরাইট নিজে থেকেই অপেক্ষা করবে ওভারলে সরে যাওয়া পর্যন্ত
-                        await target_locator.click(timeout=5000)
+                        # Playwright নিজে থেকেই অপেক্ষা করবে 00 ওভারলে সরে গিয়ে বাটন চালু হওয়া পর্যন্ত (force=True নেই)
+                        await target_locator.click(timeout=15000)
                         clicked = True
                     except Exception as e:
                         logger.error(f"Standard click failed: {e}")
@@ -434,17 +426,23 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             """)
                         except: pass
 
-                    # 💡 ৫. "Total amount" বা "Confirm" বাটন খোঁজা
+                    # 💡 ৪. "Total amount" বা "Confirm" বাটন খোঁজা (সরাসরি অপেক্ষা)
                     popup_success = False
                     if clicked:
-                        for _ in range(50): # ৫ সেকেন্ড অপেক্ষা
+                        try:
+                            # পপআপ আসার জন্য অপেক্ষা করা (Total amount অথবা Confirm)
+                            popup_locator = page.locator('text=re.compile(r"Total amount|Confirm", re.IGNORECASE)').last
+                            
+                            # পপআপ স্ক্রিনে আসা পর্যন্ত অপেক্ষা করবে
+                            await popup_locator.wait_for(state="visible", timeout=10000)
+                            
+                            # পপআপে ক্লিক করা
+                            await popup_locator.click(timeout=5000)
+                            popup_success = True
+                        except Exception as e:
+                            logger.error(f"Popup click failed: {e}")
                             try:
-                                total_amount_btn = page.locator('text=re.compile(r"Total amount|Confirm", re.IGNORECASE)').last
-                                if await total_amount_btn.count() > 0 and await total_amount_btn.is_visible():
-                                    await total_amount_btn.click(force=True, timeout=2000)
-                                    popup_success = True
-                                    break
-                                
+                                # জাভাস্ক্রিপ্ট ফলব্যাক যদি লোকে্টর কাজ না করে
                                 js_clicked = await page.evaluate("""
                                     (function() {
                                         let elements = document.querySelectorAll('div, button, span');
@@ -463,9 +461,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 """)
                                 if js_clicked:
                                     popup_success = True
-                                    break
                             except: pass
-                            await asyncio.sleep(0.1)
 
                     if not popup_success:
                         screenshot_path = f"error_popup_{uid}.png"
@@ -478,7 +474,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
-                    # 💡 ৬. ANALYSIS REPORT মেসেজ
+                    # 💡 ৫. ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
