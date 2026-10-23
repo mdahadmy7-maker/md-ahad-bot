@@ -358,14 +358,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         break
 
                     # 💡 ৩. ডিলিট করা এবং Big/Small ক্লিক করা (একদম পরপর)
-                    # GENERATING PREDICTION মেসেজটি ডিলিট করা
                     if pred_msg:
                         try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
                         except: pass
                     
                     state["first_bet"] = False 
 
-                    # Big/Small ক্লিক করা
+                    # Big/Small ক্লিক করার চেষ্টা
                     clicked = False
                     try:
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
@@ -397,25 +396,41 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except Exception as coord_e:
                             logger.error(f"Coordinate click failed: {coord_e}")
 
-                    # ক্লিক করতে না পারলে স্ক্রিনশট
-                    if not clicked:
-                        screenshot_path = f"error_{uid}.png"
+                    # 💡 ৪. ক্লিক সফল হয়েছে কিনা যাচাই করা (Confirm বাটন খোঁজা)
+                    await page.wait_for_timeout(1500) # Confirm বাটন আসার জন্য অপেক্ষা
+                    
+                    confirm_success = False
+                    try:
+                        confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm")').last
+                        if await confirm_btn.count() > 0 and await confirm_btn.is_visible():
+                            await confirm_btn.click(timeout=3000, force=True)
+                            confirm_success = True
+                    except Exception as e:
+                        logger.error(f"Confirm error: {e}")
+
+                    if not confirm_success:
+                        # আবার একবার চেক করা (স্লো ইন্টারনেটের জন্য)
+                        await page.wait_for_timeout(2000)
+                        try:
+                            confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm")').last
+                            if await confirm_btn.count() > 0 and await confirm_btn.is_visible():
+                                await confirm_btn.click(timeout=3000, force=True)
+                                confirm_success = True
+                        except: pass
+
+                    # যদি Confirm বাটন না আসে, তবে ক্লিক ফেইল করেছে -> স্ক্রিনশট পাঠাবে
+                    if not confirm_success:
+                        screenshot_path = f"error_confirm_{uid}.png"
                         await page.screenshot(path=screenshot_path)
                         await ctx.bot.send_photo(
                             chat_id=uid, 
                             photo=open(screenshot_path, 'rb'), 
-                            caption=f"⚠️ **{choice} বাটনে ক্লিক করা যাচ্ছে না!**\nবট বন্ধ করা হচ্ছে। স্ক্রিনশট দেখে বুঝে নিন।"
+                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু কোনো Confirm বাটন আসেনি!**\n\nসম্ভবত ক্লিক ঠিকমতো রেজিস্টার হয়নি বা ওয়েবসাইট আটকে আছে। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
                         )
                         state["trade_running"] = False
                         break
 
-                    await page.wait_for_timeout(1000) 
-                    
-                    try:
-                        await page.locator('text="Confirm"').last.click(timeout=3000)
-                    except: pass
-
-                    # 💡 ৪. ANALYSIS REPORT মেসেজ
+                    # 💡 ৫. ক্লিক সফল হলে ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
