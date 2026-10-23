@@ -294,33 +294,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     except Exception as e:
                         logger.error(f"Navigation error: {e}")
 
-                    if not nav_success:
-                        screenshot_path = f"nav_error_{uid}.png"
-                        await page.screenshot(path=screenshot_path)
-                        await ctx.bot.send_photo(
-                            chat_id=uid, 
-                            photo=open(screenshot_path, 'rb'), 
-                            caption="⚠️ **WinGo পেজে ঢুকতে সমস্যা হচ্ছে!**\n\nবট Lottery বা WinGo বাটন খুঁজে পাচ্ছে না। নিচের স্ক্রিনশট দেখে বুঝে নিন কোথায় আটকেছে। বট বন্ধ করা হচ্ছে।"
-                        )
-                        state["trade_running"] = False
-                        break
-
-                    # গেমের ভেতরের পপআপ ক্লোজ
-                    for _ in range(3):
-                        await page.evaluate("""
-                            (function() {
-                                let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
-                                for (let el of elements) {
-                                    let text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
-                                    if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok') {
-                                        let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
-                                        el.dispatchEvent(event);
-                                    }
-                                }
-                            })();
-                        """)
-                        await page.wait_for_timeout(500)
-
                     # টাইমার স্ক্র্যাপ
                     timer_val = "30s"
                     try:
@@ -336,6 +309,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     step_plan_str += "└────────────────────────────────┘"
 
                     # 💡 ১. শুধুমাত্র প্রথমবার (First Bet) এই দুটি মেসেজ আসবে
+                    pred_msg = None
                     if state.get("first_bet", True):
                         # AUTO TRADE ACTIVE মেসেজ
                         await ctx.bot.send_message(chat_id=uid, text=(
@@ -355,7 +329,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             "🎬 _4-second prediction animation → auto bet every period._"
                         ), parse_mode="Markdown")
 
-                        # GENERATING PREDICTION মেসেজ (একবারই আসবে এবং ডিলিট হবে)
+                        # GENERATING PREDICTION মেসেজ
                         pred_msg = await ctx.bot.send_message(chat_id=uid, text="━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[░░░░░░░░░░░░] 0%`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏳ _Running 9 layers + backtest..._", parse_mode="Markdown")
                         
                         for pct in [45, 85, 100]:
@@ -370,13 +344,28 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             except: pass
                         
                         await asyncio.sleep(0.3)
-                        # ডিলিট করে দেওয়া হলো
+
+                    # 💡 ২. WinGo পেজে ঢুকতে না পারলে স্ক্রিনশট
+                    if not nav_success:
+                        screenshot_path = f"nav_error_{uid}.png"
+                        await page.screenshot(path=screenshot_path)
+                        await ctx.bot.send_photo(
+                            chat_id=uid, 
+                            photo=open(screenshot_path, 'rb'), 
+                            caption="⚠️ **WinGo পেজে ঢুকতে সমস্যা হচ্ছে!**\n\nবট Lottery বা WinGo বাটন খুঁজে পাচ্ছে না। নিচের স্ক্রিনশট দেখে বুঝে নিন কোথায় আটকেছে। বট বন্ধ করা হচ্ছে।"
+                        )
+                        state["trade_running"] = False
+                        break
+
+                    # 💡 ৩. ডিলিট করা এবং Big/Small ক্লিক করা (একদম পরপর)
+                    # GENERATING PREDICTION মেসেজটি ডিলিট করা
+                    if pred_msg:
                         try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
                         except: pass
-                        
-                        state["first_bet"] = False 
+                    
+                    state["first_bet"] = False 
 
-                    # 💡 ২. Big / Small ক্লিক
+                    # Big/Small ক্লিক করা
                     clicked = False
                     try:
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
@@ -408,6 +397,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except Exception as coord_e:
                             logger.error(f"Coordinate click failed: {coord_e}")
 
+                    # ক্লিক করতে না পারলে স্ক্রিনশট
                     if not clicked:
                         screenshot_path = f"error_{uid}.png"
                         await page.screenshot(path=screenshot_path)
@@ -425,7 +415,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await page.locator('text="Confirm"').last.click(timeout=3000)
                     except: pass
 
-                    # 💡 ৩. ANALYSIS REPORT মেসেজ (প্রতিবারই আসবে)
+                    # 💡 ৪. ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
@@ -747,7 +737,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     elif data == "start_trade_btn":
         state["trade_running"] = True
         await query.message.edit_reply_markup(reply_markup=None)
-        # এখানে কোনো TRADE STARTED মেসেজ নেই। সরাসরি AUTO TRADE ACTIVE মেসেজ আসবে লুপের ভেতর থেকে।
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
         await query.edit_message_text("❌ **TRADE CANCELLED**")
