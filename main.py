@@ -77,16 +77,18 @@ def get_history_and_prediction():
         return "SMALL", "Unknown"
 
 # ───────────────────────────────────────────
-# 💡 ৩. পপআপ ব্লকার (Confirm বাটনে জোরালো ক্লিক)
+# 💡 ৩. পপআপ ব্লকার ফাংশন (Confirm বাটনে জোরালো ক্লিক)
 # ───────────────────────────────────────────
 async def kill_popups(page):
     for _ in range(3):
         try:
+            # Playwright locator দিয়ে Confirm বা OK বাটন খোঁজা
             confirm_btn = page.locator('button:has-text("Confirm"), div:has-text("Confirm"), span:has-text("Confirm"), button:has-text("OK")').last
             if await confirm_btn.is_visible(timeout=1000):
                 await confirm_btn.click(force=True, timeout=2000)
                 await page.wait_for_timeout(1000)
             else:
+                # ব্যাকআপ জাভাস্ক্রিপ্ট
                 clicked = await page.evaluate("""
                     (function() {
                         let els = document.querySelectorAll('button, div, span, a');
@@ -135,25 +137,23 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(3000) 
 
             await update_loading(30)
+            # 💡 ফিলাপ ফিক্স (Type + Blur)
             try:
-                # মানুষের মতো টাইপিং (যাতে ওয়েবসাইট ডেটা রিয়েল ইউজার ভাবে)
                 phone_input = page.get_by_placeholder("Please enter the phone number")
                 await phone_input.click()
-                await page.keyboard.press("Control+A")
-                await page.keyboard.press("Backspace")
-                await page.keyboard.type(login_phone, delay=100)
+                await phone_input.fill(login_phone)
+                await page.wait_for_timeout(300)
                 
                 pass_input = page.locator('input[type="password"]').first
                 await pass_input.click()
-                await page.keyboard.press("Control+A")
-                await page.keyboard.press("Backspace")
-                await page.keyboard.type(password, delay=100)
+                await pass_input.fill(password)
+                await page.wait_for_timeout(300)
                 
-                # Tab চাপলে ওয়েবসাইট ইনপুট ডেটা রেজিস্টার করে
-                await page.keyboard.press("Tab")
+                # Tab চাপলে ওয়েবসাইট বুঝতে পারে ইনপুট শেষ
+                await page.keyboard.press("Tab") 
                 await page.wait_for_timeout(1000)
             except: pass
 
@@ -164,14 +164,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             try:
                 login_btn = page.locator('button:has-text("Log in")').last
                 await login_btn.scroll_into_view_if_needed(timeout=5000)
-                await login_btn.click(force=True, timeout=10000)
+                await login_btn.click(force=True, timeout=5000)
             except:
                 try:
-                    await page.get_by_text("Log in", exact=True).last.click(force=True, timeout=10000)
+                    await page.get_by_text("Log in", exact=True).last.click(force=True, timeout=5000)
                 except: pass
             
             await update_loading(70)
-            await page.wait_for_timeout(5000) # পেজ রিলোড বা পপআপের জন্য অপেক্ষা
+            await page.wait_for_timeout(4000) 
             await kill_popups(page)
 
             await update_loading(85)
@@ -187,7 +187,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         }
                     })();
                 """)
-                await page.wait_for_timeout(3000) 
+                await page.wait_for_timeout(2000) 
             except: pass
 
             await update_loading(95)
@@ -221,7 +221,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
 
             if login_status == "failed" or uid_val == "Unknown":
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})")
+                ss_path = f"loginfail_{uid}.png"
+                await page.screenshot(path=ss_path)
+                await ctx.bot.send_photo(chat_id=uid, photo=open(ss_path, 'rb'), caption=f"❌ **LOGIN FAILED ({phone})**\n\nসঠিক নাম্বার/পাসওয়ার্ড দিন অথবা স্ক্রিনশটে দেখুন কী সমস্যা।")
                 await browser.close()
                 return
 
@@ -294,7 +296,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     # 💡 WinGo তে যাওয়ার সঠিক পথ (Home -> Lottery -> Win Go)
                     await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(3000) 
+                    await page.wait_for_timeout(2000) 
                     
                     await kill_popups(page)
 
@@ -316,7 +318,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     except Exception as e:
                         logger.error(f"WinGo Card Click Error: {e}")
                         
-                    # ৩. গেমের ভেতরে পপআপ বন্ধ করা
+                    # ৩. গেমের ভেতরে পপআপ থাকলে বন্ধ করা
                     await kill_popups(page)
 
                     timer_val = "30s"
@@ -352,7 +354,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     for pct in [38, 75, 100]:
                         bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
-                        await asyncio.sleep(0.1) 
+                        await asyncio.sleep(0.2) 
                         try:
                             await ctx.bot.edit_message_text(
                                 chat_id=uid, message_id=pred_msg.message_id,
