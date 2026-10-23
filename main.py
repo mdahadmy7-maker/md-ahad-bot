@@ -81,13 +81,10 @@ def get_history_and_prediction():
 # 💡 ৩. রিয়েল-টাইম লাইভ টাইমার (১ থেকে ৩০ পর্যন্ত বাড়বে)
 # ───────────────────────────────────────────
 async def update_live_timer(ctx, uid, message_id, start_sec, current_period, choice, bet_amount, current_bal, current_step_idx):
-    # যদি স্ক্র্যাপ করা টাইমার ০ বা ১ এর কম হয়, তবে ১ থেকে শুরু হবে
     if start_sec < 1: 
         start_sec = 1
         
-    # টাইমার ৩০ পর্যন্ত বাড়বে
     for current_sec in range(start_sec, 31):
-        # প্রোগ্রেস বার ধীরে ধীরে ভরবে (৩০ সেকেন্ডে ১০টি ব্লক)
         filled_blocks = int((current_sec / 30) * 10)
         if filled_blocks > 10: filled_blocks = 10
         bar = "█" * filled_blocks + "░" * (10 - filled_blocks)
@@ -128,7 +125,7 @@ async def update_live_timer(ctx, uid, message_id, start_sec, current_period, cho
                 chat_id=uid, message_id=message_id, text=text, parse_mode="Markdown"
             )
         except:
-            pass # মেসেজ এডিট হতে সমস্যা হলে ইগনোর করবে
+            pass
             
         await asyncio.sleep(1)
 
@@ -204,7 +201,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         }
                     })();
                 """)
-                await page.wait_for_timeout(3000) 
+                await page.wait_for_timeout(2000) 
             except: pass
 
             await update_loading(95)
@@ -212,6 +209,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             uid_val = "Unknown"
             balance = "0.00"
 
+            # আগের মতোই দ্রুত ডেটা রিডিং
             for _ in range(10): 
                 page_text = await page.inner_text("body")
                 if "Wrong account or password" in page_text:
@@ -310,7 +308,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(2000) 
 
-                    # হোমপেজের পপআপ ক্লোজ
                     for _ in range(3):
                         await page.evaluate("""
                             (function() {
@@ -326,7 +323,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         """)
                         await page.wait_for_timeout(500)
 
-                    # Lottery -> Win Go
                     try:
                         await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
                         await page.wait_for_timeout(2000)
@@ -337,7 +333,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     except Exception as e:
                         logger.error(f"Navigation error: {e}")
 
-                    # গেমের ভেতরের পপআপ ক্লোজ
                     for _ in range(3):
                         await page.evaluate("""
                             (function() {
@@ -357,7 +352,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     timer_val = 1
                     try:
                         body_text = await page.evaluate("() => document.body.innerText")
-                        # টাইমার ফরম্যাট "00 : 26" বা "26s" খোঁজা
                         timer_match = re.search(r'0*\s*:\s*(\d{2})', body_text)
                         if timer_match:
                             timer_val = int(timer_match.group(1))
@@ -434,7 +428,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             """)
                         except: pass
 
-                    # 💡 যদি ক্লিক না হয়, তবে স্ক্রিনশট নিয়ে টেলিগ্রামে পাঠাবে
                     if not clicked:
                         screenshot_path = f"error_{uid}.png"
                         await page.screenshot(path=screenshot_path)
@@ -451,10 +444,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await page.locator('text="Confirm"').last.click(timeout=3000)
                     except: pass
 
-                    # 💡 ANALYSIS REPORT মেসেজ (এটি রিয়েল-টাইমে ১ থেকে ৩০ পর্যন্ত বাড়বে)
                     report_msg = await ctx.bot.send_message(chat_id=uid, text="Sending Analysis Report...")
                     
-                    # টাইমার আপডেট করার জন্য ব্যাকগ্রাউন্ড টাস্ক (১ থেকে ৩০ পর্যন্ত বাড়বে)
                     asyncio.create_task(
                         update_live_timer(
                             ctx, uid, report_msg.message_id, 
@@ -463,7 +454,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         )
                     )
 
-                    # রেজাল্টের জন্য অপেক্ষা (৩২ সেকেন্ড)
                     await asyncio.sleep(32)
 
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
@@ -716,7 +706,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     [InlineKeyboardButton("🚀 START TRADE", callback_data="start_trade_btn"), 
                      InlineKeyboardButton("❌ CANCEL", callback_data="cancel_trade_btn")]
                 ])
-                # 💡 এখানে query.message.delete() নেই, তাই মেসেজটি ডিলিট হবে না
                 await update.message.reply_text(combined_msg, reply_markup=inline_kb)
         except ValueError:
             await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 1)।")
@@ -752,7 +741,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
     elif data == "start_trade_btn":
-        # 💡 মেসেজটি ডিলিট হবে না
         state["trade_running"] = True
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
