@@ -138,7 +138,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.wait_for_timeout(400)
 
             await update_loading(85)
-            # 💡 Account পেজে গিয়ে ডেটা নেওয়া
             try:
                 await page.evaluate("""
                     (function() {
@@ -212,14 +211,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await browser.close()
                     return
 
-            # ---------------- ৪. অটো-বেট লুপ (বাটনে চাপ দেওয়ার পর এখান থেকে শুরু হবে) ----------------
+            # ---------------- ৪. অটো-বেট লুপ ----------------
             initial_balance = float(balance)
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
 
             while state["trade_running"]:
-                active_msg = None
-                pred_msg = None
                 try:
                     current_bal = state["balance"]
                     
@@ -254,9 +251,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 WinGo তে যাওয়ার সঠিক পথ (Home -> Lottery -> Win Go)
+                    # 💡 WinGo তে যাওয়ার সঠিক পথ
                     await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(2000) 
+                    await page.wait_for_timeout(2500) 
 
                     # হোমপেজের পপআপ ক্লোজ
                     for _ in range(5):
@@ -272,7 +269,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 }
                             })();
                         """)
-                        await page.wait_for_timeout(500)
+                        await page.wait_for_timeout(400)
 
                     # Lottery -> Win Go
                     try:
@@ -319,7 +316,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         
                         for pct in [38, 75, 100]:
                             bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
-                            await asyncio.sleep(0.2)
+                            await asyncio.sleep(0.3)
                             try:
                                 await ctx.bot.edit_message_text(
                                     chat_id=uid, message_id=pred_msg.message_id,
@@ -334,36 +331,37 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         
                         state["first_bet"] = False
 
-                    # 💡 ২. Big / Small ক্লিক (এখানেই মূল কাজ হবে)
+                    # 💡 ২. Big / Small ক্লিক (মানুষের মতো স্ক্রল এবং ক্লিক লজিক)
                     clicked = False
                     try:
-                        # প্রথমে সরাসরি খোঁজার চেষ্টা
+                        # পেজের একদম নিচে স্ক্রল করা (যাতে বাটন ভেসে ওঠে)
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                        await page.wait_for_timeout(1500)
+
+                        # Playwright Locator দিয়ে খোঁজা
                         target_locator = page.get_by_text(choice, exact=True).last
-                        await target_locator.scroll_into_view_if_needed(timeout=5000)
-                        await target_locator.click(force=True, timeout=5000)
+                        await target_locator.scroll_into_view_if_needed(timeout=4000)
+                        await target_locator.click(force=True, timeout=4000)
                         clicked = True
                     except Exception as e:
-                        logger.info(f"Standard click failed for {choice}, trying JS scroll & click...")
+                        logger.info(f"Standard click failed for {choice}, trying JS click...")
                         try:
-                            # স্ক্রল করে আবার চেষ্টা করা (যদি বাটন নিচে লুকানো থাকে)
-                            await page.evaluate("window.scrollBy(0, 300)")
-                            await page.wait_for_timeout(1000)
-                            
-                            # JS এর মাধ্যমে খোঁজা এবং ক্লিক করা
+                            # JS দিয়ে জোরপূর্বক ক্লিক করা
                             clicked = await page.evaluate(f"""
                                 (function() {{
                                     let target = '{choice}'.toUpperCase();
-                                    window.scrollTo(0, document.body.scrollHeight);
-                                    
                                     let elements = document.querySelectorAll('div, span, button, p, a');
                                     for (let el of elements) {{
                                         let text = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                        if (text === target || (text.includes(target) && text.length < 15)) {{
-                                            let clickTarget = el.tagName === 'BUTTON' ? el : (el.closest('button, .button, div[role="button"]') || el);
-                                            clickTarget.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
-                                            let event = new MouseEvent('click', {{ view: window, bubbles: true, cancelable: true }});
-                                            clickTarget.dispatchEvent(event);
-                                            return true;
+                                        if (text === target || text.includes(target)) {{
+                                            // ইলিমেন্টটি স্ক্রিনে দৃশ্যমান কিনা চেক করা
+                                            let rect = el.getBoundingClientRect();
+                                            if (rect.top >= 0 && rect.bottom <= window.innerHeight) {{
+                                                let clickTarget = el.tagName === 'BUTTON' ? el : (el.closest('button, .button, div[role="button"]') || el);
+                                                let event = new MouseEvent('click', {{ view: window, bubbles: true, cancelable: true }});
+                                                clickTarget.dispatchEvent(event);
+                                                return true;
+                                            }}
                                         }}
                                     }}
                                     return false;
@@ -372,23 +370,25 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except Exception as js_e:
                             logger.error(f"JS click failed: {js_e}")
 
+                    # 💡 ৩. যদি ক্লিক করতে না পারে, স্ক্রিনশট নিয়ে টেলিগ্রামে পাঠাবে
                     if not clicked:
                         screenshot_path = f"error_{uid}.png"
                         await page.screenshot(path=screenshot_path)
                         await ctx.bot.send_photo(
                             chat_id=uid, 
                             photo=open(screenshot_path, 'rb'), 
-                            caption=f"⚠️ **{choice} বাটনে ক্লিক করা যাচ্ছে না!**\nগেমের পেজটি কেমন দেখাচ্ছে তা স্ক্রিনশটে দেখুন।"
+                            caption=f"⚠️ **{choice} বাটনে ক্লিক করা যাচ্ছে না!**\n\nবট গেমে ঢুকেছে কিন্তু বাটন খুঁজে পাচ্ছে না বা ক্লিক করতে পারছে না। নিচের স্ক্রিনশটটি দেখে আমাকে জানান।\n\n📌 _বট বন্ধ করা হচ্ছে..._"
                         )
-                        raise Exception(f"{choice} button not found on page even after scrolling.")
+                        state["trade_running"] = False
+                        break # লুপ থেকে বের হয়ে যাবে
 
+                    # ক্লিক সফল হলে কনফার্ম বাটন চেক
                     await page.wait_for_timeout(1000) 
-                    
                     try:
                         await page.locator('text="Confirm"').last.click(timeout=3000)
                     except: pass
 
-                    # 💡 ৩. ANALYSIS REPORT মেসেজ (আপনার দেওয়া স্ক্রিনশটের মতো)
+                    # 💡 ৪. ANALYSIS REPORT মেসেজ 
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
@@ -411,8 +411,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "✓ hostility 60/100 ✓ gut 25/100\n"
                         "⚡ Analyzed in: 217ms\n"
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"🔵 PREDICTION : {choice} ❮❮❮\n\n"
-                        f"✅ **ক্লিক করা হয়েছে: {choice}**\n\n"
+                        f"🔵 PREDICTION : **{choice}** ❮❮❮\n\n"
+                        f"✅ **সফলভাবে ক্লিক করা হয়েছে: {choice}**\n\n"
                         f"🚀 Step       : 🟢 Normal — Step {current_step_idx+1}\n"
                         f"💵 Amount     : ৳ {bet_amount:.2f}\n"
                         f"💰 Balance    : ৳ {current_bal:.2f}\n"
@@ -420,6 +420,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ))
 
+                    # 💡 ৩০ সেকেন্ড অপেক্ষা (গেম রেজাল্টের জন্য)
                     await asyncio.sleep(32)
 
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
@@ -500,7 +501,16 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
-                    await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **TRADE STOPPED**\nCould not place bet. Error: {str(e)[:50]}")
+                    # এরর হলে স্ক্রিনশট নিয়ে টেলিগ্রামে পাঠানো
+                    screenshot_path = f"error_{uid}.png"
+                    try:
+                        await page.screenshot(path=screenshot_path)
+                        await ctx.bot.send_photo(
+                            chat_id=uid, 
+                            photo=open(screenshot_path, 'rb'), 
+                            caption=f"⚠️ **ট্রেড চলাকালীন এরর হয়েছে!**\n`{str(e)[:100]}`\n\nস্ক্রিনশট দেখে বুঝে নিন কোথায় সমস্যা হয়েছে।"
+                        )
+                    except: pass
                     state["trade_running"] = False
                     break
                     
@@ -709,12 +719,11 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
         
     elif data == "start_trade_btn":
-        # 💡 বাটনে চাপ দেওয়া মাত্রই ট্রেডিং শুরু হবে এবং কনফার্মেশন যাবে
         state["trade_running"] = True
-        await query.message.edit_reply_markup(reply_markup=None) # বাটন রিমুভ করে দেওয়া হলো
+        await query.message.edit_reply_markup(reply_markup=None)
         await ctx.bot.send_message(
             chat_id=uid, 
-            text="🚀 **TRADE STARTED!**\n\nবট এখন WinGo পেজে ঢুকে বিগ অথবা স্মল-এ ক্লিক করা শুরু করছে। দয়া করে অপেক্ষা করুন...", 
+            text="🚀 **TRADE STARTED!**\n\n🌐 বট WinGo পেজে প্রবেশ করছে...\nঅনুগ্রহ করে অপেক্ষা করুন, প্রেডিকশন তৈরি হচ্ছে।", 
             parse_mode="Markdown"
         )
         
