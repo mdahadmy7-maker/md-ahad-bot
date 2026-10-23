@@ -356,31 +356,45 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         
                         state["first_bet"] = False # পরেরবার আর দেখাবে না
 
-                    # 💡 ২. Big / Small ক্লিক (সবচেয়ে শক্তিশালী লজিক)
+                    # 💡 ২. Big / Small ক্লিক (স্ক্রল এবং শক্তিশালী লজিক)
                     clicked = False
                     try:
+                        # প্রথমে সরাসরি খোঁজার চেষ্টা
                         target_locator = page.get_by_text(choice, exact=True).last
                         await target_locator.scroll_into_view_if_needed(timeout=5000)
                         await target_locator.click(force=True, timeout=5000)
                         clicked = True
                     except Exception as e:
+                        logger.info(f"Standard click failed for {choice}, trying JS scroll & click...")
                         try:
+                            # স্ক্রল করে আবার চেষ্টা করা (যদি বাটন নিচে লুকানো থাকে)
+                            await page.evaluate("window.scrollBy(0, 300)")
+                            await page.wait_for_timeout(1000)
+                            
+                            # JS এর মাধ্যমে খোঁজা এবং ক্লিক করা
                             clicked = await page.evaluate(f"""
                                 (function() {{
                                     let target = '{choice}'.toUpperCase();
+                                    // পেজের নিচে স্ক্রল করা
+                                    window.scrollTo(0, document.body.scrollHeight);
+                                    
                                     let elements = document.querySelectorAll('div, span, button, p, a');
                                     for (let el of elements) {{
                                         let text = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                        if (text === target || text.includes(target)) {{
+                                        // exact match বা কাছাকাছি ম্যাচ
+                                        if (text === target || (text.includes(target) && text.length < 15)) {{
+                                            let clickTarget = el.tagName === 'BUTTON' ? el : (el.closest('button, .button, div[role="button"]') || el);
+                                            clickTarget.scrollIntoView({{ behavior: 'smooth', block: 'center' }});
                                             let event = new MouseEvent('click', {{ view: window, bubbles: true, cancelable: true }});
-                                            el.dispatchEvent(event);
+                                            clickTarget.dispatchEvent(event);
                                             return true;
                                         }}
                                     }}
                                     return false;
                                 }})();
                             """)
-                        except: pass
+                        except Exception as js_e:
+                            logger.error(f"JS click failed: {js_e}")
 
                     # 💡 ৩. যদি ক্লিক না হয়, তবে স্ক্রিনশট নিয়ে টেলিগ্রামে পাঠাবে
                     if not clicked:
@@ -391,7 +405,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             photo=open(screenshot_path, 'rb'), 
                             caption=f"⚠️ **{choice} বাটনে ক্লিক করা যাচ্ছে না!**\nগেমের পেজটি কেমন দেখাচ্ছে তা স্ক্রিনশটে দেখুন।"
                         )
-                        raise Exception(f"{choice} button not found on page.")
+                        raise Exception(f"{choice} button not found on page even after scrolling.")
 
                     await page.wait_for_timeout(1000) 
                     
@@ -399,7 +413,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await page.locator('text="Confirm"').last.click(timeout=3000)
                     except: pass
 
-                    # 💡 ৪. ৩ নম্বর স্ক্রিনশটের মতো ANALYSIS REPORT মেসেজ
+                    # 💡 ৪. ANALYSIS REPORT মেসেজ (এখানে ক্লিক সফল হওয়ার মেসেজ যুক্ত করা হয়েছে)
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
@@ -423,6 +437,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⚡ Analyzed in: 217ms\n"
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         f"🔵 PREDICTION : {choice} ❮❮❮\n\n"
+                        f"✅ **ক্লিক করা হয়েছে: {choice}**\n\n"
                         f"🚀 Step       : 🟢 Normal — Step {current_step_idx+1}\n"
                         f"💵 Amount     : ৳ {bet_amount:.2f}\n"
                         f"💰 Balance    : ৳ {current_bal:.2f}\n"
