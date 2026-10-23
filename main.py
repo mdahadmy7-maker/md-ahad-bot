@@ -251,7 +251,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 WinGo তে যাওয়ার সঠিক পথ
+                    # 💡 WinGo তে যাওয়ার সঠিক পথ
                     await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(2500) 
 
@@ -321,7 +321,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         """)
                         await page.wait_for_timeout(500)
 
-                    # 💡 ১. টাইমার 00:00 হওয়া পর্যন্ত অপেক্ষা করা
+                    # 💡 ১. টাইমার 00:00 হওয়া পর্যন্ত অপেক্ষা করা
                     logger.info("Waiting for current round to end (00:00)...")
                     for _ in range(40): 
                         try:
@@ -331,17 +331,18 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except: pass
                         await asyncio.sleep(1)
                     
-                    # 💡 ২. নতুন রাউন্ড শুরু হওয়ার জন্য অপেক্ষা করা (টাইমার ২৯ বা ৩০ হওয়া পর্যন্ত)
-                    logger.info("Waiting for new round to start (Timer 29/30)...")
-                    for _ in range(15):
+                    # 💡 ২. 00:00 চলে যাওয়া এবং নতুন রাউন্ড (২৯ বা ৩০) শুরু হওয়ার জন্য অপেক্ষা করা
+                    logger.info("Waiting for 00:00 to disappear and new round to start...")
+                    for _ in range(15): # সর্বোচ্চ ১৫ সেকেন্ড অপেক্ষা
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
-                            if re.search(r'0\s*0\s*:\s*([1-3]\d)', body_text):
+                            # যদি 00:00 না থাকে এবং ২ বা ৩ দিয়ে শুরু হওয়া টাইমার থাকে (যেমন 29, 30)
+                            if not re.search(r'0\s*0\s*:\s*0\s*0', body_text) and re.search(r'0\s*0\s*:\s*([2-3]\d)', body_text):
                                 break
                         except: pass
                         await asyncio.sleep(1)
                     
-                    await page.wait_for_timeout(1000) # বাটন চালু হওয়ার জন্য একটু বাড়তি সময়
+                    await page.wait_for_timeout(1000) # বাটন চালু হওয়ার জন্য একটু বাড়তি সময়
 
                     # টাইমার স্ক্র্যাপ (মেসেজে দেখানোর জন্য)
                     timer_val = "30s"
@@ -399,7 +400,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৪. Big/Small ক্লিক করা
+                    # 💡 ৪. Big/Small ক্লিক করা (ন্যাচারাল ক্লিক)
                     clicked = False
                     try:
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
@@ -409,60 +410,61 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await target_locator.wait_for(state="visible", timeout=5000)
                         await target_locator.scroll_into_view_if_needed(timeout=4000)
                         
-                        box = await target_locator.bounding_box()
-                        if box:
-                            x = box['x'] + box['width'] / 2
-                            y = box['y'] + box['height'] / 2
-                            await page.mouse.move(x, y)
-                            await asyncio.sleep(0.2)
-                            await page.mouse.click(x, y)
-                            clicked = True
-                        else:
-                            await target_locator.click(force=True, timeout=4000)
-                            clicked = True
+                        # ন্যাচারাল ক্লিক, যা বাটন চালু হওয়া পর্যন্ত অপেক্ষা করবে
+                        await target_locator.click(timeout=5000)
+                        clicked = True
                     except Exception as e:
                         logger.error(f"Standard click failed: {e}")
                         try:
-                            if choice.upper() == "BIG":
-                                await page.mouse.click(103, 890)
-                            else:
-                                await page.mouse.click(309, 890)
-                            clicked = True
-                        except Exception as coord_e:
-                            logger.error(f"Coordinate click failed: {coord_e}")
-
-                    # 💡 ৫. "Total amount" বাটন খোঁজা এবং ক্লিক করা (Confirm এর বদলে)
-                    popup_success = False
-                    for _ in range(6): # ৬ সেকেন্ড পর্যন্ত অপেক্ষা করবে
-                        try:
-                            # পপআপে "Total amount" লেখা বাটনটি খোঁজা
-                            total_amount_btn = page.locator('text=re.compile(r"Total amount", re.IGNORECASE)').last
-                            if await total_amount_btn.count() > 0 and await total_amount_btn.is_visible():
-                                await total_amount_btn.click(timeout=3000, force=True)
-                                popup_success = True
-                                break
-                            
-                            # যদি টেক্সট দিয়ে না ধরা পড়ে, তবে JS দিয়ে খোঁজা
-                            js_clicked = await page.evaluate("""
-                                (function() {
-                                    let elements = document.querySelectorAll('div, button, span');
-                                    for(let el of elements) {
-                                        let text = (el.innerText || el.textContent || '').trim();
-                                        if(text.includes('Total amount') || text.includes('Total Amount')) {
-                                            let btn = el.closest('div[role="button"], button') || el;
-                                            btn.click();
+                            # ফলব্যাক জাভাস্ক্রিপ্ট ক্লিক
+                            clicked = await page.evaluate(f"""
+                                (function() {{
+                                    let target = '{choice}'.toUpperCase();
+                                    let elements = document.querySelectorAll('div, span, button, p, a');
+                                    for (let el of elements) {{
+                                        let text = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                        if (text === target) {{
+                                            let clickTarget = el.closest('button, div[role="button"], .btn') || el;
+                                            clickTarget.click();
                                             return true;
-                                        }
-                                    }
+                                        }}
+                                    }}
                                     return false;
-                                })();
+                                }})();
                             """)
-                            if js_clicked:
-                                popup_success = True
-                                break
-                        except Exception as e:
-                            pass
-                        await asyncio.sleep(1)
+                        except: pass
+
+                    # 💡 ৫. "Total amount" বা "Confirm" বাটন খোঁজা এবং ক্লিক করা
+                    popup_success = False
+                    if clicked:
+                        for _ in range(10): # ১০ সেকেন্ড অপেক্ষা
+                            try:
+                                total_amount_btn = page.locator('text=re.compile(r"Total amount|Confirm", re.IGNORECASE)').last
+                                if await total_amount_btn.count() > 0 and await total_amount_btn.is_visible():
+                                    await total_amount_btn.click(timeout=3000)
+                                    popup_success = True
+                                    break
+                                
+                                # জাভাস্ক্রিপ্ট ফলব্যাক
+                                js_clicked = await page.evaluate("""
+                                    (function() {
+                                        let elements = document.querySelectorAll('div, button, span');
+                                        for(let el of elements) {
+                                            let text = (el.innerText || el.textContent || '').trim();
+                                            if(text.includes('Total amount') || text.includes('Total Amount') || text.includes('Confirm')) {
+                                                let btn = el.closest('div[role="button"], button') || el;
+                                                btn.click();
+                                                return true;
+                                            }
+                                        }
+                                        return false;
+                                    })();
+                                """)
+                                if js_clicked:
+                                    popup_success = True
+                                    break
+                            except: pass
+                            await asyncio.sleep(1)
 
                     if not popup_success:
                         screenshot_path = f"error_popup_{uid}.png"
@@ -470,7 +472,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await ctx.bot.send_photo(
                             chat_id=uid, 
                             photo=open(screenshot_path, 'rb'), 
-                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু 'Total amount' বাটন পাওয়া যায়নি!**\n\nসম্ভবত পপআপ আসেনি বা বাটন নিষ্ক্রিয় ছিল। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
+                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু 'Total amount' বাটন পাওয়া যায়নি!**\n\nসম্ভবত পপআপ আসেনি বা বাটন নিষ্ক্রিয় ছিল। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
                         )
                         state["trade_running"] = False
                         break
