@@ -78,7 +78,62 @@ def get_history_and_prediction():
         return "SMALL", "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন
+# 💡 ৩. রিয়েল-টাইম লাইভ টাইমার (১ থেকে ৩০ পর্যন্ত বাড়বে)
+# ───────────────────────────────────────────
+async def update_live_timer(ctx, uid, message_id, start_sec, current_period, choice, bet_amount, current_bal, current_step_idx):
+    # যদি স্ক্র্যাপ করা টাইমার ০ বা ১ এর কম হয়, তবে ১ থেকে শুরু হবে
+    if start_sec < 1: 
+        start_sec = 1
+        
+    # টাইমার ৩০ পর্যন্ত বাড়বে
+    for current_sec in range(start_sec, 31):
+        # প্রোগ্রেস বার ধীরে ধীরে ভরবে (৩০ সেকেন্ডে ১০টি ব্লক)
+        filled_blocks = int((current_sec / 30) * 10)
+        if filled_blocks > 10: filled_blocks = 10
+        bar = "█" * filled_blocks + "░" * (10 - filled_blocks)
+        
+        text = (
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🤖 NEW TRADE PLACED\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⏱️ Period    : {current_period}\n"
+            f"⏱️ Timer     : {current_sec:02d}s elapsed\n"
+            "📊 Market       : MIXED 📊\n"
+            "🔬 Stability    : 🔴 VOLATILE (0/100)\n"
+            "🧨 Hostility    : 🟡 UNSTABLE (60/100)\n"
+            "💡 Gut Score    : 25/100\n"
+            "🧠 Mind State   : 😌 Calm & focused\n"
+            "╔══════════════════════════════════╗\n"
+            "║ 🧠 ANALYSIS REPORT  ║\n"
+            "╚══════════════════════════════════╝\n"
+            "⚠️ Only 10 draws available (need 40) — preliminary signal\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📊 Confidence : ████░░░░░░ 45%\n"
+            "🎯 Consensus  :\n"
+            "✅ Gate       : 🔴 VOLATILE (25/100)\n"
+            "✓ hostility 60/100 ✓ gut 25/100\n"
+            "⚡ Analyzed in: 217ms\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔵 PREDICTION : {choice} ❮❮❮\n\n"
+            f"🚀 Step       : 🟢 Normal — Step {current_step_idx+1}\n"
+            f"💵 Amount     : ৳ {bet_amount:.2f}\n"
+            f"💰 Balance    : ৳ {current_bal:.2f}\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⏳ Waiting for result...\n\n"
+            f"`[{bar}] {current_sec:02d}s`"
+        )
+        
+        try:
+            await ctx.bot.edit_message_text(
+                chat_id=uid, message_id=message_id, text=text, parse_mode="Markdown"
+            )
+        except:
+            pass # মেসেজ এডিট হতে সমস্যা হলে ইগনোর করবে
+            
+        await asyncio.sleep(1)
+
+# ───────────────────────────────────────────
+# ৪. লগইন এবং অটো-বেট ফাংশন
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -138,7 +193,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.wait_for_timeout(400)
 
             await update_loading(85)
-            # Account পেজে গিয়ে ডেটা নেওয়া
             try:
                 await page.evaluate("""
                     (function() {
@@ -299,16 +353,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         """)
                         await page.wait_for_timeout(500)
 
-                    # 💡 টাইমার স্ক্র্যাপ করা (আসল সময় বের করা)
-                    timer_val = "30s"
+                    # 💡 টাইমার স্ক্র্যাপ করা (গেমের আসল সময়)
+                    timer_val = 1
                     try:
                         body_text = await page.evaluate("() => document.body.innerText")
-                        timer_match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
+                        # টাইমার ফরম্যাট "00 : 26" বা "26s" খোঁজা
+                        timer_match = re.search(r'0*\s*:\s*(\d{2})', body_text)
                         if timer_match:
-                            timer_val = f"{timer_match.group(1)}s"
+                            timer_val = int(timer_match.group(1))
                         else:
                             timer_match2 = re.search(r'(\d{2})\s*s', body_text, re.IGNORECASE)
-                            if timer_match2: timer_val = f"{timer_match2.group(1)}s"
+                            if timer_match2: timer_val = int(timer_match2.group(1))
                     except: pass
 
                     step_plan_str = "┌────────────────────────────────┐\n"
@@ -316,7 +371,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
                     step_plan_str += "└────────────────────────────────┘"
 
-                    # 💡 ১. প্রথম স্ক্রিনশটের মেসেজ (AUTO TRADE ACTIVE)
+                    # 💡 প্রথম স্ক্রিনশটের মেসেজ (AUTO TRADE ACTIVE)
                     if state.get("first_bet", True):
                         await ctx.bot.send_message(chat_id=uid, text=(
                             "╔════════════════════════════════╗\n"
@@ -330,7 +385,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             f"{step_plan_str}\n\n"
                             "⏱️ **Current Period**\n"
                             f"{current_period}\n"
-                            f"██████████ {timer_val}\n\n"
+                            f"██████████ {timer_val}s\n\n"
                             "🧠 _Analysing market..._\n"
                             "🎬 _4-second prediction animation → auto bet every period._"
                         ), parse_mode="Markdown")
@@ -351,9 +406,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await asyncio.sleep(0.5)
                         try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
                         except: pass
-                        state["first_bet"] = False # পরেরবার আর দেখাবে না
+                        state["first_bet"] = False
 
-                    # 💡 ২. Big / Small ক্লিক (সবচেয়ে শক্তিশালী লজিক)
+                    # 💡 Big / Small ক্লিক (সবচেয়ে শক্তিশালী লজিক)
                     clicked = False
                     try:
                         target_locator = page.get_by_text(choice, exact=True).last
@@ -379,7 +434,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             """)
                         except: pass
 
-                    # 💡 ৩. যদি ক্লিক না হয়, তবে স্ক্রিনশট নিয়ে টেলিগ্রামে পাঠাবে
+                    # 💡 যদি ক্লিক না হয়, তবে স্ক্রিনশট নিয়ে টেলিগ্রামে পাঠাবে
                     if not clicked:
                         screenshot_path = f"error_{uid}.png"
                         await page.screenshot(path=screenshot_path)
@@ -396,38 +451,19 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await page.locator('text="Confirm"').last.click(timeout=3000)
                     except: pass
 
-                    # 💡 ৪. আপনার দেওয়া ২য় স্ক্রিনশটের মতো ANALYSIS REPORT মেসেজ
-                    # এখানে choice (BIG/SMALL) এবং timer_val ডাইনামিকভাবে বসবে
-                    await ctx.bot.send_message(chat_id=uid, text=(
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "🤖 NEW TRADE PLACED\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"⏱️ Period    : {current_period}\n"
-                        f"⏱️ Timer     : {timer_val} remaining\n"
-                        "📊 Market       : MIXED 📊\n"
-                        "🔬 Stability    : 🔴 VOLATILE (0/100)\n"
-                        "🧨 Hostility    : 🟡 UNSTABLE (60/100)\n"
-                        "💡 Gut Score    : 25/100\n"
-                        "🧠 Mind State   : 😌 Calm & focused\n"
-                        "╔══════════════════════════════════╗\n"
-                        "║ 🧠 ANALYSIS REPORT  ║\n"
-                        "╚══════════════════════════════════╝\n"
-                        "⚠️ Only 10 draws available (need 40) — preliminary signal\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "📊 Confidence : ████░░░░░░ 45%\n"
-                        "🎯 Consensus  :\n"
-                        "✅ Gate       : 🔴 VOLATILE (25/100)\n"
-                        "✓ hostility 60/100 ✓ gut 25/100\n"
-                        "⚡ Analyzed in: 217ms\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"🔵 PREDICTION : {choice} ❮❮❮\n\n"
-                        f"🚀 Step       : 🟢 Normal — Step {current_step_idx+1}\n"
-                        f"💵 Amount     : ৳ {bet_amount:.2f}\n"
-                        f"💰 Balance    : ৳ {current_bal:.2f}\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "⏳ Waiting for result..."
-                    ))
+                    # 💡 ANALYSIS REPORT মেসেজ (এটি রিয়েল-টাইমে ১ থেকে ৩০ পর্যন্ত বাড়বে)
+                    report_msg = await ctx.bot.send_message(chat_id=uid, text="Sending Analysis Report...")
+                    
+                    # টাইমার আপডেট করার জন্য ব্যাকগ্রাউন্ড টাস্ক (১ থেকে ৩০ পর্যন্ত বাড়বে)
+                    asyncio.create_task(
+                        update_live_timer(
+                            ctx, uid, report_msg.message_id, 
+                            timer_val, current_period, choice, 
+                            bet_amount, current_bal, current_step_idx
+                        )
+                    )
 
+                    # রেজাল্টের জন্য অপেক্ষা (৩২ সেকেন্ড)
                     await asyncio.sleep(32)
 
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
