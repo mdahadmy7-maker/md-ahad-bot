@@ -252,7 +252,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
-                    # 💡 এপিআই থেকে প্রেডিকশন বের করা 
                     choice, current_period = get_history_and_prediction()
 
                     # 💡 WinGo তে যাওয়ার সঠিক পথ (Home -> Lottery -> Win Go)
@@ -260,7 +259,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await page.wait_for_timeout(2000) 
 
                     # হোমপেজের পপআপ ক্লোজ
-                    for _ in range(3):
+                    for _ in range(5):
                         await page.evaluate("""
                             (function() {
                                 let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
@@ -287,7 +286,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         logger.error(f"Navigation error: {e}")
 
                     # গেমের ভেতরের পপআপ ক্লোজ
-                    for _ in range(3):
+                    for _ in range(5):
                         await page.evaluate("""
                             (function() {
                                 let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
@@ -302,21 +301,25 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         """)
                         await page.wait_for_timeout(500)
 
-                    # টাইমার স্ক্র্যাপ
+                    # টাইমার স্ক্র্যাপ (আসল সময় বের করা)
                     timer_val = "30s"
                     try:
                         body_text = await page.evaluate("() => document.body.innerText")
-                        timer_match = re.search(r'(\d{2})\s*s', body_text, re.IGNORECASE)
-                        if timer_match: timer_val = f"{timer_match.group(1)}s"
+                        timer_match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
+                        if timer_match:
+                            timer_val = f"{timer_match.group(1)}s"
+                        else:
+                            timer_match2 = re.search(r'(\d{2})\s*s', body_text, re.IGNORECASE)
+                            if timer_match2: timer_val = f"{timer_match2.group(1)}s"
                     except: pass
+
+                    step_plan_str = "┌────────────────────────────────┐\n"
+                    for i, amt in enumerate(state['step_amounts']):
+                        step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
+                    step_plan_str += "└────────────────────────────────┘"
 
                     # 💡 ১. যদি প্রথম বাজি হয়, তবে অ্যানিমেশন দেখাবে
                     if state.get("first_bet", True):
-                        step_plan_str = "┌────────────────────────────────┐\n"
-                        for i, amt in enumerate(state['step_amounts']):
-                            step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
-                        step_plan_str += "└────────────────────────────────┘"
-
                         active_msg = await ctx.bot.send_message(chat_id=uid, text=(
                             "╔════════════════════════════════╗\n"
                             "   🚀 **AUTO TRADE ACTIVE** 🚀\n"
