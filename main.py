@@ -35,7 +35,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# 💡 ২. API থেকে প্রেডিকশন বের করার ফাংশন
+# 💡 ২. API থেকে রেজাল্ট ও প্রেডিকশন বের করার ফাংশন
 # ───────────────────────────────────────────
 def get_history_and_prediction():
     try:
@@ -122,7 +122,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
             await update_loading(70)
-            for _ in range(5):
+            for _ in range(10):
                 await page.evaluate("""
                     (function() {
                         let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
@@ -138,7 +138,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.wait_for_timeout(400)
 
             await update_loading(85)
-            # Account পেজে গিয়ে ডেটা নেওয়া
+            # 💡 Account পেজে গিয়ে ডেটা নেওয়া
             try:
                 await page.evaluate("""
                     (function() {
@@ -218,6 +218,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             current_step_idx = 0
 
             while state["trade_running"]:
+                active_msg = None
+                pred_msg = None
                 try:
                     current_bal = state["balance"]
                     
@@ -257,7 +259,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await page.wait_for_timeout(2000) 
 
                     # হোমপেজের পপআপ ক্লোজ
-                    for _ in range(3):
+                    for _ in range(5):
                         await page.evaluate("""
                             (function() {
                                 let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
@@ -284,7 +286,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         logger.error(f"Navigation error: {e}")
 
                     # গেমের ভেতরের পপআপ ক্লোজ
-                    for _ in range(3):
+                    for _ in range(5):
                         await page.evaluate("""
                             (function() {
                                 let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
@@ -299,7 +301,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         """)
                         await page.wait_for_timeout(500)
 
-                    # 💡 টাইমার স্ক্র্যাপ করা (আসল সময় বের করা)
+                    # টাইমার স্ক্র্যাপ (আসল সময় বের করা)
                     timer_val = "30s"
                     try:
                         body_text = await page.evaluate("() => document.body.innerText")
@@ -316,9 +318,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
                     step_plan_str += "└────────────────────────────────┘"
 
-                    # 💡 ১. প্রথম স্ক্রিনশটের মেসেজ (AUTO TRADE ACTIVE)
+                    # 💡 ১. যদি প্রথম বাজি হয়, তবে অ্যানিমেশন দেখাবে
                     if state.get("first_bet", True):
-                        await ctx.bot.send_message(chat_id=uid, text=(
+                        active_msg = await ctx.bot.send_message(chat_id=uid, text=(
                             "╔════════════════════════════════╗\n"
                             "   🚀 **AUTO TRADE ACTIVE** 🚀\n"
                             "╚════════════════════════════════╝\n\n"
@@ -351,6 +353,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await asyncio.sleep(0.5)
                         try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
                         except: pass
+                        
                         state["first_bet"] = False # পরেরবার আর দেখাবে না
 
                     # 💡 ২. Big / Small ক্লিক (সবচেয়ে শক্তিশালী লজিক)
@@ -396,8 +399,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await page.locator('text="Confirm"').last.click(timeout=3000)
                     except: pass
 
-                    # 💡 ৪. আপনার দেওয়া ২য় স্ক্রিনশটের মতো ANALYSIS REPORT মেসেজ
-                    # এখানে choice (BIG/SMALL) এবং timer_val ডাইনামিকভাবে বসবে
+                    # 💡 ৪. ৩ নম্বর স্ক্রিনশটের মতো ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
