@@ -190,6 +190,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.wait_for_timeout(400)
 
             await update_loading(85)
+            # Account পেজে যাওয়া
             try:
                 await page.evaluate("""
                     (function() {
@@ -201,7 +202,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         }
                     })();
                 """)
-                await page.wait_for_timeout(2000) 
+                await page.wait_for_timeout(3000) 
             except: pass
 
             await update_loading(95)
@@ -209,23 +210,31 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             uid_val = "Unknown"
             balance = "0.00"
 
-            # আগের মতোই দ্রুত ডেটা রিডিং
-            for _ in range(10): 
-                page_text = await page.inner_text("body")
-                if "Wrong account or password" in page_text:
-                    login_status = "failed"
-                    break
-                
-                uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
-                balance_match = re.search(r'Total\s*balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
-                
-                if uid_match:
-                    uid_val = uid_match.group(1)
-                    if balance_match: 
-                        balance = balance_match.group(1)
-                    login_status = "success"
-                    break
-                await page.wait_for_timeout(500)
+            # 💡 ব্রাউজারের ভেতরেই অপেক্ষা করবে যতক্ষণ না আসল ব্যালেন্স (0.00 এর বেশি) আসছে
+            try:
+                await page.wait_for_function("""
+                    () => {
+                        let text = document.body.innerText;
+                        // Total balance এবং দশমিক সংখ্যা খোঁজা
+                        let match = text.match(/Total\\s*balance[\\s\\S]*?([\\d]+\\.[\\d]+)/i);
+                        return match && parseFloat(match[1]) > 0.00;
+                    }
+                """, timeout=20000) # ২০ সেকেন্ড পর্যন্ত অপেক্ষা করবে
+            except:
+                pass # যদি ২০ সেকেন্ডেও 0.00 থাকে
+            
+            page_text = await page.inner_text("body")
+            uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
+            # 💡 রেগুলার এক্সপ্রেশন আরও শক্তিশালী করা হলো যাতে ৳ চিহ্ন বা নিউলাইন থাকলেও ধরতে পারে
+            balance_match = re.search(r'Total\s*balance[\s\S]*?([0-9]+\.[0-9]+)', page_text, re.IGNORECASE)
+            
+            if uid_match:
+                uid_val = uid_match.group(1)
+                if balance_match: 
+                    balance = balance_match.group(1)
+                login_status = "success"
+            elif "Wrong account or password" in page_text:
+                login_status = "failed"
 
             await update_loading(100)
             await asyncio.sleep(0.2)
@@ -460,7 +469,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await page.wait_for_timeout(2000) 
                     
                     new_page_text = await page.evaluate("() => document.body.innerText")
-                    new_balance_match = re.search(r'Total\s*balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
+                    new_balance_match = re.search(r'Total\s*balance[\s\S]*?([0-9]+\.[0-9]+)', new_page_text, re.IGNORECASE)
                     
                     if new_balance_match:
                         new_balance = float(new_balance_match.group(1))
