@@ -208,7 +208,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]]
             await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
 
-            # 💡 ২. START TRADE চাপার জন্য অপেক্ষা
             while not state.get("trade_running", False):
                 await asyncio.sleep(1)
                 if state.get("task") != asyncio.current_task():
@@ -220,9 +219,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # 💡 ৩. একদম আপনার ফাইলের মতো WinGo পেজে যাওয়ার লজিক
+            # 💡 একবারই WinGo পেজে যাবে
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(2500) 
+            await page.wait_for_timeout(2000) 
             
             for _ in range(3):
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span, a')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
@@ -231,7 +230,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             try:
                 await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
             except: pass
-            await page.wait_for_timeout(2500)
+            await page.wait_for_timeout(2000)
             
             try:
                 win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
@@ -274,7 +273,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ৪. কঠোর টাইমার চেক (৩০ থেকে ৬)
+                    # 💡 ১. কঠোর টাইমার চেক (৩০ থেকে ৬)
                     logger.info("Waiting for the timer to show 06s-30s...")
                     timer_val = "0s"
                     valid_timer = False
@@ -309,7 +308,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
                     step_plan_str += "└────────────────────────────────┘"
 
-                    # 💡 ৫. প্রথমবার AUTO TRADE ACTIVE মেসেজ
+                    # 💡 ২. প্রথমবার AUTO TRADE ACTIVE মেসেজ
                     pred_msg = None
                     if state.get("first_bet", True):
                         await ctx.bot.send_message(chat_id=uid, text=(
@@ -350,7 +349,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৬. Big/Small ক্লিক
+                    # 💡 ৩. Big/Small ক্লিক
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(200)
                     
@@ -376,7 +375,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             clicked = True
                         except: pass
 
-                    # 💡 ৭. সাথে সাথে Total amount এ ক্লিক করা
+                    # 💡 ৪. সাথে সাথে Total amount এ ক্লিক করা
                     confirm_success = False
                     for _ in range(10):
                         try:
@@ -402,7 +401,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             confirm_success = True
                         except: pass
 
-                    # 💡 ৮. ২ সেকেন্ড অপেক্ষা করে স্ক্রিনশট (যাতে পপআপ চলে যায়)
+                    # 💡 ৫. স্ক্রিনশট নেওয়া (২ সেকেন্ড পর, যাতে পপআপ চলে যায়)
                     await page.wait_for_timeout(2000)
                     
                     proof_path = f"proof_success_{uid}.png"
@@ -414,7 +413,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         caption=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice}**\n💵 Amount: ৳ {bet_amount:.2f}\n📱 স্ক্রিনশটে দেখুন সাইটে কি হয়েছে ↓"
                     )
 
-                    # 💡 ৯. ANALYSIS REPORT
+                    # 💡 ৬. ANALYSIS REPORT
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
@@ -445,7 +444,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
-                    # 💡 ১০. নতুন রেজাল্ট না আসা পর্যন্ত অপেক্ষা (কোনো ক্লিক বা স্ক্রল নয়)
+                    # 💡 ৭. নতুন রেজাল্ট না আসা পর্যন্ত অপেক্ষা (কোনো ক্লিক নয়)
                     logger.info("Waiting for new round to start...")
                     for _ in range(40): 
                         try:
@@ -458,7 +457,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except: pass
                         await asyncio.sleep(1)
                     
-                    # 💡 ১১. উপরে স্ক্রল করে ব্যালেন্স চেক করবে
+                    # 💡 ৮. উপরে স্ক্রল করে ব্যালেন্স চেক করবে
                     logger.info("Scrolling up to check balance...")
                     await page.evaluate("window.scrollTo(0, 0);")
                     await page.wait_for_timeout(1500)
@@ -536,7 +535,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 f"{next_step_txt}"
                             ))
                     
-                    # 💡 ১২. নিচে স্ক্রল করে আবার গেমে ফিরে আসবে
+                    # 💡 ৯. নিচে স্ক্রল করে আবার গেমে ফিরে আসবে
                     logger.info("Scrolling down to resume betting...")
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(1500)
