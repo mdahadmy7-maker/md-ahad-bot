@@ -4,9 +4,7 @@ import re
 import os
 import requests
 import json
-import random
-import time
-from datetime import datetime, timezone
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from playwright.async_api import async_playwright
@@ -37,37 +35,18 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# 💡 ২. টাইম সিঙ্ক (Time Sync) ফাংশন
-# ───────────────────────────────────────────
-def get_seconds_left():
-    """UTC টাইম থেকে বর্তমান রাউন্ডে কত সেকেন্ড বাকি তা বের করা"""
-    now = datetime.now(timezone.utc)
-    return 30 - (now.second % 30)
-
-def get_current_period():
-    """UTC টাইম থেকে বর্তমান পিরিয়ড নম্বর বের করার লজিক"""
-    now = datetime.now(timezone.utc)
-    # WinGo 30S এর পিরিয়ড ফরম্যাট: YYYYMMDD + 1000 + রাউন্ড নম্বর
-    # উদাহরণ: 20261024 + 1000 + (সেকেন্ডের হিসাব)
-    period_str = now.strftime("%Y%m%d")
-    # দিনের শুরু থেকে কতগুলো ৩০ সেকেন্ড পার হয়েছে
-    seconds_since_midnight = now.hour * 3600 + now.minute * 60 + now.second
-    round_number = (seconds_since_midnight // 30) + 1
-    return f"{period_str}1000{round_number:05d}"
-
-# ───────────────────────────────────────────
-# 💡 ৩. API থেকে প্রেডিকশন বের করার ফাংশন
+# 💡 ২. API থেকে রেজাল্ট ও প্রেডিকশন বের করার ফাংশন
 # ───────────────────────────────────────────
 def get_history_and_prediction():
     try:
-        res = requests.get(HISTORY_API + f"?t={int(time.time()*1000)}", timeout=10)
+        res = requests.get(HISTORY_API, timeout=10)
         data = res.json()
         
         list_data = data.get("data", {}).get("list", [])
         if not list_data:
-            return "SMALL", get_current_period()
+            return "SMALL", "Unknown"
             
-        latest_period = get_current_period() # API থেকে না নিয়ে টাইম থেকে নিচ্ছি
+        latest_period = str(list_data[0].get("issueNumber", "Unknown"))
         reversed_list = list(reversed(list_data))
         
         history = []
@@ -96,10 +75,10 @@ def get_history_and_prediction():
         
     except Exception as e:
         logger.error(f"History API error: {e}")
-        return "SMALL", get_current_period()
+        return "SMALL", "Unknown"
 
 # ───────────────────────────────────────────
-# ৪. লগইন এবং অটো-বেট ফাংশন
+# ৩. লগইন এবং অটো-বেট ফাংশন
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -283,7 +262,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
-                    # 💡 টাইম সিঙ্ক ব্যবহার করে প্রেডিকশন ও পিরিয়ড নেওয়া
                     choice, current_period = get_history_and_prediction()
 
                     # গেমের ভেতরের পপআপ ক্লোজ
@@ -301,6 +279,15 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             })();
                         """)
                         await page.wait_for_timeout(300)
+
+                    # টাইমার স্ক্র্যাপ
+                    timer_val = "30s"
+                    try:
+                        body_text = await page.evaluate("() => document.body.innerText")
+                        timer_match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
+                        if timer_match:
+                            timer_val = f"{timer_match.group(1)}s"
+                    except: pass
 
                     step_plan_str = "┌────────────────────────────────┐\n"
                     for i, amt in enumerate(state['step_amounts']):
@@ -321,7 +308,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             f"{step_plan_str}\n\n"
                             "⏱️ **Current Period**\n"
                             f"{current_period}\n"
-                            f"██████████ {get_seconds_left()}s\n\n"
+                            f"██████████ {timer_val}\n\n"
                             "🧠 _Analysing market..._\n"
                             "🎬 _4-second prediction animation → auto bet every period._"
                         ), parse_mode="Markdown")
@@ -346,101 +333,66 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["first_bet"] = False 
 
                     # ----------------------------------------------------
-                    # 💡 [মূল ফিক্স] UTC টাইম সিঙ্ক ব্যবহার করে অপেক্ষা করা
+                    # 💡 [মূল ফিক্স] শুধু 30 বা 29 আসার জন্য অপেক্ষা করা (আপনার কথামতো)
                     # ----------------------------------------------------
-                    logger.info("Using UTC Time Sync to wait for the new round...")
+                    logger.info("Waiting for timer to show 30 or 29...")
+                    timer_ready = False
                     
-                    # বর্তমানে কত সেকেন্ড বাকি আছে তা বের করা
-                    sec_left = get_seconds_left()
-                    
-                    # যদি ০০ ওভারলে থাকে (মানে ৩ সেকেন্ডের কম বাকি), তবে অপেক্ষা করবে
-                    if sec_left <= 3:
-                        logger.info(f"Only {sec_left}s left. Waiting for overlay to clear...")
-                        await asyncio.sleep(sec_left + 1.5) # ০০ শেষ হওয়া + ১.৫ সেকেন্ড বাফার
-                    else:
-                        # যদি রাউন্ডের মাঝখানে থাকে, তবে পরের রাউন্ডের ২৯ সেকেন্ডে যাওয়ার জন্য অপেক্ষা করবে
-                        wait_time = sec_left - 28
-                        if wait_time > 0:
-                            logger.info(f"Waiting {wait_time}s to reach the start of the next round...")
-                            await asyncio.sleep(wait_time)
-                        else:
-                            await asyncio.sleep(2) # ন্যূনতম ২ সেকেন্ড বাফার
+                    for _ in range(400): # সর্বোচ্চ ৪০ সেকেন্ড অপেক্ষা করবে
+                        try:
+                            body_text = await page.evaluate("() => document.body.innerText")
+                            if "00:30" in body_text or "00:29" in body_text:
+                                timer_ready = True
+                                logger.info("Timer is 30 or 29! Clicking NOW.")
+                                break
+                        except: pass
+                        await asyncio.sleep(0.1)
 
-                    logger.info("New round started! Proceeding to click.")
+                    if not timer_ready:
+                        logger.error("Timer failed to show 30/29. Skipping.")
+                        continue
 
-                    # 💡 ২. Big / Small ক্লিক (জাভাস্ক্রিপ্ট ইনজেকশন)
+                    # 💡 ৩. একদম সাথে সাথে Big/Small এবং Total amount ক্লিক (কোনো দেরি নেই)
                     clicked = False
+                    popup_success = False
+                    
                     try:
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                         
-                        clicked = await page.evaluate(f"""
-                            (function() {{
-                                // '00' ওভারলে রিমুভ করা
-                                let allElements = document.querySelectorAll('div, span');
-                                for (let el of allElements) {{
-                                    let text = (el.innerText || '').trim();
-                                    if (text === '00' || text === '0 0') {{
-                                        let parent = el.closest('div');
-                                        while(parent) {{
-                                            parent.style.pointerEvents = 'none';
-                                            parent.style.display = 'none';
-                                            parent = parent.parentElement;
-                                        }}
-                                    }}
-                                }}
-                                let target = '{choice}'.toUpperCase();
-                                let elements = document.querySelectorAll('div, span, button, p, a');
-                                for (let el of elements) {{
-                                    let text = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                    if (text === target) {{
-                                        let rect = el.getBoundingClientRect();
-                                        if (rect.width > 0 && rect.height > 0) {{
-                                            let clickTarget = el.closest('button, div[role="button"], .btn') || el;
-                                            let opts = {{ bubbles: true, cancelable: true, clientX: rect.left + rect.width/2, clientY: rect.top + rect.height/2, view: window }};
-                                            clickTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
-                                            clickTarget.dispatchEvent(new MouseEvent('mousedown', opts));
-                                            clickTarget.dispatchEvent(new PointerEvent('pointerup', opts));
-                                            clickTarget.dispatchEvent(new MouseEvent('mouseup', opts));
-                                            clickTarget.dispatchEvent(new MouseEvent('click', opts));
-                                            return true;
-                                        }}
-                                    }}
-                                }}
-                                return false;
-                            }})();
-                        """)
+                        # প্রথমে Big/Small এ ক্লিক
+                        target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
+                        await target_locator.click(force=True, timeout=3000)
+                        clicked = True
+                        logger.info(f"Clicked {choice}.")
+                        
+                        # সাথে সাথেই Total amount এ ক্লিক (কোনো wait_for_timeout নেই)
+                        popup_locator = page.get_by_text("Total amount").last
+                        await popup_locator.click(force=True, timeout=3000)
+                        popup_success = True
+                        logger.info("Clicked Total amount successfully.")
+                        
                     except Exception as e:
-                        logger.error(f"JS click failed: {e}")
+                        logger.error(f"Click sequence failed: {e}")
 
-                    # 💡 ৩. "Total amount" বাটন খোঁজা
-                    popup_success = False
-                    if clicked:
-                        try:
-                            popup_locator = page.locator('text="Total amount"').last
-                            await popup_locator.wait_for(state="visible", timeout=5000)
-                            await popup_locator.click(force=True, timeout=3000)
-                            popup_success = True
-                        except Exception as e:
-                            logger.error(f"Popup click failed: {e}")
-
+                    # 💡 [আপনার নির্দেশ] আটকে গেলে স্ক্রিনশট পাঠাবে
                     if not popup_success:
                         screenshot_path = f"error_popup_{uid}.png"
                         await page.screenshot(path=screenshot_path)
                         await ctx.bot.send_photo(
                             chat_id=uid, 
                             photo=open(screenshot_path, 'rb'), 
-                            caption=f"⚠️ **{choice} বাটনে ক্লিক করার পর 'Total amount' বাটন পাওয়া যায়নি!**\n\nসম্ভবত ক্লিক ঠিকমতো রেজিস্টার হয়নি বা ওভারলে ছিল। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
+                            caption=f"⚠️ **{choice} বাটনে ক্লিক করার পর 'Total amount' বাটন পাওয়া যায়নি!**\n\nসম্ভবত ক্লিক ঠিকমতো রেজিস্টার হয়নি। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
                         )
                         state["trade_running"] = False
                         break
 
-                    # 💡 ৪. ANALYSIS REPORT মেসেজ
+                    # 💡 ৫. ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         f"⏱️ Period    : {current_period}\n"
-                        f"⏱️ Timer     : 30s remaining\n"
+                        f"⏱️ Timer     : {timer_val} remaining\n"
                         "📊 Market       : MIXED 📊\n"
                         "🔬 Stability    : 🔴 VOLATILE (0/100)\n"
                         "🧨 Hostility    : 🟡 UNSTABLE (60/100)\n"
@@ -465,19 +417,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ))
 
-                    # 💡 ৫. রেজাল্টের জন্য অপেক্ষা (UTC টাইম দিয়ে)
-                    # পরের রাউন্ডের ৩০ সেকেন্ড শেষ হওয়ার পর রেজাল্ট আসে, তাই ৩২ সেকেন্ড অপেক্ষা করা হচ্ছে
-                    logger.info("Waiting 32s for the round to finish...")
+                    # 💡 ৬. ৩২ সেকেন্ড অপেক্ষা (রেজাল্টের জন্য)
                     await asyncio.sleep(32)
 
-                    # WinGo পেজে ফিরে এসে পরের রাউন্ডের প্রস্তুতি নেওয়া
-                    try:
-                        # পেজ রিলোড না করে শুধু ওভারলে চেক করা
-                        pass 
-                    except: pass
-
-                    # 💡 ৬. ব্যালেন্স চেক করে WIN/LOSS আপডেট
-                    # (এখানে আপনার আগের লজিকই আছে, তবে ৩২ সেকেন্ড অপেক্ষার পর সাইটে গিয়ে ব্যালেন্স চেক করা হবে)
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
                     await page.wait_for_timeout(2000) 
                     
@@ -554,7 +496,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 f"{next_step_txt}"
                             ))
 
-                    # আবার WinGo পেজে ফিরে যাওয়া (যাতে পরের রাউন্ডে ক্লিক করা যায়)
+                    # আবার WinGo পেজে ফিরে যাওয়া (Account থেকে)
                     await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(1500) 
                     try:
