@@ -357,41 +357,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
-                    # 💡 ৩. ডিলিট করা (প্রেডিকশন মেসেজ)
+                    # 💡 ৩. ডিলিট করা এবং Big/Small ক্লিক করা (একদম পরপর)
                     if pred_msg:
                         try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
                         except: pass
                     
                     state["first_bet"] = False 
-
-                    # ----------------------------------------------------
-                    # 💡 [অত্যন্ত গুরুত্বপূর্ণ] টাইমার 00:00 এবং 29, 28, 27 দেখার জন্য অপেক্ষা করা
-                    # ----------------------------------------------------
-                    logger.info("Waiting for 00:00 to appear...")
-                    for _ in range(60): # সর্বোচ্চ ৩০ সেকেন্ড অপেক্ষা করবে
-                        try:
-                            body_text = await page.evaluate("() => document.body.innerText")
-                            if "00:00" in body_text:
-                                break
-                        except: pass
-                        await asyncio.sleep(0.5)
-
-                    logger.info("Waiting for timer to show 29, 28, or 27...")
-                    for _ in range(50): # সর্বোচ্চ ১০ সেকেন্ড অপেক্ষা করবে
-                        try:
-                            body_text = await page.evaluate("() => document.body.innerText")
-                            if "00:00" not in body_text:
-                                match = re.search(r'00:(\d{2})', body_text)
-                                if match:
-                                    sec = int(match.group(1))
-                                    if sec in [27, 28, 29, 30]:
-                                        logger.info(f"Timer reached {sec}s. Clicking now.")
-                                        break
-                        except: pass
-                        await asyncio.sleep(0.2) # ০.২ সেকেন্ড পর পর চেক করবে
-
-                    # UI সেটেল হওয়ার জন্য সামান্য অপেক্ষা
-                    await asyncio.sleep(0.5)
 
                     # Big/Small ক্লিক করার চেষ্টা
                     clicked = False
@@ -416,7 +387,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     except Exception as e:
                         logger.error(f"Standard click failed: {e}")
                         try:
-                            # কো-অর্ডিনেট ক্লিক
+                            # কো-অর্ডিনেট ক্লিক (স্ক্রিনশটের নিচের বাটন)
                             if choice.upper() == "BIG":
                                 await page.mouse.click(103, 890)
                             else:
@@ -425,13 +396,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except Exception as coord_e:
                             logger.error(f"Coordinate click failed: {coord_e}")
 
-                    # 💡 ৪. ক্লিক সফল হয়েছে কিনা যাচাই করা (Confirm / Total amount বাটন খোঁজা)
-                    await page.wait_for_timeout(1500) # পপআপ আসার জন্য অপেক্ষা
+                    # 💡 ৪. ক্লিক সফল হয়েছে কিনা যাচাই করা (Confirm বাটন খোঁজা)
+                    await page.wait_for_timeout(1500) # Confirm বাটন আসার জন্য অপেক্ষা
                     
                     confirm_success = False
                     try:
-                        # Confirm এবং Total amount দুটোই চেক করা হচ্ছে
-                        confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm"), text="Total amount", text=re.compile("Total amount", re.IGNORECASE)').last
+                        confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm")').last
                         if await confirm_btn.count() > 0 and await confirm_btn.is_visible():
                             await confirm_btn.click(timeout=3000, force=True)
                             confirm_success = True
@@ -439,23 +409,23 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         logger.error(f"Confirm error: {e}")
 
                     if not confirm_success:
-                        # আবার একবার চেক করা
+                        # আবার একবার চেক করা (স্লো ইন্টারনেটের জন্য)
                         await page.wait_for_timeout(2000)
                         try:
-                            confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm"), text="Total amount", text=re.compile("Total amount", re.IGNORECASE)').last
+                            confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm")').last
                             if await confirm_btn.count() > 0 and await confirm_btn.is_visible():
                                 await confirm_btn.click(timeout=3000, force=True)
                                 confirm_success = True
                         except: pass
 
-                    # যদি Confirm/Total amount বাটন না আসে, তবে ক্লিক ফেইল করেছে -> স্ক্রিনশট পাঠাবে
+                    # যদি Confirm বাটন না আসে, তবে ক্লিক ফেইল করেছে -> স্ক্রিনশট পাঠাবে
                     if not confirm_success:
                         screenshot_path = f"error_confirm_{uid}.png"
                         await page.screenshot(path=screenshot_path)
                         await ctx.bot.send_photo(
                             chat_id=uid, 
                             photo=open(screenshot_path, 'rb'), 
-                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু কোনো Confirm/Total amount বাটন আসেনি!**\n\nসম্ভবত ক্লিক ঠিকমতো রেজিস্টার হয়নি বা ওয়েবসাইট আটকে আছে। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
+                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু কোনো Confirm বাটন আসেনি!**\n\nসম্ভবত ক্লিক ঠিকমতো রেজিস্টার হয়নি বা ওয়েবসাইট আটকে আছে। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
                         )
                         state["trade_running"] = False
                         break
@@ -781,7 +751,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
     elif data == "start_trade_btn":
         state["trade_running"] = True
-        # 💡 [ফিক্স] edit_reply_markup লাইনটি সরিয়ে দেওয়া হয়েছে যাতে বাটন ডিলিট না হয়
+        await query.message.edit_reply_markup(reply_markup=None)
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
         await query.edit_message_text("❌ **TRADE CANCELLED**")
