@@ -365,59 +365,79 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     state["first_bet"] = False 
 
                     # ----------------------------------------------------
-                    # 💡 [নতুন লজিক] ৫ সেকেন্ডের বেশি অপেক্ষা করবে না
+                    # 💡 [মূল ফিক্স] "00" থাকলে ক্লিক করবে না, "00" চলে গেলেই ক্লিক করবে
                     # ----------------------------------------------------
-                    logger.info("Checking for 00:00 overlay (max 5 seconds)...")
-                    for _ in range(25): # 25 * 0.2 = 5 seconds max
-                        try:
-                            body_text = await page.evaluate("() => document.body.innerText")
-                            # যদি 00:00 না থাকে, তবে লুপ থেকে বেরিয়ে যাবে (ক্লিক করার জন্য রেডি)
-                            if "00:00" not in body_text:
-                                break
-                        except: pass
-                        await asyncio.sleep(0.2)
+                    logger.info("Waiting for '00' overlay to disappear...")
+                    try:
+                        # অপেক্ষা করবে যতক্ষণ না 00:00 সম্পূর্ণ মুছে গিয়ে নতুন রাউন্ড (29, 28, 27) শুরু হয়
+                        await page.wait_for_function("""
+                            () => {
+                                let text = document.body.innerText;
+                                // যদি 00:00 থাকে, তবে ক্লিক করবে না (false রিটার্ন করবে)
+                                if (text.includes('00:00')) return false;
+                                
+                                // 00:00 না থাকলে চেক করবে নতুন রাউন্ড শুরু হয়েছে কিনা
+                                let match = text.match(/00:(\\d{2})/);
+                                if (match) {
+                                    let sec = parseInt(match[1]);
+                                    // ২৭ থেকে ৩০ এর মধ্যে হলেই true রিটার্ন করবে (তখন ক্লিক হবে)
+                                    return sec >= 27 && sec <= 30;
+                                }
+                                return false;
+                            }
+                        """, timeout=15000) # সর্বোচ্চ ১৫ সেকেন্ড অপেক্ষা করবে
+                        logger.info("New round started! Proceeding to click.")
+                    except Exception as e:
+                        logger.info(f"Timer wait timeout: {e}")
 
-                    # Big/Small ক্লিক করার চেষ্টা
+                    # UI আপডেট হওয়ার জন্য সামান্য অপেক্ষা (খুব দ্রুত)
+                    await asyncio.sleep(0.5)
+
+                    # Big/Small ক্লিক করার চেষ্টা (জাভাস্ক্রিপ্ট পয়েন্টার ইভেন্ট)
                     clicked = False
                     try:
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                        await page.wait_for_timeout(1000)
                         
-                        target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
-                        await target_locator.scroll_into_view_if_needed(timeout=4000)
-                        
-                        box = await target_locator.bounding_box()
-                        if box:
-                            x = box['x'] + box['width'] / 2
-                            y = box['y'] + box['height'] / 2
-                            await page.mouse.move(x, y)
-                            await asyncio.sleep(0.2)
-                            await page.mouse.click(x, y)
-                            clicked = True
-                        else:
-                            await target_locator.click(force=True, timeout=4000)
-                            clicked = True
+                        clicked = await page.evaluate(f"""
+                            (function() {{
+                                let target = '{choice}'.toUpperCase();
+                                let elements = document.querySelectorAll('div, span, button, p, a');
+                                for (let el of elements) {{
+                                    let text = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                    if (text === target) {{
+                                        let rect = el.getBoundingClientRect();
+                                        if (rect.width > 0 && rect.height > 0) {{
+                                            let clickTarget = el.closest('button, div[role="button"], .btn') || el;
+                                            
+                                            let x = rect.left + (rect.width / 2);
+                                            let y = rect.top + (rect.height / 2);
+                                            let opts = {{ bubbles: true, cancelable: true, clientX: x, clientY: y, view: window }};
+                                            
+                                            clickTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
+                                            clickTarget.dispatchEvent(new MouseEvent('mousedown', opts));
+                                            clickTarget.dispatchEvent(new PointerEvent('pointerup', opts));
+                                            clickTarget.dispatchEvent(new MouseEvent('mouseup', opts));
+                                            clickTarget.dispatchEvent(new MouseEvent('click', opts));
+                                            
+                                            return true;
+                                        }}
+                                    }}
+                                }}
+                                return false;
+                            }})();
+                        """)
                     except Exception as e:
-                        logger.error(f"Standard click failed: {e}")
-                        try:
-                            # কো-অর্ডিনেট ক্লিক (স্ক্রিনশটের নিচের বাটন)
-                            if choice.upper() == "BIG":
-                                await page.mouse.click(103, 890)
-                            else:
-                                await page.mouse.click(309, 890)
-                            clicked = True
-                        except Exception as coord_e:
-                            logger.error(f"Coordinate click failed: {coord_e}")
+                        logger.error(f"JS click failed: {e}")
 
                     # 💡 ৪. ক্লিক সফল হয়েছে কিনা যাচাই করা (শুধুমাত্র Total amount বাটন খোঁজা)
-                    await page.wait_for_timeout(1500) # পপআপ আসার জন্য অপেক্ষা
+                    await page.wait_for_timeout(1000) # পপআপ আসার জন্য অপেক্ষা
                     
                     popup_success = False
                     try:
                         # শুধুমাত্র Total amount খোঁজা হচ্ছে
                         popup_btn = page.locator('text="Total amount"').last
                         if await popup_btn.count() > 0 and await popup_btn.is_visible():
-                            await popup_btn.click(timeout=3000, force=True)
+                            await popup_btn.click(force=True, timeout=3000)
                             popup_success = True
                     except Exception as e:
                         logger.error(f"Popup error: {e}")
@@ -428,7 +448,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         try:
                             popup_btn = page.locator('text="Total amount"').last
                             if await popup_btn.count() > 0 and await popup_btn.is_visible():
-                                await popup_btn.click(timeout=3000, force=True)
+                                await popup_btn.click(force=True, timeout=3000)
                                 popup_success = True
                         except: pass
 
