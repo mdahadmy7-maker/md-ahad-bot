@@ -4,6 +4,8 @@ import re
 import os
 import requests
 import json
+import random
+import time
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -16,6 +18,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SITE_URL = "https://www.hgnice.vip/#/login"
 HOME_URL = "https://www.hgnice.vip/#/"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
+BET_API = "https://api.ar-lottery01.com/api/Lottery/WinGoBet"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -381,35 +384,74 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         logger.error("Timer failed to reach 28-30. Skipping.")
                         continue
 
-                    # 💡 ১.৫ সেকেন্ড বাফার (বাটন ১০০% চালু হওয়ার জন্য)
-                    await asyncio.sleep(1.5)
+                    # 💡 ১ সেকেন্ড বাফার (বাটন ১০০% চালু হওয়ার জন্য)
+                    await asyncio.sleep(1.0)
 
-                    # 💡 ২. Big / Small ক্লিক (force=True ছাড়া, একদম ন্যাচারাল)
-                    clicked = False
+                    # 💡 ২. API হিট করার চেষ্টা (আপনার দেওয়া লিংক অনুযায়ী)
+                    bet_content = "BigSmall_" + choice.capitalize() # BigSmall_Big বা BigSmall_Small
+                    
+                    # টোকেন খোঁজা (ব্রাউজারের লোকাল স্টোরেজ থেকে)
+                    token = await page.evaluate("() => localStorage.getItem('token') || localStorage.getItem('authorization') || JSON.parse(localStorage.getItem('userInfo') || '{}').token")
+                    
+                    payload = {
+                        "gameCode": "WinGo_30S",
+                        "issueNumber": str(current_period),
+                        "amount": bet_amount,
+                        "betMultiple": 1,
+                        "betContent": bet_content,
+                        "language": "en",
+                        "random": random.randint(100000000000, 999999999999),
+                        "signature": "66AEEECE88D27A8668C6A7FC13F41E5D", # এটি ডাইনামিক হওয়া দরকার, তবে আপাতত আপনার দেওয়া ডামি সিগনেচার দেওয়া হলো
+                        "timestamp": int(time.time())
+                    }
+
+                    api_success = False
                     try:
-                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                        
-                        target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
-                        
-                        # Playwright নিজে থেকেই অপেক্ষা করবে বাটন ক্লিকযোগ্য হওয়া পর্যন্ত
-                        await target_locator.click(timeout=8000)
-                        clicked = True
-                        logger.info(f"Clicked {choice} successfully.")
+                        logger.info(f"Attempting API hit to {BET_API}...")
+                        response = requests.post(BET_API, json=payload, headers={"Authorization": f"Bearer {token}"}, timeout=10)
+                        if response.status_code == 200:
+                            logger.info(f"API Response: {response.text}")
+                            if '"code":0' in response.text or '"success":true' in response.text: # সফল রেসপন্স চেক
+                                api_success = True
                     except Exception as e:
-                        logger.error(f"Standard click failed: {e}")
+                        logger.error(f"API hit failed: {e}")
+
+                    # 💡 ৩. যদি API ফেইল করে, তবে UI-তে ক্লিক করবে (Fallback)
+                    if not api_success:
+                        logger.info("API failed or signature invalid. Falling back to UI click.")
+                        clicked = False
                         try:
-                            # জাভাস্ক্রিপ্ট ফলব্যাক
+                            await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                            
                             clicked = await page.evaluate(f"""
                                 (function() {{
+                                    // '00' ওভারলে রিমুভ করা
+                                    let allElements = document.querySelectorAll('div, span');
+                                    for (let el of allElements) {{
+                                        let text = (el.innerText || '').trim();
+                                        if (text === '00' || text === '0 0') {{
+                                            let parent = el.closest('div');
+                                            while(parent) {{
+                                                parent.style.pointerEvents = 'none';
+                                                parent.style.display = 'none';
+                                                parent = parent.parentElement;
+                                            }}
+                                        }}
+                                    }}
                                     let target = '{choice}'.toUpperCase();
                                     let elements = document.querySelectorAll('div, span, button, p, a');
                                     for (let el of elements) {{
                                         let text = (el.innerText || el.textContent || '').trim().toUpperCase();
                                         if (text === target) {{
                                             let rect = el.getBoundingClientRect();
-                                            if (rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).pointerEvents !== 'none') {{
+                                            if (rect.width > 0 && rect.height > 0) {{
                                                 let clickTarget = el.closest('button, div[role="button"], .btn') || el;
-                                                clickTarget.click();
+                                                let opts = {{ bubbles: true, cancelable: true, clientX: rect.left + rect.width/2, clientY: rect.top + rect.height/2, view: window }};
+                                                clickTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
+                                                clickTarget.dispatchEvent(new MouseEvent('mousedown', opts));
+                                                clickTarget.dispatchEvent(new PointerEvent('pointerup', opts));
+                                                clickTarget.dispatchEvent(new MouseEvent('mouseup', opts));
+                                                clickTarget.dispatchEvent(new MouseEvent('click', opts));
                                                 return true;
                                             }}
                                         }}
@@ -417,31 +459,30 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                     return false;
                                 }})();
                             """)
-                        except: pass
+                        except Exception as e:
+                            logger.error(f"UI click failed: {e}")
 
-                    # 💡 ৩. "Total amount" বাটন খোঁজা (সর্বোচ্চ ৫ সেকেন্ড অপেক্ষা)
-                    popup_success = False
-                    if clicked:
+                        if not clicked:
+                            screenshot_path = f"error_click_{uid}.png"
+                            await page.screenshot(path=screenshot_path)
+                            await ctx.bot.send_photo(chat_id=uid, photo=open(screenshot_path, 'rb'), caption="⚠️ বাটনে ক্লিক করা যাচ্ছে না!")
+                            state["trade_running"] = False
+                            break
+
+                        # UI ক্লিকের পর Total Amount চেক
+                        popup_success = False
                         try:
-                            # 💡 এখানেই আসল ফিক্স। পপআপ আসার জন্য অপেক্ষা করবে।
                             popup_locator = page.locator('text="Total amount"').last
                             await popup_locator.wait_for(state="visible", timeout=5000)
-                            await popup_locator.click(timeout=3000)
+                            await popup_locator.click(force=True, timeout=3000)
                             popup_success = True
-                            logger.info("Clicked Total amount successfully.")
                         except Exception as e:
                             logger.error(f"Popup click failed: {e}")
 
-                    if not popup_success:
-                        screenshot_path = f"error_popup_{uid}.png"
-                        await page.screenshot(path=screenshot_path)
-                        await ctx.bot.send_photo(
-                            chat_id=uid, 
-                            photo=open(screenshot_path, 'rb'), 
-                            caption=f"⚠️ **{choice} বাটনে ক্লিক করার পর 'Total amount' বাটন পাওয়া যায়নি!**\n\nসম্ভবত ক্লিক ঠিকমতো রেজিস্টার হয়নি বা ওভারলে ছিল। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
-                        )
-                        state["trade_running"] = False
-                        break
+                        if not popup_success:
+                            await ctx.bot.send_message(chat_id=uid, text="⚠️ **Total amount বাটন পাওয়া যায়নি!** বট বন্ধ করা হচ্ছে।")
+                            state["trade_running"] = False
+                            break
 
                     # 💡 ৪. ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
