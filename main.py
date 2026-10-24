@@ -78,32 +78,7 @@ def get_history_and_prediction():
         return "SMALL", "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. পপআপ ক্লোজ করার ফাংশন (একদম আক্রমনাত্মক)
-# ───────────────────────────────────────────
-async def close_all_popups(page):
-    try:
-        # ১. জাভাস্ক্রিপ্ট দিয়ে সব সম্ভাব্য পপআপ বাটন খুঁজে ক্লিক করা
-        await page.evaluate("""
-            (function() {
-                let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
-                for (let el of elements) {
-                    let text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
-                    if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok' || text === 'got it' || text.includes('announcement')) {
-                        let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
-                        el.dispatchEvent(event);
-                        
-                        // যদি বাটনটি div বা span এর ভেতরে থাকে
-                        let btn = el.closest('button, div[role="button"], .btn') || el;
-                        btn.dispatchEvent(event);
-                    }
-                }
-            })();
-        """)
-        await page.wait_for_timeout(400)
-    except: pass
-
-# ───────────────────────────────────────────
-# ৪. লগইন এবং অটো-বেট ফাংশন
+# ৩. লগইন এবং অটো-বেট ফাংশন
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -147,7 +122,20 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
             await update_loading(70)
-            await close_all_popups(page) # লগইন পপআপ ক্লোজ
+            for _ in range(10):
+                await page.evaluate("""
+                    (function() {
+                        let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
+                        for (let el of elements) {
+                            let text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
+                            if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok') {
+                                let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
+                                el.dispatchEvent(event);
+                            }
+                        }
+                    })();
+                """)
+                await page.wait_for_timeout(400)
 
             await update_loading(85)
             try:
@@ -163,7 +151,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 """)
                 await page.wait_for_timeout(3000) 
             except: pass
-            await close_all_popups(page)
 
             await update_loading(95)
             login_status = "unknown"
@@ -229,22 +216,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
 
-            # WinGo পেজে যাওয়া
-            await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(2000) 
-            await close_all_popups(page)
-
-            try:
-                await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
-                await page.wait_for_timeout(2000)
-                await close_all_popups(page)
-                
-                win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
-                await win_go_card.click(timeout=5000, force=True)
-                await page.wait_for_timeout(3000)
-                await close_all_popups(page)
-            except: pass
-
             while state["trade_running"]:
                 try:
                     current_bal = state["balance"]
@@ -280,13 +251,67 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. প্রথমবার ওয়েলকাম মেসেজ ও অ্যানিমেশন (নেভিগেশনের আগেই)
-                    if state.get("first_bet", True):
-                        step_plan_str = "┌────────────────────────────────┐\n"
-                        for i, amt in enumerate(state['step_amounts']):
-                            step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
-                        step_plan_str += "└────────────────────────────────┘"
+                    # 💡 WinGo তে যাওয়ার সঠিক পথ
+                    await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
+                    await page.wait_for_timeout(2500) 
 
+                    # হোমপেজের পপআপ ক্লোজ
+                    for _ in range(3):
+                        await page.evaluate("""
+                            (function() {
+                                let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
+                                for (let el of elements) {
+                                    let text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
+                                    if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok') {
+                                        let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
+                                        el.dispatchEvent(event);
+                                    }
+                                }
+                            })();
+                        """)
+                        await page.wait_for_timeout(500)
+
+                    # Lottery -> Win Go
+                    nav_success = False
+                    try:
+                        try:
+                            await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
+                        except:
+                            await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if((el.innerText||'').toLowerCase().includes('lottery')) { el.click(); return true; } } return false; }""")
+                        
+                        await page.wait_for_timeout(2500)
+                        
+                        try:
+                            win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
+                            await win_go_card.scroll_into_view_if_needed(timeout=5000)
+                            await win_go_card.click(timeout=5000, force=True)
+                        except:
+                            clicked = await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } return false; }""")
+                            if not clicked: raise Exception("Win Go card not found.")
+                            
+                        await page.wait_for_timeout(4000) 
+                        nav_success = True
+                    except Exception as e:
+                        logger.error(f"Navigation error: {e}")
+
+                    # টাইমার স্ক্র্যাপ
+                    timer_val = "30s"
+                    try:
+                        body_text = await page.evaluate("() => document.body.innerText")
+                        timer_match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
+                        if timer_match:
+                            timer_val = f"{timer_match.group(1)}s"
+                    except: pass
+
+                    step_plan_str = "┌────────────────────────────────┐\n"
+                    for i, amt in enumerate(state['step_amounts']):
+                        step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
+                    step_plan_str += "└────────────────────────────────┘"
+
+                    # 💡 ১. শুধুমাত্র প্রথমবার (First Bet) এই দুটি মেসেজ আসবে
+                    pred_msg = None
+                    if state.get("first_bet", True):
+                        # AUTO TRADE ACTIVE মেসেজ
                         await ctx.bot.send_message(chat_id=uid, text=(
                             "╔════════════════════════════════╗\n"
                             "   🚀 **AUTO TRADE ACTIVE** 🚀\n"
@@ -299,16 +324,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             f"{step_plan_str}\n\n"
                             "⏱️ **Current Period**\n"
                             f"{current_period}\n"
-                            "██████████ 30s\n\n"
+                            f"██████████ {timer_val}\n\n"
                             "🧠 _Analysing market..._\n"
                             "🎬 _4-second prediction animation → auto bet every period._"
                         ), parse_mode="Markdown")
 
+                        # GENERATING PREDICTION মেসেজ
                         pred_msg = await ctx.bot.send_message(chat_id=uid, text="━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[░░░░░░░░░░░░] 0%`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏳ _Running 9 layers + backtest..._", parse_mode="Markdown")
                         
-                        for pct in [20, 40, 60, 80, 100]:
+                        for pct in [45, 85, 100]:
                             bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
-                            await asyncio.sleep(0.6) 
+                            await asyncio.sleep(0.2)
                             try:
                                 await ctx.bot.edit_message_text(
                                     chat_id=uid, message_id=pred_msg.message_id,
@@ -317,112 +343,100 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 )
                             except: pass
                         
-                        await asyncio.sleep(0.2)
-                        if pred_msg:
-                            try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
-                            except: pass
-                        
-                        state["first_bet"] = False 
-
-                    # 💡 ২. টাইমার 00:00 হওয়া এবং ২৯/২৮/২৭ শুরু হওয়া পর্যন্ত অপেক্ষা করা
-                    logger.info("Waiting for 00:00...")
-                    for _ in range(40):
-                        body_text = await page.evaluate("() => document.body.innerText")
-                        if "00:00" in body_text:
-                            break
-                        await asyncio.sleep(0.3) # ফাস্ট পোলিং
-
-                    logger.info("Waiting for 29, 28, or 27...")
-                    timer_found = False
-                    for _ in range(30):
-                        body_text = await page.evaluate("() => document.body.innerText")
-                        if "00:00" not in body_text:
-                            match = re.search(r'00:(\d{2})', body_text)
-                            if match:
-                                sec = int(match.group(1))
-                                if sec in [27, 28, 29, 30]:
-                                    timer_found = True
-                                    break
                         await asyncio.sleep(0.3)
 
-                    # 💡 ৩. ক্লিক করার ঠিক আগে আবার পপআপ চেক করা (যদি থাকে)
-                    await close_all_popups(page)
-
-                    # 💡 ৪. ১ সেকেন্ড অপেক্ষা করা (বাটন চালু হওয়ার জন্য)
-                    if timer_found:
-                        await asyncio.sleep(1.0) 
-
-                    # 💡 ৫. Big/Small ক্লিক করা
-                    clicked = False
-                    try:
-                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                        target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
-                        await target_locator.click(timeout=3000)
-                        clicked = True
-                    except Exception as e:
-                        logger.info(f"Playwright click failed: {e}, trying JS...")
-                        try:
-                            clicked = await page.evaluate(f"""
-                                (function() {{
-                                    let target = '{choice}'.toUpperCase();
-                                    let elements = document.querySelectorAll('div, span, button, p, a');
-                                    for (let el of elements) {{
-                                        let text = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                        if (text === target) {{
-                                            let rect = el.getBoundingClientRect();
-                                            if (rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).pointerEvents !== 'none') {{
-                                                let clickTarget = el.closest('button, div[role="button"], .btn') || el;
-                                                
-                                                let x = rect.left + (rect.width / 2);
-                                                let y = rect.top + (rect.height / 2);
-                                                let opts = {{ bubbles: true, cancelable: true, clientX: x, clientY: y, view: window }};
-                                                
-                                                clickTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
-                                                clickTarget.dispatchEvent(new MouseEvent('mousedown', opts));
-                                                clickTarget.dispatchEvent(new PointerEvent('pointerup', opts));
-                                                clickTarget.dispatchEvent(new MouseEvent('mouseup', opts));
-                                                clickTarget.dispatchEvent(new MouseEvent('click', opts));
-                                                
-                                                return true;
-                                            }}
-                                        }}
-                                    }}
-                                    return false;
-                                }})();
-                            """)
-                        except: pass
-
-                    # 💡 ৬. "Total amount" বাটন খোঁজা
-                    popup_success = False
-                    if clicked:
-                        for _ in range(20): # ৪ সেকেন্ড অপেক্ষা
-                            try:
-                                popup_locator = page.locator('text=re.compile(r"Total amount|Confirm", re.IGNORECASE)').last
-                                if await popup_locator.count() > 0 and await popup_locator.is_visible():
-                                    await popup_locator.click(timeout=3000)
-                                    popup_success = True
-                                    break
-                            except: pass
-                            await asyncio.sleep(0.2)
-
-                    if not popup_success:
-                        screenshot_path = f"error_popup_{uid}.png"
+                    # 💡 ২. WinGo পেজে ঢুকতে না পারলে স্ক্রিনশট
+                    if not nav_success:
+                        screenshot_path = f"nav_error_{uid}.png"
                         await page.screenshot(path=screenshot_path)
                         await ctx.bot.send_photo(
                             chat_id=uid, 
                             photo=open(screenshot_path, 'rb'), 
-                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু 'Total amount' বাটন পাওয়া যায়নি!**\n\nসম্ভবত পপআপ আসেনি বা বাটন নিষ্ক্রিয় ছিল। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
+                            caption="⚠️ **WinGo পেজে ঢুকতে সমস্যা হচ্ছে!**\n\nবট Lottery বা WinGo বাটন খুঁজে পাচ্ছে না। নিচের স্ক্রিনশট দেখে বুঝে নিন কোথায় আটকেছে। বট বন্ধ করা হচ্ছে।"
                         )
                         state["trade_running"] = False
                         break
 
-                    # 💡 ৭. ANALYSIS REPORT মেসেজ
+                    # 💡 ৩. ডিলিট করা এবং Big/Small ক্লিক করা (একদম পরপর)
+                    if pred_msg:
+                        try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
+                        except: pass
+                    
+                    state["first_bet"] = False 
+
+                    # Big/Small ক্লিক করার চেষ্টা
+                    clicked = False
+                    try:
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                        await page.wait_for_timeout(1000)
+                        
+                        target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
+                        await target_locator.scroll_into_view_if_needed(timeout=4000)
+                        
+                        box = await target_locator.bounding_box()
+                        if box:
+                            x = box['x'] + box['width'] / 2
+                            y = box['y'] + box['height'] / 2
+                            await page.mouse.move(x, y)
+                            await asyncio.sleep(0.2)
+                            await page.mouse.click(x, y)
+                            clicked = True
+                        else:
+                            await target_locator.click(force=True, timeout=4000)
+                            clicked = True
+                    except Exception as e:
+                        logger.error(f"Standard click failed: {e}")
+                        try:
+                            # কো-অর্ডিনেট ক্লিক (স্ক্রিনশটের নিচের বাটন)
+                            if choice.upper() == "BIG":
+                                await page.mouse.click(103, 890)
+                            else:
+                                await page.mouse.click(309, 890)
+                            clicked = True
+                        except Exception as coord_e:
+                            logger.error(f"Coordinate click failed: {coord_e}")
+
+                    # 💡 ৪. ক্লিক সফল হয়েছে কিনা যাচাই করা (Confirm বাটন খোঁজা)
+                    await page.wait_for_timeout(1500) # Confirm বাটন আসার জন্য অপেক্ষা
+                    
+                    confirm_success = False
+                    try:
+                        confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm")').last
+                        if await confirm_btn.count() > 0 and await confirm_btn.is_visible():
+                            await confirm_btn.click(timeout=3000, force=True)
+                            confirm_success = True
+                    except Exception as e:
+                        logger.error(f"Confirm error: {e}")
+
+                    if not confirm_success:
+                        # আবার একবার চেক করা (স্লো ইন্টারনেটের জন্য)
+                        await page.wait_for_timeout(2000)
+                        try:
+                            confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm")').last
+                            if await confirm_btn.count() > 0 and await confirm_btn.is_visible():
+                                await confirm_btn.click(timeout=3000, force=True)
+                                confirm_success = True
+                        except: pass
+
+                    # যদি Confirm বাটন না আসে, তবে ক্লিক ফেইল করেছে -> স্ক্রিনশট পাঠাবে
+                    if not confirm_success:
+                        screenshot_path = f"error_confirm_{uid}.png"
+                        await page.screenshot(path=screenshot_path)
+                        await ctx.bot.send_photo(
+                            chat_id=uid, 
+                            photo=open(screenshot_path, 'rb'), 
+                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু কোনো Confirm বাটন আসেনি!**\n\nসম্ভবত ক্লিক ঠিকমতো রেজিস্টার হয়নি বা ওয়েবসাইট আটকে আছে। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
+                        )
+                        state["trade_running"] = False
+                        break
+
+                    # 💡 ৫. ক্লিক সফল হলে ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         f"⏱️ Period    : {current_period}\n"
-                        f"⏱️ Timer     : 30s remaining\n"
+                        f"⏱️ Timer     : {timer_val} remaining\n"
                         "📊 Market       : MIXED 📊\n"
                         "🔬 Stability    : 🔴 VOLATILE (0/100)\n"
                         "🧨 Hostility    : 🟡 UNSTABLE (60/100)\n"
@@ -439,19 +453,19 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "✓ hostility 60/100 ✓ gut 25/100\n"
                         "⚡ Analyzed in: 217ms\n"
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"🔵 PREDICTION : **{choice}**\n"
+                        f"🔵 PREDICTION : {choice} ❮❮❮\n\n"
+                        f"✅ **সফলভাবে ক্লিক করা হয়েছে: {choice}**\n\n"
                         f"🚀 Step       : 🟢 Normal — Step {current_step_idx+1}\n"
                         f"💵 Amount     : ৳ {bet_amount:.2f}\n"
                         f"💰 Balance    : ৳ {current_bal:.2f}\n"
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "⏳ Waiting for result..."
-                    ), parse_mode="Markdown")
+                    ))
 
                     await asyncio.sleep(32)
 
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
-                    await page.wait_for_timeout(2000) 
-                    await close_all_popups(page)
+                    await page.wait_for_timeout(2500) 
                     
                     new_page_text = await page.evaluate("() => document.body.innerText")
                     new_balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
@@ -525,19 +539,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 "—\n"
                                 f"{next_step_txt}"
                             ))
-                    
-                    # আবার WinGo পেজে ফিরে যাওয়া
-                    await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(1500) 
-                    await close_all_popups(page)
-                    try:
-                        await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
-                        await page.wait_for_timeout(1500)
-                        win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
-                        await win_go_card.click(timeout=5000, force=True)
-                        await page.wait_for_timeout(2500)
-                        await close_all_popups(page)
-                    except: pass
 
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
@@ -750,6 +751,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
     elif data == "start_trade_btn":
         state["trade_running"] = True
+        await query.message.edit_reply_markup(reply_markup=None)
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
         await query.edit_message_text("❌ **TRADE CANCELLED**")
