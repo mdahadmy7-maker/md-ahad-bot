@@ -253,9 +253,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     # 💡 WinGo তে যাওয়ার সঠিক পথ
                     await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(2500) 
+                    await page.wait_for_timeout(2000) 
 
-                    # হোমপেজের পপআপ ক্লোজ
+                    # পপআপ ক্লোজ
                     for _ in range(3):
                         await page.evaluate("""
                             (function() {
@@ -269,7 +269,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 }
                             })();
                         """)
-                        await page.wait_for_timeout(500)
+                        await page.wait_for_timeout(400)
 
                     # Lottery -> Win Go
                     nav_success = False
@@ -279,7 +279,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except:
                             await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if((el.innerText||'').toLowerCase().includes('lottery')) { el.click(); return true; } } return false; }""")
                         
-                        await page.wait_for_timeout(2500)
+                        await page.wait_for_timeout(2000)
                         
                         try:
                             win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
@@ -289,7 +289,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             clicked = await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } return false; }""")
                             if not clicked: raise Exception("Win Go card not found.")
                             
-                        await page.wait_for_timeout(4000) 
+                        await page.wait_for_timeout(3000) 
                         nav_success = True
                     except Exception as e:
                         logger.error(f"Navigation error: {e}")
@@ -308,10 +308,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
                     step_plan_str += "└────────────────────────────────┘"
 
-                    # 💡 ১. শুধুমাত্র প্রথমবার (First Bet) এই দুটি মেসেজ আসবে
+                    # 💡 ১. শুধুমাত্র প্রথমবার মেসেজ
                     pred_msg = None
                     if state.get("first_bet", True):
-                        # AUTO TRADE ACTIVE মেসেজ
                         await ctx.bot.send_message(chat_id=uid, text=(
                             "╔════════════════════════════════╗\n"
                             "   🚀 **AUTO TRADE ACTIVE** 🚀\n"
@@ -329,7 +328,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             "🎬 _4-second prediction animation → auto bet every period._"
                         ), parse_mode="Markdown")
 
-                        # GENERATING PREDICTION মেসেজ
                         pred_msg = await ctx.bot.send_message(chat_id=uid, text="━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[░░░░░░░░░░░░] 0%`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏳ _Running 9 layers + backtest..._", parse_mode="Markdown")
                         
                         for pct in [45, 85, 100]:
@@ -365,77 +363,74 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     state["first_bet"] = False 
 
                     # ----------------------------------------------------
-                    # 💡 [মূল ফিক্স] "00" চলে যাওয়া পর্যন্ত অপেক্ষা করা
+                    # 💡 [মূল ফিক্স] "00" থাকলে ক্লিক করবে না, "00" চলে গেলেই ক্লিক করবে
                     # ----------------------------------------------------
-                    logger.info("Waiting for '00' to disappear (up to 15 seconds)...")
+                    logger.info("Waiting for '00' overlay to disappear...")
+                    
+                    # ৫ সেকেন্ড পর্যন্ত অপেক্ষা করবে ০০ আসার জন্য (যদি না থাকে, তবে সোজা ক্লিকে যাবে)
+                    try:
+                        await page.wait_for_function("() => document.body.innerText.includes('00:00')", timeout=5000)
+                    except: pass
+
+                    # এখন অপেক্ষা করবে ০০ মুছে যাওয়ার জন্য
                     timer_ready = False
-                    for _ in range(30): # 30 * 0.5 = 15 seconds
+                    for _ in range(150): # সর্বোচ্চ ১৫ সেকেন্ড
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
-                            
-                            # যদি 00:00 থাকে, তবে অপেক্ষা করবে (ক্লিক করবে না)
-                            if "00:00" in body_text:
-                                await asyncio.sleep(0.5)
-                                continue
-                                
-                            # যদি 00 না থাকে, তবে চেক করবে টাইমার ২৯, ২৮, ২৭ এসেছে কিনা
-                            match = re.search(r'00:(\d{2})', body_text)
-                            if match:
-                                sec = int(match.group(1))
-                                if sec in [27, 28, 29, 30]:
-                                    timer_ready = True
-                                    logger.info(f"Timer is {sec}. Ready to click!")
-                                    break
+                            # 00:00 অথবা 00 না থাকলেই চেক করবে টাইমার ২৭-২৯ কিনা
+                            if "00:00" not in body_text:
+                                match = re.search(r'00:(\d{2})', body_text)
+                                if match:
+                                    sec = int(match.group(1))
+                                    if sec in [27, 28, 29, 30]:
+                                        timer_ready = True
+                                        logger.info(f"Timer is {sec}. Ready to click.")
+                                        break
                         except: pass
-                        await asyncio.sleep(0.5)
+                        await asyncio.sleep(0.1)
 
                     if timer_ready:
-                        # UI ঠিকমতো লোড হওয়ার জন্য ০.৫ সেকেন্ড অপেক্ষা
+                        # UI আপডেট হওয়ার জন্য ০.৫ সেকেন্ড বাফার
                         await asyncio.sleep(0.5)
-                        
-                        # Big/Small ক্লিক করা
+
+                        # Big/Small ক্লিক করা (জাভাস্ক্রিপ্ট ইভেন্ট)
                         clicked = False
                         try:
                             await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                            target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
-                            await target_locator.click(timeout=4000)
-                            clicked = True
-                        except Exception as e:
-                            logger.error(f"Standard click failed: {e}")
-                            try:
-                                # জাভাস্ক্রিপ্ট ফোর্স ক্লিক
-                                clicked = await page.evaluate(f"""
-                                    (function() {{
-                                        let target = '{choice}'.toUpperCase();
-                                        let elements = document.querySelectorAll('div, span, button, p, a');
-                                        for (let el of elements) {{
-                                            let text = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                            if (text === target) {{
-                                                let rect = el.getBoundingClientRect();
-                                                if (rect.width > 0 && rect.height > 0) {{
-                                                    let clickTarget = el.closest('button, div[role="button"], .btn') || el;
-                                                    
-                                                    let x = rect.left + (rect.width / 2);
-                                                    let y = rect.top + (rect.height / 2);
-                                                    let opts = {{ bubbles: true, cancelable: true, clientX: x, clientY: y, view: window }};
-                                                    
-                                                    clickTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
-                                                    clickTarget.dispatchEvent(new MouseEvent('mousedown', opts));
-                                                    clickTarget.dispatchEvent(new PointerEvent('pointerup', opts));
-                                                    clickTarget.dispatchEvent(new MouseEvent('mouseup', opts));
-                                                    clickTarget.dispatchEvent(new MouseEvent('click', opts));
-                                                    
-                                                    return true;
-                                                }}
+                            
+                            clicked = await page.evaluate(f"""
+                                (function() {{
+                                    let target = '{choice}'.toUpperCase();
+                                    let elements = document.querySelectorAll('div, span, button, p, a');
+                                    for (let el of elements) {{
+                                        let text = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                        if (text === target) {{
+                                            let rect = el.getBoundingClientRect();
+                                            if (rect.width > 0 && rect.height > 0) {{
+                                                let clickTarget = el.closest('button, div[role="button"], .btn') || el;
+                                                
+                                                let x = rect.left + (rect.width / 2);
+                                                let y = rect.top + (rect.height / 2);
+                                                let opts = {{ bubbles: true, cancelable: true, clientX: x, clientY: y, view: window }};
+                                                
+                                                clickTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
+                                                clickTarget.dispatchEvent(new MouseEvent('mousedown', opts));
+                                                clickTarget.dispatchEvent(new PointerEvent('pointerup', opts));
+                                                clickTarget.dispatchEvent(new MouseEvent('mouseup', opts));
+                                                clickTarget.dispatchEvent(new MouseEvent('click', opts));
+                                                
+                                                return true;
                                             }}
                                         }}
-                                        return false;
-                                    }})();
-                                """)
-                            except: pass
+                                    }}
+                                    return false;
+                                }})();
+                            """)
+                        except Exception as e:
+                            logger.error(f"JS click failed: {e}")
 
                         # 💡 ৪. ক্লিক সফল হয়েছে কিনা যাচাই করা (শুধুমাত্র Total amount বাটন খোঁজা)
-                        await page.wait_for_timeout(1000) # পপআপ আসার জন্য অপেক্ষা
+                        await page.wait_for_timeout(1000) 
                         
                         popup_success = False
                         try:
@@ -447,7 +442,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             logger.error(f"Popup error: {e}")
 
                         if not popup_success:
-                            # আবার একবার চেক করা (স্লো ইন্টারনেটের জন্য)
                             await page.wait_for_timeout(2000)
                             try:
                                 popup_btn = page.locator('text="Total amount"').last
@@ -456,7 +450,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                     popup_success = True
                             except: pass
 
-                        # যদি Total amount বাটন না আসে, তবে ক্লিক ফেইল করেছে -> স্ক্রিনশট পাঠাবে
+                        # যদি Total amount বাটন না আসে, তবে স্ক্রিনশট পাঠাবে
                         if not popup_success:
                             screenshot_path = f"error_popup_{uid}.png"
                             await page.screenshot(path=screenshot_path)
