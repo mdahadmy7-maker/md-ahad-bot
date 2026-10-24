@@ -87,7 +87,7 @@ async def close_popups_fast(page):
                 let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
                 for (let el of elements) {
                     let text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
-                    if (['confirm', 'receive', 'close', 'ok'].includes(text)) {
+                    if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok' || text === 'got it' || text.includes('announcement')) {
                         el.click();
                     }
                 }
@@ -125,7 +125,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(3000)
 
             await update_loading(30)
             try:
@@ -140,7 +140,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
             await update_loading(70)
-            await page.wait_for_timeout(2000)
+            await page.wait_for_timeout(3000)
             await close_popups_fast(page)
 
             await update_loading(85)
@@ -155,7 +155,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         }
                     })();
                 """)
-                await page.wait_for_timeout(2000) 
+                await page.wait_for_timeout(3000) 
             except: pass
             await close_popups_fast(page)
 
@@ -164,14 +164,22 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             uid_val = "Unknown"
             balance = "0.00"
 
-            for _ in range(10): 
+            for _ in range(15): 
                 page_text = await page.inner_text("body")
                 if "Wrong account or password" in page_text:
                     login_status = "failed"
                     break
                 
                 uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
-                balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
+                
+                # 💡 [মূল ফিক্স] ব্যালেন্স রিড করার সঠিক নিয়ম (Wallet balance এর ওপরের নাম্বার)
+                balance_match = re.search(r'([\d.]+)\s*[\r\n]+.*?Wallet\s*balance', page_text, re.IGNORECASE)
+                if not balance_match:
+                    balance_match = re.search(r'([\d.]+)\s*[\r\n]+.*?Total\s*balance', page_text, re.IGNORECASE)
+                if not balance_match:
+                    balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
+                if not balance_match:
+                    balance_match = re.search(r'[৳]\s*([\d.]+)', page_text)
                 
                 if uid_match:
                     uid_val = uid_match.group(1)
@@ -179,7 +187,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         balance = balance_match.group(1)
                     login_status = "success"
                     break
-                await page.wait_for_timeout(400)
+                await page.wait_for_timeout(500)
 
             await update_loading(100)
             await asyncio.sleep(0.2)
@@ -343,76 +351,76 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # ----------------------------------------------------
                     # 💡 [মূল ফিক্স] ৩০ সেকেন্ডের বেশি অপেক্ষা করবে না
                     # ----------------------------------------------------
-                    logger.info("Waiting for '00' overlay to clear and 28-30 to appear (Max 32s)...")
-                    try:
-                        # wait_for_function ব্যবহার করে ব্রাউজারের ভেতরেই চেক করা হচ্ছে
-                        await page.wait_for_function("""
-                            () => {
-                                let text = document.body.innerText;
-                                // 00:00 থাকলে ক্লিক করবে না
-                                if (text.includes('00:00')) return false;
-                                
-                                // 00:00 না থাকলে ২৮, ২৯, ৩০ চেক করবে
-                                let match = text.match(/00:(\\d{2})/);
-                                if (match) {
-                                    let sec = parseInt(match[1]);
-                                    if (sec >= 28 && sec <= 30) {
-                                        return true;
-                                    }
-                                }
-                                return false;
-                            }
-                        """, timeout=32000) # সর্বোচ্চ ৩২ সেকেন্ড অপেক্ষা করবে
-                        logger.info("Timer reached 28-30. Clicking NOW.")
-                    except Exception as e:
-                        logger.info(f"Timer wait error/timeout: {e}")
+                    logger.info("Waiting for 00:00 and 28-30 to appear (Max 32s)...")
+                    timer_ready = False
+                    
+                    # প্রথমে 00:00 আসার জন্য অপেক্ষা করবে (সর্বোচ্চ ৩০ সেকেন্ড)
+                    for _ in range(300):
+                        try:
+                            body_text = await page.evaluate("() => document.body.innerText")
+                            if "00:00" in body_text:
+                                break
+                        except: pass
+                        await asyncio.sleep(0.1)
+
+                    # এখন 00:00 মুছে গিয়ে 28-30 আসার জন্য অপেক্ষা করবে
+                    for _ in range(100): # ১০ সেকেন্ড
+                        try:
+                            body_text = await page.evaluate("() => document.body.innerText")
+                            if "00:00" not in body_text:
+                                match = re.search(r'00:(\d{2})', body_text)
+                                if match:
+                                    sec = int(match.group(1))
+                                    if sec in [28, 29, 30]:
+                                        timer_ready = True
+                                        logger.info(f"Timer is {sec}. Clicking NOW.")
+                                        break
+                        except: pass
+                        await asyncio.sleep(0.1)
 
                     # 💡 ৪. Big/Small ক্লিক করা (force=True ছাড়া, একদম ফাস্ট)
                     clicked = False
-                    try:
-                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                        
-                        target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
-                        
-                        # এখানে force=True নেই, তাই Playwright নিজেই ওভারলে সরে যাওয়া পর্যন্ত অপেক্ষা করবে
-                        await target_locator.click(timeout=5000)
-                        clicked = True
-                    except Exception as e:
-                        logger.error(f"Standard click failed: {e}")
-                        # জাভাস্ক্রিপ্ট ফলব্যাক
+                    if timer_ready:
                         try:
-                            clicked = await page.evaluate(f"""
-                                (function() {{
-                                    let target = '{choice}'.toUpperCase();
-                                    let elements = document.querySelectorAll('div, span, button, p, a');
-                                    for (let el of elements) {{
-                                        let text = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                        if (text === target) {{
-                                            let rect = el.getBoundingClientRect();
-                                            if (rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).pointerEvents !== 'none') {{
-                                                let clickTarget = el.closest('button, div[role="button"], .btn') || el;
-                                                let opts = {{ bubbles: true, cancelable: true, clientX: rect.left + rect.width/2, clientY: rect.top + rect.height/2, view: window }};
-                                                clickTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
-                                                clickTarget.dispatchEvent(new MouseEvent('mousedown', opts));
-                                                clickTarget.dispatchEvent(new PointerEvent('pointerup', opts));
-                                                clickTarget.dispatchEvent(new MouseEvent('mouseup', opts));
-                                                clickTarget.dispatchEvent(new MouseEvent('click', opts));
-                                                return true;
+                            await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                            
+                            target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
+                            await target_locator.click(timeout=4000)
+                            clicked = True
+                        except Exception as e:
+                            logger.error(f"Standard click failed: {e}")
+                            try:
+                                clicked = await page.evaluate(f"""
+                                    (function() {{
+                                        let target = '{choice}'.toUpperCase();
+                                        let elements = document.querySelectorAll('div, span, button, p, a');
+                                        for (let el of elements) {{
+                                            let text = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                            if (text === target) {{
+                                                let rect = el.getBoundingClientRect();
+                                                if (rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).pointerEvents !== 'none') {{
+                                                    let clickTarget = el.closest('button, div[role="button"], .btn') || el;
+                                                    let opts = {{ bubbles: true, cancelable: true, clientX: rect.left + rect.width/2, clientY: rect.top + rect.height/2, view: window }};
+                                                    clickTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
+                                                    clickTarget.dispatchEvent(new MouseEvent('mousedown', opts));
+                                                    clickTarget.dispatchEvent(new PointerEvent('pointerup', opts));
+                                                    clickTarget.dispatchEvent(new MouseEvent('mouseup', opts));
+                                                    clickTarget.dispatchEvent(new MouseEvent('click', opts));
+                                                    return true;
+                                                }}
                                             }}
                                         }}
-                                    }}
-                                    return false;
-                                }})();
-                            """)
-                        except: pass
+                                        return false;
+                                    }})();
+                                """)
+                            except: pass
 
                     # 💡 ৫. ক্লিক সফল হয়েছে কিনা যাচাই করা (শুধুমাত্র Total amount বাটন খোঁজা)
                     popup_success = False
                     if clicked:
                         try:
-                            # পপআপ আসার জন্য অপেক্ষা করা (Total amount) - সর্বোচ্চ ৪ সেকেন্ড
                             popup_locator = page.locator('text="Total amount"').last
-                            await popup_locator.wait_for(state="visible", timeout=4000)
+                            await popup_locator.wait_for(state="visible", timeout=5000)
                             await popup_locator.click(force=True, timeout=3000)
                             popup_success = True
                         except Exception as e:
@@ -424,7 +432,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await ctx.bot.send_photo(
                             chat_id=uid, 
                             photo=open(screenshot_path, 'rb'), 
-                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু কোনো 'Total amount' বাটন আসেনি!**\n\nসম্ভবত ক্লিক ঠিকমতো রেজিস্টার হয়নি বা ওয়েবসাইট আটকে আছে। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
+                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু কোনো 'Total amount' বাটন আসেনি!**\n\nসম্ভবত ক্লিক ঠিকমতো রেজিস্টার হয়নি বা ওয়েবসাইট আটকে আছে। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
                         )
                         state["trade_running"] = False
                         break
@@ -468,7 +476,15 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await close_popups_fast(page)
                     
                     new_page_text = await page.evaluate("() => document.body.innerText")
-                    new_balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
+                    
+                    # 💡 [ব্যালেন্স ফিক্স] নতুন রাউন্ডের পর ব্যালেন্স চেক
+                    new_balance_match = re.search(r'([\d.]+)\s*[\r\n]+.*?Wallet\s*balance', new_page_text, re.IGNORECASE)
+                    if not new_balance_match:
+                        new_balance_match = re.search(r'([\d.]+)\s*[\r\n]+.*?Total\s*balance', new_page_text, re.IGNORECASE)
+                    if not new_balance_match:
+                        new_balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
+                    if not new_balance_match:
+                        new_balance_match = re.search(r'[৳]\s*([\d.]+)', new_page_text)
                     
                     if new_balance_match:
                         new_balance = float(new_balance_match.group(1))
