@@ -78,7 +78,32 @@ def get_history_and_prediction():
         return "SMALL", "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন
+# ৩. পপআপ ক্লোজ করার ফাংশন (একদম আক্রমনাত্মক)
+# ───────────────────────────────────────────
+async def close_all_popups(page):
+    try:
+        # ১. জাভাস্ক্রিপ্ট দিয়ে সব সম্ভাব্য পপআপ বাটন খুঁজে ক্লিক করা
+        await page.evaluate("""
+            (function() {
+                let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
+                for (let el of elements) {
+                    let text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
+                    if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok' || text === 'got it' || text.includes('announcement')) {
+                        let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
+                        el.dispatchEvent(event);
+                        
+                        // যদি বাটনটি div বা span এর ভেতরে থাকে
+                        let btn = el.closest('button, div[role="button"], .btn') || el;
+                        btn.dispatchEvent(event);
+                    }
+                }
+            })();
+        """)
+        await page.wait_for_timeout(400)
+    except: pass
+
+# ───────────────────────────────────────────
+# ৪. লগইন এবং অটো-বেট ফাংশন
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -122,20 +147,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
             await update_loading(70)
-            for _ in range(10):
-                await page.evaluate("""
-                    (function() {
-                        let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
-                        for (let el of elements) {
-                            let text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
-                            if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok') {
-                                let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
-                                el.dispatchEvent(event);
-                            }
-                        }
-                    })();
-                """)
-                await page.wait_for_timeout(400)
+            await close_all_popups(page) # লগইন পপআপ ক্লোজ
 
             await update_loading(85)
             try:
@@ -151,6 +163,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 """)
                 await page.wait_for_timeout(3000) 
             except: pass
+            await close_all_popups(page)
 
             await update_loading(95)
             login_status = "unknown"
@@ -219,13 +232,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # WinGo পেজে যাওয়া
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000) 
-            
+            await close_all_popups(page)
+
             try:
                 await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
                 await page.wait_for_timeout(2000)
+                await close_all_popups(page)
+                
                 win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
                 await win_go_card.click(timeout=5000, force=True)
                 await page.wait_for_timeout(3000)
+                await close_all_popups(page)
             except: pass
 
             while state["trade_running"]:
@@ -263,7 +280,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. প্রথমবার ওয়েলকাম মেসেজ ও অ্যানিমেশন
+                    # 💡 ১. প্রথমবার ওয়েলকাম মেসেজ ও অ্যানিমেশন (নেভিগেশনের আগেই)
                     if state.get("first_bet", True):
                         step_plan_str = "┌────────────────────────────────┐\n"
                         for i, amt in enumerate(state['step_amounts']):
@@ -313,73 +330,80 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         body_text = await page.evaluate("() => document.body.innerText")
                         if "00:00" in body_text:
                             break
-                        await asyncio.sleep(0.5)
+                        await asyncio.sleep(0.3) # ফাস্ট পোলিং
 
                     logger.info("Waiting for 29, 28, or 27...")
                     timer_found = False
-                    for _ in range(20):
+                    for _ in range(30):
                         body_text = await page.evaluate("() => document.body.innerText")
                         if "00:00" not in body_text:
                             match = re.search(r'00:(\d{2})', body_text)
                             if match:
                                 sec = int(match.group(1))
-                                if sec in [27, 28, 29]:
+                                if sec in [27, 28, 29, 30]:
                                     timer_found = True
                                     break
-                        await asyncio.sleep(0.5)
+                        await asyncio.sleep(0.3)
 
+                    # 💡 ৩. ক্লিক করার ঠিক আগে আবার পপআপ চেক করা (যদি থাকে)
+                    await close_all_popups(page)
+
+                    # 💡 ৪. ১ সেকেন্ড অপেক্ষা করা (বাটন চালু হওয়ার জন্য)
                     if timer_found:
-                        logger.info("Timer found. Waiting 1.5s for UI to settle...")
-                        await asyncio.sleep(1.5) # বাটন ১০০% চালু হওয়ার জন্য বাড়তি সময়
-                    else:
-                        logger.info("Timer not detected, trying to click anyway...")
+                        await asyncio.sleep(1.0) 
 
-                    # 💡 ৩. Big/Small ক্লিক করা (জাভাস্ক্রিপ্ট পয়েন্টার ইভেন্ট দিয়ে)
+                    # 💡 ৫. Big/Small ক্লিক করা
                     clicked = False
                     try:
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                        
-                        clicked = await page.evaluate(f"""
-                            (function() {{
-                                let target = '{choice}'.toUpperCase();
-                                let elements = document.querySelectorAll('div, span, button, p, a');
-                                for (let el of elements) {{
-                                    let text = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                    if (text === target) {{
-                                        let rect = el.getBoundingClientRect();
-                                        if (rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).pointerEvents !== 'none') {{
-                                            let clickTarget = el.closest('button, div[role="button"], .btn') || el;
-                                            
-                                            let x = rect.left + (rect.width / 2);
-                                            let y = rect.top + (rect.height / 2);
-                                            let opts = {{ bubbles: true, cancelable: true, clientX: x, clientY: y, view: window }};
-                                            
-                                            clickTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
-                                            clickTarget.dispatchEvent(new MouseEvent('mousedown', opts));
-                                            clickTarget.dispatchEvent(new PointerEvent('pointerup', opts));
-                                            clickTarget.dispatchEvent(new MouseEvent('mouseup', opts));
-                                            clickTarget.dispatchEvent(new MouseEvent('click', opts));
-                                            
-                                            return true;
+                        target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
+                        await target_locator.click(timeout=3000)
+                        clicked = True
+                    except Exception as e:
+                        logger.info(f"Playwright click failed: {e}, trying JS...")
+                        try:
+                            clicked = await page.evaluate(f"""
+                                (function() {{
+                                    let target = '{choice}'.toUpperCase();
+                                    let elements = document.querySelectorAll('div, span, button, p, a');
+                                    for (let el of elements) {{
+                                        let text = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                        if (text === target) {{
+                                            let rect = el.getBoundingClientRect();
+                                            if (rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).pointerEvents !== 'none') {{
+                                                let clickTarget = el.closest('button, div[role="button"], .btn') || el;
+                                                
+                                                let x = rect.left + (rect.width / 2);
+                                                let y = rect.top + (rect.height / 2);
+                                                let opts = {{ bubbles: true, cancelable: true, clientX: x, clientY: y, view: window }};
+                                                
+                                                clickTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
+                                                clickTarget.dispatchEvent(new MouseEvent('mousedown', opts));
+                                                clickTarget.dispatchEvent(new PointerEvent('pointerup', opts));
+                                                clickTarget.dispatchEvent(new MouseEvent('mouseup', opts));
+                                                clickTarget.dispatchEvent(new MouseEvent('click', opts));
+                                                
+                                                return true;
+                                            }}
                                         }}
                                     }}
-                                }}
-                                return false;
-                            }})();
-                        """)
-                    except Exception as e:
-                        logger.error(f"JS click failed: {e}")
+                                    return false;
+                                }})();
+                            """)
+                        except: pass
 
-                    # 💡 ৪. "Total amount" বাটন খোঁজা
+                    # 💡 ৬. "Total amount" বাটন খোঁজা
                     popup_success = False
                     if clicked:
-                        try:
-                            popup_locator = page.locator('text=re.compile(r"Total amount|Confirm", re.IGNORECASE)').last
-                            await popup_locator.wait_for(state="visible", timeout=10000)
-                            await popup_locator.click(timeout=5000)
-                            popup_success = True
-                        except Exception as e:
-                            logger.error(f"Popup click failed: {e}")
+                        for _ in range(20): # ৪ সেকেন্ড অপেক্ষা
+                            try:
+                                popup_locator = page.locator('text=re.compile(r"Total amount|Confirm", re.IGNORECASE)').last
+                                if await popup_locator.count() > 0 and await popup_locator.is_visible():
+                                    await popup_locator.click(timeout=3000)
+                                    popup_success = True
+                                    break
+                            except: pass
+                            await asyncio.sleep(0.2)
 
                     if not popup_success:
                         screenshot_path = f"error_popup_{uid}.png"
@@ -392,7 +416,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
-                    # 💡 ৫. ANALYSIS REPORT মেসেজ
+                    # 💡 ৭. ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
@@ -427,6 +451,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
                     await page.wait_for_timeout(2000) 
+                    await close_all_popups(page)
                     
                     new_page_text = await page.evaluate("() => document.body.innerText")
                     new_balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
@@ -504,12 +529,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # আবার WinGo পেজে ফিরে যাওয়া
                     await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(1500) 
+                    await close_all_popups(page)
                     try:
                         await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
                         await page.wait_for_timeout(1500)
                         win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
                         await win_go_card.click(timeout=5000, force=True)
                         await page.wait_for_timeout(2500)
+                        await close_all_popups(page)
                     except: pass
 
                 except Exception as e:
