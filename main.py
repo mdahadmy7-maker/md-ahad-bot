@@ -307,47 +307,70 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         
                         state["first_bet"] = False 
 
-                    # 💡 ২. টাইমার 00:00 হওয়া পর্যন্ত অপেক্ষা করা
+                    # 💡 ২. টাইমার 00:00 হওয়া এবং ২৯/২৮/২৭ শুরু হওয়া পর্যন্ত অপেক্ষা করা
                     logger.info("Waiting for 00:00...")
-                    try:
-                        await page.wait_for_function("() => document.body.innerText.includes('00:00')", timeout=40000)
-                    except: pass 
-                    
-                    # 💡 ৩. 00 চলে যাওয়া এবং নতুন রাউন্ড (29/30) শুরু হওয়ার জন্য অপেক্ষা করা
-                    logger.info("Waiting for 00 to disappear and new round to start...")
-                    try:
-                        await page.wait_for_function("""
-                            () => {
-                                let text = document.body.innerText;
-                                if (text.includes('00:00')) return false;
-                                let match = text.match(/00:(\\d{2})/);
-                                if (match) {
-                                    let sec = parseInt(match[1]);
-                                    return sec >= 29 && sec <= 30;
-                                }
-                                return false;
-                            }
-                        """, timeout=20000)
-                    except Exception as e:
-                        logger.info(f"Timer wait timeout: {e}")
-                    
-                    # 💡 ৪. ১ সেকেন্ডের বাফার (বাটন চালু হওয়ার জন্য)
-                    await page.wait_for_timeout(1000)
+                    for _ in range(40):
+                        body_text = await page.evaluate("() => document.body.innerText")
+                        if "00:00" in body_text:
+                            break
+                        await asyncio.sleep(0.5)
 
-                    # 💡 ৫. Big/Small ক্লিক করা (কোনো force=True নেই, যাতে ওভারলে থাকলে ক্লিক না করে)
+                    logger.info("Waiting for 29, 28, or 27...")
+                    timer_found = False
+                    for _ in range(20):
+                        body_text = await page.evaluate("() => document.body.innerText")
+                        if "00:00" not in body_text:
+                            match = re.search(r'00:(\d{2})', body_text)
+                            if match:
+                                sec = int(match.group(1))
+                                if sec in [27, 28, 29]:
+                                    timer_found = True
+                                    break
+                        await asyncio.sleep(0.5)
+
+                    if timer_found:
+                        logger.info("Timer found. Waiting 1.5s for UI to settle...")
+                        await asyncio.sleep(1.5) # বাটন ১০০% চালু হওয়ার জন্য বাড়তি সময়
+                    else:
+                        logger.info("Timer not detected, trying to click anyway...")
+
+                    # 💡 ৩. Big/Small ক্লিক করা (জাভাস্ক্রিপ্ট পয়েন্টার ইভেন্ট দিয়ে)
                     clicked = False
                     try:
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                         
-                        target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
-                        
-                        # প্লেরাইট নিজে থেকেই অপেক্ষা করবে বাটন ক্লিকযোগ্য হওয়া পর্যন্ত
-                        await target_locator.click(timeout=15000)
-                        clicked = True
+                        clicked = await page.evaluate(f"""
+                            (function() {{
+                                let target = '{choice}'.toUpperCase();
+                                let elements = document.querySelectorAll('div, span, button, p, a');
+                                for (let el of elements) {{
+                                    let text = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                    if (text === target) {{
+                                        let rect = el.getBoundingClientRect();
+                                        if (rect.width > 0 && rect.height > 0 && window.getComputedStyle(el).pointerEvents !== 'none') {{
+                                            let clickTarget = el.closest('button, div[role="button"], .btn') || el;
+                                            
+                                            let x = rect.left + (rect.width / 2);
+                                            let y = rect.top + (rect.height / 2);
+                                            let opts = {{ bubbles: true, cancelable: true, clientX: x, clientY: y, view: window }};
+                                            
+                                            clickTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
+                                            clickTarget.dispatchEvent(new MouseEvent('mousedown', opts));
+                                            clickTarget.dispatchEvent(new PointerEvent('pointerup', opts));
+                                            clickTarget.dispatchEvent(new MouseEvent('mouseup', opts));
+                                            clickTarget.dispatchEvent(new MouseEvent('click', opts));
+                                            
+                                            return true;
+                                        }}
+                                    }}
+                                }}
+                                return false;
+                            }})();
+                        """)
                     except Exception as e:
-                        logger.error(f"Standard click failed: {e}")
+                        logger.error(f"JS click failed: {e}")
 
-                    # 💡 ৬. "Total amount" বাটন খোঁজা
+                    # 💡 ৪. "Total amount" বাটন খোঁজা
                     popup_success = False
                     if clicked:
                         try:
@@ -369,7 +392,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
-                    # 💡 ৭. ANALYSIS REPORT মেসেজ
+                    # 💡 ৫. ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
