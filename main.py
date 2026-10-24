@@ -387,70 +387,75 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         logger.error("Timer failed to reach 28-30. Skipping.")
                         continue
 
-                    # 💡 ১.৫ সেকেন্ড বাফার (বাটন ১০০% চালু হওয়ার জন্য)
-                    await asyncio.sleep(1.5)
+                    # 💡 ২ সেকেন্ড বাফার (বাটন ১০০% চালু হওয়ার জন্য)
+                    await asyncio.sleep(2.0)
 
-                    # 💡 ২. Big / Small ক্লিক (সবচেয়ে শক্তিশালী ৩ স্তরের ক্লিক)
-                    clicked = False
-                    try:
-                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                        
-                        # ১ম চেষ্টা: Playwright Locator
-                        target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
+                    # 💡 ২. Big / Small ক্লিক (রিট্রাই লজিক সহ)
+                    popup_success = False
+                    
+                    for attempt in range(3):
+                        clicked = False
                         try:
-                            await target_locator.click(timeout=3000)
-                            clicked = True
-                            logger.info("Clicked via Playwright Locator")
-                        except:
-                            # ২য় চেষ্টা: মাউস কো-অর্ডিনেট (Bounding Box)
-                            box = await target_locator.bounding_box()
-                            if box:
-                                x = box['x'] + box['width'] / 2
-                                y = box['y'] + box['height'] / 2
-                                await page.mouse.move(x, y)
-                                await asyncio.sleep(0.1)
-                                await page.mouse.click(x, y)
+                            await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                            
+                            # ১ম চেষ্টা: Playwright Locator
+                            target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
+                            try:
+                                await target_locator.click(timeout=2000)
                                 clicked = True
-                                logger.info("Clicked via Mouse Coordinates")
-                            else:
-                                # ৩য় চেষ্টা: জাভাস্ক্রিপ্ট পয়েন্টার ইভেন্ট
-                                clicked = await page.evaluate(f"""
-                                    (function() {{
-                                        let target = '{choice}'.toUpperCase();
-                                        let elements = document.querySelectorAll('div, span, button, p, a');
-                                        for (let el of elements) {{
-                                            let text = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                            if (text === target) {{
-                                                let rect = el.getBoundingClientRect();
-                                                if (rect.width > 0 && rect.height > 0) {{
-                                                    let clickTarget = el.closest('button, div[role="button"], .btn') || el;
-                                                    let opts = {{ bubbles: true, cancelable: true, clientX: rect.left + rect.width/2, clientY: rect.top + rect.height/2, view: window }};
-                                                    clickTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
-                                                    clickTarget.dispatchEvent(new MouseEvent('mousedown', opts));
-                                                    clickTarget.dispatchEvent(new PointerEvent('pointerup', opts));
-                                                    clickTarget.dispatchEvent(new MouseEvent('mouseup', opts));
-                                                    clickTarget.dispatchEvent(new MouseEvent('click', opts));
-                                                    return true;
+                                logger.info("Clicked via Playwright Locator")
+                            except:
+                                # ২য় চেষ্টা: মাউস কো-অর্ডিনেট (Bounding Box)
+                                box = await target_locator.bounding_box()
+                                if box:
+                                    x = box['x'] + box['width'] / 2
+                                    y = box['y'] + box['height'] / 2
+                                    await page.mouse.move(x, y)
+                                    await asyncio.sleep(0.1)
+                                    await page.mouse.click(x, y)
+                                    clicked = True
+                                    logger.info("Clicked via Mouse Coordinates")
+                                else:
+                                    # ৩য় চেষ্টা: জাভাস্ক্রিপ্ট পয়েন্টার ইভেন্ট
+                                    clicked = await page.evaluate(f"""
+                                        (function() {{
+                                            let target = '{choice}'.toUpperCase();
+                                            let elements = document.querySelectorAll('div, span, button, p, a');
+                                            for (let el of elements) {{
+                                                let text = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                                if (text === target) {{
+                                                    let rect = el.getBoundingClientRect();
+                                                    if (rect.width > 0 && rect.height > 0) {{
+                                                        let clickTarget = el.closest('button, div[role="button"], .btn') || el;
+                                                        let opts = {{ bubbles: true, cancelable: true, clientX: rect.left + rect.width/2, clientY: rect.top + rect.height/2, view: window }};
+                                                        clickTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
+                                                        clickTarget.dispatchEvent(new MouseEvent('mousedown', opts));
+                                                        clickTarget.dispatchEvent(new PointerEvent('pointerup', opts));
+                                                        clickTarget.dispatchEvent(new MouseEvent('mouseup', opts));
+                                                        clickTarget.dispatchEvent(new MouseEvent('click', opts));
+                                                        return true;
+                                                    }}
                                                 }}
                                             }}
-                                        }}
-                                        return false;
-                                    }})();
-                                """)
-                                if clicked: logger.info("Clicked via JS Pointer Events")
-                    except Exception as e:
-                        logger.error(f"All click methods failed: {e}")
-
-                    # 💡 ৩. "Total amount" বাটন খোঁজা (সর্বোচ্চ ৫ সেকেন্ড অপেক্ষা)
-                    popup_success = False
-                    if clicked:
-                        try:
-                            popup_locator = page.locator('text="Total amount"').last
-                            await popup_locator.wait_for(state="visible", timeout=5000)
-                            await popup_locator.click(timeout=3000)
-                            popup_success = True
+                                            return false;
+                                        }})();
+                                    """)
+                                    if clicked: logger.info("Clicked via JS Pointer Events")
                         except Exception as e:
-                            logger.error(f"Popup click failed: {e}")
+                            logger.error(f"Click attempt {attempt+1} failed: {e}")
+
+                        if clicked:
+                            # Total amount বাটন চেক
+                            try:
+                                popup_locator = page.locator('text="Total amount"').last
+                                await popup_locator.wait_for(state="visible", timeout=3000)
+                                await popup_locator.click(timeout=2000)
+                                popup_success = True
+                                logger.info("Popup clicked successfully!")
+                                break
+                            except Exception as e:
+                                logger.error(f"Popup not found after click attempt {attempt+1}")
+                                await asyncio.sleep(1.0)
 
                     if not popup_success:
                         screenshot_path = f"error_popup_{uid}.png"
