@@ -321,19 +321,24 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         """)
                         await page.wait_for_timeout(500)
 
-                    # 💡 ১. টাইমার 00:00 হওয়া পর্যন্ত অপেক্ষা করা
-                    logger.info("Waiting for current round to end (00:00)...")
+                    # 💡 ১. টাইমার চেক করা (আপনার নির্দেশ অনুযায়ী ৩০ থেকে ৬ সেকেন্ডের মধ্যে গেলেই ট্যাপ করবে)
+                    logger.info("Waiting for a good time to bet (between 30s and 6s)...")
+                    bet_time_reached = False
                     for _ in range(40): 
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
-                            if re.search(r'0\s*0\s*:\s*0\s*0', body_text) or "Time remaining" not in body_text:
-                                break
+                            # টাইমার ফরম্যাট 00:XX খোঁজা হচ্ছে
+                            match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
+                            if match:
+                                sec = int(match.group(1))
+                                if 6 <= sec <= 30:
+                                    bet_time_reached = True
+                                    break # টাইমার পেলে সাথে সাথে লুপ থেকে বের হবে এবং বিট করবে
                         except: pass
                         await asyncio.sleep(1)
                     
-                    # 💡 ২. নতুন রাউন্ড শুরু হওয়ার জন্য অপেক্ষা করা (বাটন চালু হওয়া পর্যন্ত)
-                    logger.info("Waiting for new round to start...")
-                    await page.wait_for_timeout(3000) # ৩ সেকেন্ড বাফার
+                    if not bet_time_reached:
+                        logger.warning("Could not find suitable timer window, proceeding anyway.")
 
                     # টাইমার স্ক্র্যাপ (মেসেজে দেখানোর জন্য)
                     timer_val = "30s"
@@ -397,10 +402,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                         await page.wait_for_timeout(1000)
                         
-                        # বাটনটি খুঁজে বের করা
                         target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
-                        
-                        # বাটনটি ক্লিক করার জন্য প্রস্তুত হওয়া পর্যন্ত অপেক্ষা করা
                         await target_locator.wait_for(state="visible", timeout=5000)
                         await target_locator.scroll_into_view_if_needed(timeout=4000)
                         
@@ -426,18 +428,53 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except Exception as coord_e:
                             logger.error(f"Coordinate click failed: {coord_e}")
 
-                    # 💡 ৫. Confirm বাটন খোঁজা এবং ক্লিক করা
+                    # 💡 ৫. মডাল ওপেন হওয়ার পর অ্যামাউন্ট বসানো এবং Confirm (Total amount) ক্লিক করা
+                    await page.wait_for_timeout(2000) # মডাল ওপেন হওয়ার জন্য অপেক্ষা
+
+                    # ৫.১ অ্যামাউন্ট ইনপুট করা (Quantity)
+                    try:
+                        inputs = await page.locator('input[type="text"], input[type="number"]').all()
+                        for inp in inputs:
+                            if await inp.is_visible():
+                                # লগইন ফিল্ড বাদে অন্য ফিল্ডে টাইপ করবে
+                                placeholder = await inp.get_attribute("placeholder")
+                                if not placeholder or "amount" in placeholder.lower() or "quantity" in placeholder.lower():
+                                    await inp.click()
+                                    await inp.fill(str(int(bet_amount)))
+                                    await page.keyboard.press("Enter")
+                                    break
+                    except Exception as e:
+                        logger.error(f"Amount input error: {e}")
+
+                    # ৫.২ "I agree" চেকবক্স ক্লিক করা (যদি থাকে)
+                    try:
+                        agree_box = page.locator('text="I agree"').first
+                        if await agree_box.count() > 0 and await agree_box.is_visible():
+                            await agree_box.click()
+                            await page.wait_for_timeout(300)
+                    except Exception as e:
+                        logger.error(f"Agree box error: {e}")
+
+                    # ৫.৩ Confirm (Total amount) বাটন খোঁজা এবং ক্লিক করা
                     confirm_success = False
-                    for _ in range(6): # ৬ সেকেন্ড পর্যন্ত অপেক্ষা করবে Confirm বাটনের জন্য
+                    for _ in range(6):
                         try:
-                            confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm"), div:has-text("Confirm")').last
+                            # "Total amount" লেখা যেকোনো বাটন বা ডিভ খুঁজবে
+                            confirm_btn = page.locator('text="Total amount"').last
                             if await confirm_btn.count() > 0 and await confirm_btn.is_visible():
                                 await confirm_btn.click(timeout=3000, force=True)
                                 confirm_success = True
                                 break
                         except Exception as e:
                             pass
-                        await asyncio.sleep(1)
+                        await asyncio.sleep(0.5)
+
+                    # যদি টেক্সট না পায়, তবে স্ক্রিনের ডানদিকের নিচে ক্লিক করবে (Fallback)
+                    if not confirm_success:
+                        try:
+                            await page.mouse.click(309, 880)
+                            confirm_success = True
+                        except: pass
 
                     if not confirm_success:
                         screenshot_path = f"error_confirm_{uid}.png"
@@ -445,12 +482,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await ctx.bot.send_photo(
                             chat_id=uid, 
                             photo=open(screenshot_path, 'rb'), 
-                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু কোনো Confirm বাটন আসেনি!**\n\nসম্ভবত ক্লিক ঠিকমতো রেজিস্টার হয়নি বা বাটন নিষ্ক্রিয় ছিল। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
+                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু Total amount বাটনে ক্লিক করা যায়নি!**\n\nস্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
                         )
                         state["trade_running"] = False
                         break
 
-                    # 💡 ৬. ANALYSIS REPORT মেসেজ (আপনার স্ক্রিনশটের মতো হুবহু)
+                    # 💡 ৬. ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
