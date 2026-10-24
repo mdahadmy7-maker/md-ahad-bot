@@ -364,6 +364,26 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
+                    # ----------------------------------------------------
+                    # 💡 [নতুন লজিক] টাইমার ২৯, ২৮, ২৭ দেখার জন্য অপেক্ষা করা
+                    # ----------------------------------------------------
+                    logger.info("Waiting for timer to show 29, 28, or 27...")
+                    try:
+                        await page.wait_for_function("""
+                            () => {
+                                let text = document.body.innerText;
+                                // রেজেক্স দিয়ে চেক করছি 00:29, 00:28, 00:27 আছে কিনা
+                                if (/00\\s*:\\s*(27|28|29)/.test(text)) {
+                                    return true;
+                                }
+                                return false;
+                            }
+                        """, timeout=45000)
+                        logger.info("Timer reached 27-29! Proceeding to click.")
+                        await asyncio.sleep(0.5) # বাটন ১০০% চালু হওয়ার জন্য সামান্য বাফার
+                    except Exception as e:
+                        logger.error(f"Timer wait failed or timed out: {e}")
+
                     # Big/Small ক্লিক করার চেষ্টা
                     clicked = False
                     try:
@@ -396,12 +416,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except Exception as coord_e:
                             logger.error(f"Coordinate click failed: {coord_e}")
 
-                    # 💡 ৪. ক্লিক সফল হয়েছে কিনা যাচাই করা (Confirm বাটন খোঁজা)
-                    await page.wait_for_timeout(1500) # Confirm বাটন আসার জন্য অপেক্ষা
+                    # 💡 ৪. ক্লিক সফল হয়েছে কিনা যাচাই করা (Confirm / Total amount বাটন খোঁজা)
+                    await page.wait_for_timeout(1500) # পপআপ আসার জন্য অপেক্ষা
                     
                     confirm_success = False
                     try:
-                        confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm")').last
+                        # আপনার কোডে Confirm ছিল, আমি সাথে Total amount যোগ করেছি যাতে পপআপ মিস না হয়
+                        confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm"), text="Total amount", text=re.compile("Total amount", re.IGNORECASE)').last
                         if await confirm_btn.count() > 0 and await confirm_btn.is_visible():
                             await confirm_btn.click(timeout=3000, force=True)
                             confirm_success = True
@@ -412,7 +433,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         # আবার একবার চেক করা (স্লো ইন্টারনেটের জন্য)
                         await page.wait_for_timeout(2000)
                         try:
-                            confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm")').last
+                            confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm"), text="Total amount", text=re.compile("Total amount", re.IGNORECASE)').last
                             if await confirm_btn.count() > 0 and await confirm_btn.is_visible():
                                 await confirm_btn.click(timeout=3000, force=True)
                                 confirm_success = True
@@ -425,7 +446,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await ctx.bot.send_photo(
                             chat_id=uid, 
                             photo=open(screenshot_path, 'rb'), 
-                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু কোনো Confirm বাটন আসেনি!**\n\nসম্ভবত ক্লিক ঠিকমতো রেজিস্টার হয়নি বা ওয়েবসাইট আটকে আছে। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
+                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু কোনো Confirm/Total amount বাটন আসেনি!**\n\nসম্ভবত ক্লিক ঠিকমতো রেজিস্টার হয়নি বা ওয়েবসাইট আটকে আছে। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
                         )
                         state["trade_running"] = False
                         break
