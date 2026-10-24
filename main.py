@@ -366,7 +366,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
                             
-                            # যদি 00:00 না থাকে, তবে চেক করবে টাইমার ২৮, ২৯ বা ৩০ কিনা
                             if "00:00" not in body_text and "00 : 00" not in body_text:
                                 match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
                                 if match:
@@ -382,23 +381,24 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         logger.error("Timer failed to reach 28-30. Skipping.")
                         continue
 
-                    # 💡 ২.৫ সেকেন্ডের কঠোর বাফার (বাটন ১০০% চালু হওয়ার জন্য)
-                    await asyncio.sleep(2.5)
+                    # 💡 ১.৫ সেকেন্ড বাফার (বাটন ১০০% চালু হওয়ার জন্য)
+                    await asyncio.sleep(1.5)
 
-                    # 💡 ২. Big / Small ক্লিক (ন্যাচারাল ক্লিক, যা বাটন চালু না হলে অপেক্ষা করবে)
+                    # 💡 ২. Big / Small ক্লিক (force=True ছাড়া, একদম ন্যাচারাল)
                     clicked = False
                     try:
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                         
-                        # এখানে force=True নেই, তাই Playwright নিজেই চেক করবে বাটন ক্লিকযোগ্য কিনা
                         target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
-                        await target_locator.click(timeout=5000)
+                        
+                        # Playwright নিজে থেকেই অপেক্ষা করবে বাটন ক্লিকযোগ্য হওয়া পর্যন্ত
+                        await target_locator.click(timeout=8000)
                         clicked = True
-                        logger.info("Clicked via Playwright Native Click")
+                        logger.info(f"Clicked {choice} successfully.")
                     except Exception as e:
-                        logger.error(f"Playwright click failed: {e}")
+                        logger.error(f"Standard click failed: {e}")
                         try:
-                            # জাভাস্ক্রিপ্ট ফলব্যাক (যদি উপরেরটি ফেইল করে)
+                            # জাভাস্ক্রিপ্ট ফলব্যাক
                             clicked = await page.evaluate(f"""
                                 (function() {{
                                     let target = '{choice}'.toUpperCase();
@@ -423,10 +423,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     popup_success = False
                     if clicked:
                         try:
+                            # 💡 এখানেই আসল ফিক্স। পপআপ আসার জন্য অপেক্ষা করবে।
                             popup_locator = page.locator('text="Total amount"').last
                             await popup_locator.wait_for(state="visible", timeout=5000)
-                            await popup_locator.click(force=True, timeout=3000)
+                            await popup_locator.click(timeout=3000)
                             popup_success = True
+                            logger.info("Clicked Total amount successfully.")
                         except Exception as e:
                             logger.error(f"Popup click failed: {e}")
 
