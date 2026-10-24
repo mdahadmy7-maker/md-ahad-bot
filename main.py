@@ -365,220 +365,210 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     state["first_bet"] = False 
 
                     # ----------------------------------------------------
-                    # 💡 [মূল ফিক্স] "00" চলে যাওয়া পর্যন্ত অপেক্ষা করা
+                    # 💡 [অত্যন্ত গুরুত্বপূর্ণ] টাইমার 00:00 এবং 29, 28, 27 দেখার জন্য অপেক্ষা করা
                     # ----------------------------------------------------
-                    logger.info("Waiting for '00' to disappear (up to 15 seconds)...")
-                    timer_ready = False
-                    for _ in range(30): # 30 * 0.5 = 15 seconds
+                    logger.info("Waiting for 00:00 to appear...")
+                    for _ in range(60): # সর্বোচ্চ ৩০ সেকেন্ড অপেক্ষা করবে
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
-                            
-                            # যদি 00:00 থাকে, তবে অপেক্ষা করবে (ক্লিক করবে না)
                             if "00:00" in body_text:
-                                await asyncio.sleep(0.5)
-                                continue
-                                
-                            # যদি 00 না থাকে, তবে চেক করবে টাইমার ২৯, ২৮, ২৭ এসেছে কিনা
-                            match = re.search(r'00:(\d{2})', body_text)
-                            if match:
-                                sec = int(match.group(1))
-                                if sec in [27, 28, 29, 30]:
-                                    timer_ready = True
-                                    logger.info(f"Timer is {sec}. Ready to click!")
-                                    break
+                                break
                         except: pass
                         await asyncio.sleep(0.5)
 
-                    if timer_ready:
-                        # UI ঠিকমতো লোড হওয়ার জন্য ০.৫ সেকেন্ড অপেক্ষা
-                        await asyncio.sleep(0.5)
-                        
-                        # Big/Small ক্লিক করা
-                        clicked = False
+                    logger.info("Waiting for timer to show 29, 28, or 27...")
+                    for _ in range(50): # সর্বোচ্চ ১০ সেকেন্ড অপেক্ষা করবে
                         try:
-                            await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                            target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
-                            await target_locator.click(timeout=4000)
+                            body_text = await page.evaluate("() => document.body.innerText")
+                            if "00:00" not in body_text:
+                                match = re.search(r'00:(\d{2})', body_text)
+                                if match:
+                                    sec = int(match.group(1))
+                                    if sec in [27, 28, 29, 30]:
+                                        logger.info(f"Timer reached {sec}s. Clicking now.")
+                                        break
+                        except: pass
+                        await asyncio.sleep(0.2) # ০.২ সেকেন্ড পর পর চেক করবে
+
+                    # UI সেটেল হওয়ার জন্য সামান্য অপেক্ষা
+                    await asyncio.sleep(0.5)
+
+                    # Big/Small ক্লিক করার চেষ্টা
+                    clicked = False
+                    try:
+                        await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                        await page.wait_for_timeout(1000)
+                        
+                        target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
+                        await target_locator.scroll_into_view_if_needed(timeout=4000)
+                        
+                        box = await target_locator.bounding_box()
+                        if box:
+                            x = box['x'] + box['width'] / 2
+                            y = box['y'] + box['height'] / 2
+                            await page.mouse.move(x, y)
+                            await asyncio.sleep(0.2)
+                            await page.mouse.click(x, y)
                             clicked = True
-                        except Exception as e:
-                            logger.error(f"Standard click failed: {e}")
-                            try:
-                                # জাভাস্ক্রিপ্ট ফোর্স ক্লিক
-                                clicked = await page.evaluate(f"""
-                                    (function() {{
-                                        let target = '{choice}'.toUpperCase();
-                                        let elements = document.querySelectorAll('div, span, button, p, a');
-                                        for (let el of elements) {{
-                                            let text = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                            if (text === target) {{
-                                                let rect = el.getBoundingClientRect();
-                                                if (rect.width > 0 && rect.height > 0) {{
-                                                    let clickTarget = el.closest('button, div[role="button"], .btn') || el;
-                                                    
-                                                    let x = rect.left + (rect.width / 2);
-                                                    let y = rect.top + (rect.height / 2);
-                                                    let opts = {{ bubbles: true, cancelable: true, clientX: x, clientY: y, view: window }};
-                                                    
-                                                    clickTarget.dispatchEvent(new PointerEvent('pointerdown', opts));
-                                                    clickTarget.dispatchEvent(new MouseEvent('mousedown', opts));
-                                                    clickTarget.dispatchEvent(new PointerEvent('pointerup', opts));
-                                                    clickTarget.dispatchEvent(new MouseEvent('mouseup', opts));
-                                                    clickTarget.dispatchEvent(new MouseEvent('click', opts));
-                                                    
-                                                    return true;
-                                                }}
-                                            }}
-                                        }}
-                                        return false;
-                                    }})();
-                                """)
-                            except: pass
-
-                        # 💡 ৪. ক্লিক সফল হয়েছে কিনা যাচাই করা (শুধুমাত্র Total amount বাটন খোঁজা)
-                        await page.wait_for_timeout(1000) # পপআপ আসার জন্য অপেক্ষা
-                        
-                        popup_success = False
+                        else:
+                            await target_locator.click(force=True, timeout=4000)
+                            clicked = True
+                    except Exception as e:
+                        logger.error(f"Standard click failed: {e}")
                         try:
-                            popup_btn = page.locator('text="Total amount"').last
-                            if await popup_btn.count() > 0 and await popup_btn.is_visible():
-                                await popup_btn.click(force=True, timeout=3000)
-                                popup_success = True
-                        except Exception as e:
-                            logger.error(f"Popup error: {e}")
-
-                        if not popup_success:
-                            # আবার একবার চেক করা (স্লো ইন্টারনেটের জন্য)
-                            await page.wait_for_timeout(2000)
-                            try:
-                                popup_btn = page.locator('text="Total amount"').last
-                                if await popup_btn.count() > 0 and await popup_btn.is_visible():
-                                    await popup_btn.click(force=True, timeout=3000)
-                                    popup_success = True
-                            except: pass
-
-                        # যদি Total amount বাটন না আসে, তবে ক্লিক ফেইল করেছে -> স্ক্রিনশট পাঠাবে
-                        if not popup_success:
-                            screenshot_path = f"error_popup_{uid}.png"
-                            await page.screenshot(path=screenshot_path)
-                            await ctx.bot.send_photo(
-                                chat_id=uid, 
-                                photo=open(screenshot_path, 'rb'), 
-                                caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু কোনো 'Total amount' বাটন আসেনি!**\n\nসম্ভবত ক্লিক ঠিকমতো রেজিস্টার হয়নি বা ওয়েবসাইট আটকে আছে। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
-                            )
-                            state["trade_running"] = False
-                            break
-
-                        # 💡 ৫. ক্লিক সফল হলে ANALYSIS REPORT মেসেজ
-                        await ctx.bot.send_message(chat_id=uid, text=(
-                            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                            "🤖 NEW TRADE PLACED\n"
-                            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                            f"⏱️ Period    : {current_period}\n"
-                            f"⏱️ Timer     : {timer_val} remaining\n"
-                            "📊 Market       : MIXED 📊\n"
-                            "🔬 Stability    : 🔴 VOLATILE (0/100)\n"
-                            "🧨 Hostility    : 🟡 UNSTABLE (60/100)\n"
-                            "💡 Gut Score    : 25/100\n"
-                            "🧠 Mind State   : 😌 Calm & focused\n"
-                            "╔══════════════════════════════════╗\n"
-                            "║ 🧠 ANALYSIS REPORT  ║\n"
-                            "╚══════════════════════════════════╝\n"
-                            "⚠️ Only 10 draws available (need 40) — preliminary signal\n"
-                            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                            "📊 Confidence : ████░░░░░░ 45%\n"
-                            "🎯 Consensus  :\n"
-                            "✅ Gate       : 🔴 VOLATILE (25/100)\n"
-                            "✓ hostility 60/100 ✓ gut 25/100\n"
-                            "⚡ Analyzed in: 217ms\n"
-                            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                            f"🔵 PREDICTION : {choice} ❮❮❮\n\n"
-                            f"✅ **সফলভাবে ক্লিক করা হয়েছে: {choice}**\n\n"
-                            f"🚀 Step       : 🟢 Normal — Step {current_step_idx+1}\n"
-                            f"💵 Amount     : ৳ {bet_amount:.2f}\n"
-                            f"💰 Balance    : ৳ {current_bal:.2f}\n"
-                            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                            "⏳ Waiting for result..."
-                        ))
-
-                        await asyncio.sleep(32)
-
-                        await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
-                        await page.wait_for_timeout(2500) 
-                        
-                        new_page_text = await page.evaluate("() => document.body.innerText")
-                        new_balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
-                        
-                        if new_balance_match:
-                            new_balance = float(new_balance_match.group(1))
-                            state['total_trades'] += 1
-                            
-                            if new_balance > current_bal:
-                                state["balance"] = new_balance
-                                state["wins"] += 1
-                                current_step_idx = 0
-                                p_l = bet_amount * 0.96
-                                win_rate = (state['wins'] / state['total_trades'] * 100)
-                                
-                                await ctx.bot.send_message(chat_id=uid, text=(
-                                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                    "—\n"
-                                    "🟢 TRADE RESULT\n"
-                                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                    "—\n"
-                                    f"⏰ Period : {current_period}\n"
-                                    f"🔵 Side : {choice} ❮❮❮\n"
-                                    f"🚀 Step : {current_step_idx+1}\n"
-                                    f"💵 Amount : ৳ {bet_amount:.2f}\n\n"
-                                    "📊 Result : WIN ✅\n"
-                                    f"💹 P/L : +৳ {p_l:.2f}\n"
-                                    f"💰 Balance : ৳ {new_balance:.2f}\n"
-                                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                    "—\n"
-                                    f"🏆 Wins : {state['wins']} 🔴 Losses : {state['losses']} 📈 Rate :\n"
-                                    f"{win_rate:.1f}%\n"
-                                    "🧠 Mind State : 😌 Calm & focused\n"
-                                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                    "—\n"
-                                    "➡️ Next Step : 1\n"
-                                    "🟢 Recovered! Back to Step 1."
-                                ))
+                            # কো-অর্ডিনেট ক্লিক
+                            if choice.upper() == "BIG":
+                                await page.mouse.click(103, 890)
                             else:
-                                state["balance"] = new_balance
-                                state["losses"] += 1
-                                current_step_idx += 1
-                                p_l = -bet_amount
-                                
-                                win_rate = (state['wins'] / state['total_trades'] * 100) if state['total_trades'] > 0 else 0
-                                
-                                if current_step_idx < len(state['step_amounts']):
-                                    next_step_txt = f"➡️ Next Step : {current_step_idx+1} (৳ {state['step_amounts'][current_step_idx]})"
-                                else:
-                                    next_step_txt = "🛑 No more steps left."
+                                await page.mouse.click(309, 890)
+                            clicked = True
+                        except Exception as coord_e:
+                            logger.error(f"Coordinate click failed: {coord_e}")
 
-                                await ctx.bot.send_message(chat_id=uid, text=(
-                                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                    "—\n"
-                                    "🔴 TRADE RESULT\n"
-                                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                    "—\n"
-                                    f"⏰ Period : {current_period}\n"
-                                    f"🔵 Side : {choice} ❮❮❮\n"
-                                    f"🚀 Step : {current_step_idx}\n"
-                                    f"💵 Amount : ৳ {bet_amount:.2f}\n\n"
-                                    "📊 Result : LOSS ❌\n"
-                                    f"💹 P/L : -৳ {bet_amount:.2f}\n"
-                                    f"💰 Balance : ৳ {new_balance:.2f}\n"
-                                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                    "—\n"
-                                    f"🏆 Wins : {state['wins']} 🔴 Losses : {state['losses']} 📈 Rate :\n"
-                                    f"{win_rate:.1f}%\n"
-                                    "🧠 Mind State : 😐 Focused\n"
-                                    "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                    "—\n"
-                                    f"{next_step_txt}"
-                                ))
-                    else:
-                        logger.error("Timer failed to reach 27-30. Skipping this round.")
+                    # 💡 ৪. ক্লিক সফল হয়েছে কিনা যাচাই করা (Confirm / Total amount বাটন খোঁজা)
+                    await page.wait_for_timeout(1500) # পপআপ আসার জন্য অপেক্ষা
+                    
+                    confirm_success = False
+                    try:
+                        # Confirm এবং Total amount দুটোই চেক করা হচ্ছে
+                        confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm"), text="Total amount", text=re.compile("Total amount", re.IGNORECASE)').last
+                        if await confirm_btn.count() > 0 and await confirm_btn.is_visible():
+                            await confirm_btn.click(timeout=3000, force=True)
+                            confirm_success = True
+                    except Exception as e:
+                        logger.error(f"Confirm error: {e}")
+
+                    if not confirm_success:
+                        # আবার একবার চেক করা
+                        await page.wait_for_timeout(2000)
+                        try:
+                            confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm"), text="Total amount", text=re.compile("Total amount", re.IGNORECASE)').last
+                            if await confirm_btn.count() > 0 and await confirm_btn.is_visible():
+                                await confirm_btn.click(timeout=3000, force=True)
+                                confirm_success = True
+                        except: pass
+
+                    # যদি Confirm/Total amount বাটন না আসে, তবে ক্লিক ফেইল করেছে -> স্ক্রিনশট পাঠাবে
+                    if not confirm_success:
+                        screenshot_path = f"error_confirm_{uid}.png"
+                        await page.screenshot(path=screenshot_path)
+                        await ctx.bot.send_photo(
+                            chat_id=uid, 
+                            photo=open(screenshot_path, 'rb'), 
+                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু কোনো Confirm/Total amount বাটন আসেনি!**\n\nসম্ভবত ক্লিক ঠিকমতো রেজিস্টার হয়নি বা ওয়েবসাইট আটকে আছে। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
+                        )
+                        state["trade_running"] = False
+                        break
+
+                    # 💡 ৫. ক্লিক সফল হলে ANALYSIS REPORT মেসেজ
+                    await ctx.bot.send_message(chat_id=uid, text=(
+                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        "🤖 NEW TRADE PLACED\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"⏱️ Period    : {current_period}\n"
+                        f"⏱️ Timer     : {timer_val} remaining\n"
+                        "📊 Market       : MIXED 📊\n"
+                        "🔬 Stability    : 🔴 VOLATILE (0/100)\n"
+                        "🧨 Hostility    : 🟡 UNSTABLE (60/100)\n"
+                        "💡 Gut Score    : 25/100\n"
+                        "🧠 Mind State   : 😌 Calm & focused\n"
+                        "╔══════════════════════════════════╗\n"
+                        "║ 🧠 ANALYSIS REPORT  ║\n"
+                        "╚══════════════════════════════════╝\n"
+                        "⚠️ Only 10 draws available (need 40) — preliminary signal\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        "📊 Confidence : ████░░░░░░ 45%\n"
+                        "🎯 Consensus  :\n"
+                        "✅ Gate       : 🔴 VOLATILE (25/100)\n"
+                        "✓ hostility 60/100 ✓ gut 25/100\n"
+                        "⚡ Analyzed in: 217ms\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"🔵 PREDICTION : {choice} ❮❮❮\n\n"
+                        f"✅ **সফলভাবে ক্লিক করা হয়েছে: {choice}**\n\n"
+                        f"🚀 Step       : 🟢 Normal — Step {current_step_idx+1}\n"
+                        f"💵 Amount     : ৳ {bet_amount:.2f}\n"
+                        f"💰 Balance    : ৳ {current_bal:.2f}\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        "⏳ Waiting for result..."
+                    ))
+
+                    await asyncio.sleep(32)
+
+                    await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
+                    await page.wait_for_timeout(2500) 
+                    
+                    new_page_text = await page.evaluate("() => document.body.innerText")
+                    new_balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
+                    
+                    if new_balance_match:
+                        new_balance = float(new_balance_match.group(1))
+                        state['total_trades'] += 1
+                        
+                        if new_balance > current_bal:
+                            state["balance"] = new_balance
+                            state["wins"] += 1
+                            current_step_idx = 0
+                            p_l = bet_amount * 0.96
+                            win_rate = (state['wins'] / state['total_trades'] * 100)
+                            
+                            await ctx.bot.send_message(chat_id=uid, text=(
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "—\n"
+                                "🟢 TRADE RESULT\n"
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "—\n"
+                                f"⏰ Period : {current_period}\n"
+                                f"🔵 Side : {choice} ❮❮❮\n"
+                                f"🚀 Step : {current_step_idx+1}\n"
+                                f"💵 Amount : ৳ {bet_amount:.2f}\n\n"
+                                "📊 Result : WIN ✅\n"
+                                f"💹 P/L : +৳ {p_l:.2f}\n"
+                                f"💰 Balance : ৳ {new_balance:.2f}\n"
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "—\n"
+                                f"🏆 Wins : {state['wins']} 🔴 Losses : {state['losses']} 📈 Rate :\n"
+                                f"{win_rate:.1f}%\n"
+                                "🧠 Mind State : 😌 Calm & focused\n"
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "—\n"
+                                "➡️ Next Step : 1\n"
+                                "🟢 Recovered! Back to Step 1."
+                            ))
+                        else:
+                            state["balance"] = new_balance
+                            state["losses"] += 1
+                            current_step_idx += 1
+                            p_l = -bet_amount
+                            
+                            win_rate = (state['wins'] / state['total_trades'] * 100) if state['total_trades'] > 0 else 0
+                            
+                            if current_step_idx < len(state['step_amounts']):
+                                next_step_txt = f"➡️ Next Step : {current_step_idx+1} (৳ {state['step_amounts'][current_step_idx]})"
+                            else:
+                                next_step_txt = "🛑 No more steps left."
+
+                            await ctx.bot.send_message(chat_id=uid, text=(
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "—\n"
+                                "🔴 TRADE RESULT\n"
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "—\n"
+                                f"⏰ Period : {current_period}\n"
+                                f"🔵 Side : {choice} ❮❮❮\n"
+                                f"🚀 Step : {current_step_idx}\n"
+                                f"💵 Amount : ৳ {bet_amount:.2f}\n\n"
+                                "📊 Result : LOSS ❌\n"
+                                f"💹 P/L : -৳ {bet_amount:.2f}\n"
+                                f"💰 Balance : ৳ {new_balance:.2f}\n"
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "—\n"
+                                f"🏆 Wins : {state['wins']} 🔴 Losses : {state['losses']} 📈 Rate :\n"
+                                f"{win_rate:.1f}%\n"
+                                "🧠 Mind State : 😐 Focused\n"
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "—\n"
+                                f"{next_step_txt}"
+                            ))
 
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
