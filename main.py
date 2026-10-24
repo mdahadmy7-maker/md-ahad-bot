@@ -78,7 +78,7 @@ def get_history_and_prediction():
         return "SMALL", "Unknown"
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (আপনার প্রথম ফাইলের হুবহু লজিক)
+# ৩. লগইন এবং অটো-বেট ফাংশন
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -104,7 +104,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         page = await context.new_page()
         
         try:
-            # ---------------- ১. লগইন ----------------
+            # ---------------- ১. লগইন (আপনার প্রথম ফাইলের হুবহু লজিক) ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(3000)
@@ -138,7 +138,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.wait_for_timeout(400)
 
             await update_loading(85)
-            # 💡 Account পেজে গিয়ে ডেটা নেওয়া (হুবহু আপনার প্রথম ফাইলের মতো)
             try:
                 await page.evaluate("""
                     (function() {
@@ -316,7 +315,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
                     step_plan_str += "└────────────────────────────────┘"
 
-                    # 💡 ১. যদি প্রথম বাজি হয়, তবে অ্যানিমেশন দেখাবে
+                    # 💡 ১. প্রথম বাজি হলে অ্যানিমেশন
                     if state.get("first_bet", True):
                         active_msg = await ctx.bot.send_message(chat_id=uid, text=(
                             "╔════════════════════════════════╗\n"
@@ -364,6 +363,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     logger.info("Waiting for 00 to disappear and 29/28/27 to appear...")
                     try:
+                        # অপেক্ষা করবে যতক্ষণ না 00:00 থাকে না এবং টাইমার ২৭-৩০ এর মধ্যে আসে
                         await page.wait_for_function("""
                             () => {
                                 let text = document.body.innerText;
@@ -388,7 +388,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             timer_val = f"{timer_match.group(1)}s"
                     except: pass
 
-                    # 💡 ২. Big / Small ক্লিক (force=True বাদ দেওয়া হয়েছে)
+                    # 💡 ২. ১.৫ সেকেন্ড অপেক্ষা (যাতে 00 ওভারলে সম্পূর্ণ মুছে যায়)
+                    await asyncio.sleep(1.5)
+
+                    # 💡 ৩. Big / Small ক্লিক (force=True বাদ দেওয়া হয়েছে)
                     clicked = False
                     try:
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
@@ -422,27 +425,30 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             """)
                         except: pass
 
-                    if not clicked:
-                        screenshot_path = f"error_click_{uid}.png"
+                    # 💡 ৪. "Total amount" বাটন খোঁজা (ক্লিক সফল হয়েছে কিনা যাচাই)
+                    popup_success = False
+                    if clicked:
+                        try:
+                            popup_locator = page.locator('text="Total amount"').last
+                            await popup_locator.wait_for(state="visible", timeout=5000)
+                            await popup_locator.click(timeout=3000)
+                            popup_success = True
+                        except Exception as e:
+                            logger.error(f"Popup click failed: {e}")
+
+                    # 💡 [মূল ফিক্স] যদি Total amount বাটন না আসে, তবে ANALYSIS REPORT পাঠাবে না
+                    if not popup_success:
+                        screenshot_path = f"error_popup_{uid}.png"
                         await page.screenshot(path=screenshot_path)
                         await ctx.bot.send_photo(
                             chat_id=uid, 
                             photo=open(screenshot_path, 'rb'), 
-                            caption=f"⚠️ **{choice} বাটনে ক্লিক করা যাচ্ছে না!**\nগেমের পেজটি কেমন দেখাচ্ছে তা স্ক্রিনশটে দেখুন।"
+                            caption=f"⚠️ **{choice} বাটনে ক্লিক করেছেন কিন্তু 'Total amount' বাটন পাওয়া যায়নি!**\n\nসম্ভবত ক্লিক ঠিকমতো রেজিস্টার হয়নি বা ওভারলে ছিল। স্ক্রিনশট দেখুন। বট বন্ধ করা হচ্ছে।"
                         )
-                        raise Exception(f"{choice} button not found on page.")
+                        state["trade_running"] = False
+                        break # লুপ থেকে বের হয়ে যাবে, ফেক মেসেজ দেবে না
 
-                    await page.wait_for_timeout(1000) 
-                    
-                    # 💡 ৩. "Total amount" বাটন খোঁজা এবং ক্লিক করা
-                    try:
-                        popup_locator = page.locator('text="Total amount"').last
-                        await popup_locator.wait_for(state="visible", timeout=5000)
-                        await popup_locator.click(timeout=3000)
-                    except Exception as e:
-                        logger.error(f"Popup click failed: {e}")
-
-                    # 💡 ৪. ANALYSIS REPORT মেসেজ
+                    # 💡 ৫. ANALYSIS REPORT মেসেজ (কেবল সফল হলে)
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
