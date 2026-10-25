@@ -274,15 +274,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     choice, current_period = get_history_and_prediction()
 
                     # 💡 ১. টাইমার চেক (৩০ থেকে ৬)
-                    logger.info("Waiting for timer 06s-30s...")
+                    logger.info("Waiting for timer 30s-6s...")
                     timer_val = "0s"
                     valid_timer = False
                     
-                    for _ in range(150): # ৩০ সেকেন্ড পর্যন্ত অপেক্ষা করবে
+                    for _ in range(150): 
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
                             
-                            # ০ ০ পপআপ থাকলে স্কিপ করবে
                             if "Select Big" in body_text or "Total amount" in body_text or "0 0" == body_text.strip():
                                 await asyncio.sleep(0.2)
                                 continue
@@ -295,14 +294,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                     valid_timer = True
                                     break
                                 elif sec < 6:
-                                    break # ৫ বা তার নিচে নামলে রাউন্ড বাদ
+                                    break
                         except: pass
                         await asyncio.sleep(0.2)
 
                     if not valid_timer:
-                        logger.warning("Timer dropped below 6s or not found. Waiting for next round...")
+                        logger.warning("Timer dropped below 6s. Waiting for next round...")
                         await asyncio.sleep(2)
-                        continue
+                        continue 
 
                     step_plan_str = "┌────────────────────────────────┐\n"
                     for i, amt in enumerate(state['step_amounts']):
@@ -349,12 +348,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ২. Big/Small ক্লিক
+                    # 💡 ২. Big/Small এ ক্লিক করা (যেকোনো একটাতে)
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(200)
                     
                     clicked = False
                     try:
+                        # এখানে 'choice' ভেরিয়েবলটি হয় "BIG" হবে, নয়তো "SMALL" হবে। দুটো একসাথে কখনোই হবে না।
                         target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
                         box = await target_locator.bounding_box()
                         if box:
@@ -375,9 +375,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             clicked = True
                         except: pass
 
-                    # 💡 ৩. সাথে সাথে Total amount এ ক্লিক করা (দ্রুত লুপ)
+                    # 💡 ৩. সাথে সাথে Total amount এ ক্লিক করা
                     confirm_success = False
-                    for _ in range(10):
+                    for _ in range(15): 
                         try:
                             inputs = await page.locator('input[type="text"], input[type="number"]').all()
                             for inp in inputs:
@@ -458,7 +458,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except: pass
                         await asyncio.sleep(1)
                     
-                    # 💡 ৭. উপরে স্ক্রল করে ব্যালেন্স চেক করবে (অ্যাকাউন্ট পেজে যাবে না)
+                    # 💡 ৭. উপরে স্ক্রল করে ব্যালেন্স চেক করবে
                     logger.info("Scrolling up to check balance...")
                     await page.evaluate("window.scrollTo(0, 0);")
                     await page.wait_for_timeout(1500)
@@ -751,9 +751,11 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         )
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
     elif data == "start_trade_btn":
-        state["trade_running"] = True
-        try: await query.edit_message_reply_markup(reply_markup=None)
-        except: pass
+        if not state.get("trade_running", False):
+            state["trade_running"] = True
+            await query.answer("Trade Started!", show_alert=False)
+        else:
+            await query.answer("Trade is already running!", show_alert=True)
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
         await query.edit_message_text("❌ **TRADE CANCELLED**")
