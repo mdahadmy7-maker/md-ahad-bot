@@ -312,8 +312,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. টাইমার চেক (৬ থেকে ৩০)
-                    logger.info("Waiting for timer (6s-30s)...")
+                    # 💡 ১. কঠোর টাইমার চেক (৩০ থেকে ৬)
+                    logger.info("Waiting for timer (30s-6s)...")
                     timer_val = "0s"
                     valid_timer = False
                     
@@ -321,10 +321,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
                             
+                            # ০ ০ পপআপ থাকলে স্কিপ করবে
                             if "Select Big" in body_text or "Total amount" in body_text or "0 0" == body_text.strip():
                                 await asyncio.sleep(0.2)
                                 continue
-                                
+
                             match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
                             if match:
                                 sec = int(match.group(1))
@@ -338,6 +339,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await asyncio.sleep(0.2)
 
                     if not valid_timer:
+                        logger.warning("Timer dropped below 6s or not found. Waiting for next round...")
                         await asyncio.sleep(2)
                         continue
 
@@ -346,7 +348,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
                     step_plan_str += "└────────────────────────────────┘"
 
-                    # 💡 ২. প্রথমবার AUTO TRADE ACTIVE এবং GENERATING PREDICTION মেসেজ (বাটনে চাপ দেওয়ার সাথে সাথে)
+                    # 💡 ২. প্রথমবার AUTO TRADE ACTIVE এবং GENERATING PREDICTION মেসেজ 
                     pred_msg = None
                     if state.get("first_bet", True):
                         await ctx.bot.send_message(chat_id=uid, text=(
@@ -387,15 +389,30 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৩. শুধু Big অথবা Small এ ক্লিক করা
+                    # 💡 ৩. Big/Small এ ক্লিক করা
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(300)
                     
                     try:
-                        if choice.upper() == "BIG":
-                            await page.locator('div, button, span').filter(has_text=re.compile(r'^Big$', re.IGNORECASE)).last.click(force=True, timeout=3000)
-                        else:
-                            await page.locator('div, button, span').filter(has_text=re.compile(r'^Small$', re.IGNORECASE)).last.click(force=True, timeout=3000)
+                        # JS দিয়ে ক্লিক করা হচ্ছে যাতে একসাথে দুইটাতে না হয়
+                        click_result = await page.evaluate(f"""
+                            (() => {{
+                                let els = document.querySelectorAll('div, span, button');
+                                for (let el of els) {{
+                                    if (el.innerText && el.innerText.trim().toUpperCase() === '{choice.upper()}') {{
+                                        let rect = el.getBoundingClientRect();
+                                        if (rect.width > 0 && rect.height > 0) {{
+                                            el.click();
+                                            return true;
+                                        }}
+                                    }}
+                                }}
+                                return false;
+                            }})()
+                        """)
+                        
+                        if not click_result:
+                            raise Exception("JS click failed")
                     except Exception as e:
                         logger.error(f"Big/Small Click Error: {e}")
                         stuck_path = f"stuck_bigsmall_{uid}.png"
@@ -408,12 +425,27 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
-                    # 💡 ৪. সাথে সাথে Total amount এ ক্লিক করা
+                    # 💡 ৪. সাথে সাথে Total amount এ ক্লিক করা (কোনো অপেক্ষা নেই)
                     try:
-                        agree = page.locator('text="I agree"')
-                        if await agree.count() > 0 and await agree.first.is_visible():
-                            await agree.first.click(force=True)
-                        await page.locator('text=/Total amount/i').last.click(force=True, timeout=5000)
+                        total_click = await page.evaluate("""
+                            (() => {
+                                let els = document.querySelectorAll('div, span, button');
+                                for (let el of els) {
+                                    if (el.innerText && el.innerText.includes('Total amount')) {
+                                        let rect = el.getBoundingClientRect();
+                                        if (rect.width > 0 && rect.height > 0) {
+                                            el.click();
+                                            return true;
+                                        }
+                                    }
+                                }
+                                return false;
+                            })()
+                        """)
+                        
+                        if not total_click:
+                            await page.locator('text=/Total amount/i').last.click(force=True, timeout=3000)
+                            
                     except Exception as e:
                         logger.error(f"Total Amount Click Error: {e}")
                         stuck_path = f"stuck_total_{uid}.png"
@@ -631,164 +663,4 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "║   🚀 START YOUR TARGET 🚀   ║\n"
             "╚════════════════════════╝\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "💰 YOUR BALANCE\n"
-            f"৳ {state.get('balance', '0.00')}\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🎯 Enter your TARGET profit amount:\n"
-            "How much do you want to earn? (in ৳)"
-        )
-        await update.message.reply_text(target_msg)
-        return
-        
-    if state.get("awaiting") == "target":
-        try:
-            target_amount = float(text)
-            state["target"] = target_amount
-            balance = float(state.get('balance', '0.00'))
-            stop_at = balance + target_amount
-            target_set_msg = (
-                "╔════════════════════════╗\n"
-                "║   🎯 TARGET SET 🎯   ║\n"
-                "╚════════════════════════╝\n\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"💰 Balance  : ৳ {balance:.2f}\n"
-                f"🎯 Target   : ৳ {target_amount:.2f} profit\n"
-                f"🏦 Stop At  : ৳ {stop_at:.2f}\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                "🚀 Enter your STEP COUNT:\n"
-                "How many steps? (e.g. 5, max 50)"
-            )
-            state["awaiting"] = "steps"
-            await update.message.reply_text(target_set_msg)
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 50)।")
-        return
-        
-    if state.get("awaiting") == "steps":
-        try:
-            steps = int(text)
-            if steps > 50 or steps < 1: raise ValueError("Steps must be between 1 and 50")
-            state["steps"] = steps
-            state["step_amounts"] = [] 
-            state["current_step"] = 1
-            state["awaiting"] = "step_amount"
-            step_msg = (
-                "╔════════════════════════╗\n"
-                "║   💵 STEP AMOUNTS 💵   ║\n"
-                "╚════════════════════════╝\n\n"
-                f"You chose {steps} steps.\n\n"
-                f"💵 Step {state['current_step']} — bet amount? (in ৳)"
-            )
-            await update.message.reply_text(step_msg)
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! ১ থেকে ৫০ এর মধ্যে একটি সংখ্যা দিন (যেমন: 5)।")
-        return
-
-    if state.get("awaiting") == "step_amount":
-        try:
-            amount = float(text)
-            if amount <= 0: raise ValueError("Amount must be greater than 0")
-            state["step_amounts"].append(amount)
-            state["current_step"] += 1
-            if state["current_step"] <= state["steps"]:
-                step_msg = f"💵 Step {state['current_step']} — bet amount? (in ৳)"
-                await update.message.reply_text(step_msg)
-            else:
-                state["awaiting"] = None
-                total_risk = sum(state["step_amounts"])
-                balance = float(state.get('balance', '0.00'))
-                target = float(state.get('target', 0))
-                stop_at = balance + target
-                step_plan_text = ""
-                for i, amt in enumerate(state["step_amounts"]):
-                    step_plan_text += f"Step {i+1:02d} : ৳ {amt:.2f}\n"
-                
-                combined_msg = (
-                    "⚙️ TRADE CONFIGURATION ⚙️\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"💰 Balance  : ৳ {balance:.2f}\n"
-                    f"🎯 Target   : ৳ {target:.2f} profit\n"
-                    f"🏦 Stop At  : ৳ {stop_at:.2f}\n"
-                    f"📋 Steps    : {state['steps']}\n"
-                    f"⚠️ Total Risk : ৳ {total_risk:.2f}\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    "📊 STEP PLAN\n"
-                    f"{step_plan_text}"
-                    "\n"
-                    "👇 Press START TRADE to begin."
-                )
-                inline_kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🚀 START TRADE", callback_data="start_trade_btn"), 
-                     InlineKeyboardButton("❌ CANCEL", callback_data="cancel_trade_btn")]
-                ])
-                await update.message.reply_text(combined_msg, reply_markup=inline_kb)
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 1)।")
-        return
-
-    if text == "🛑 STOP TRADE":
-        state["trade_running"] = False
-        await update.message.reply_text("🛑 TRADE STOPPED")
-        return
-    if text == "🚪 LOGOUT":
-        state["trade_running"] = False
-        state["temp_phone"] = ""
-        state["temp_password"] = ""
-        await update.message.reply_text("🚪 LOGGED OUT")
-        return
-
-async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    uid = update.effective_user.id
-    state = get_state(uid)
-    data = query.data
-    if data == "start_login":
-        state["awaiting"] = "phone"
-        login_msg = (
-            "╔════════════════════════╗\n"
-            "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
-            "╚════════════════════════╝\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "📱 Enter your HGNICE phone number:\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Everyone uses their own account — your session is private."
-        )
-        await ctx.bot.send_message(chat_id=uid, text=login_msg)
-    elif data == "start_trade_btn":
-        state["trade_running"] = True
-    elif data == "cancel_trade_btn":
-        state["trade_running"] = False
-        await query.edit_message_text("❌ **TRADE CANCELLED**")
-
-async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    state = get_state(uid)
-    state["trade_running"] = False
-    if state.get("task"): state["task"].cancel()
-    user_state[uid] = {
-        "awaiting": None, "temp_phone": "", "temp_password": "",
-        "accounts": [], "balance": "0.00", "target": 0, 
-        "steps": 0, "step_amounts": [], "current_step": 0, "trade_running": False, "task": None,
-        "wins": 0, "losses": 0, "total_trades": 0, "first_bet": True
-    }
-    await update.message.reply_text("🔄 সব ডেটা রিসেট হয়েছে। /start দিন।")
-
-def main():
-    if not BOT_TOKEN:
-        print("❌ Error: BOT_TOKEN সেট করা নেই!")
-        return
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("reset", cmd_reset))
-    app.add_handler(CallbackQueryHandler(callback_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    print("🤖 Bot started...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+           
