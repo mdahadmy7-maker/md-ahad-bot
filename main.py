@@ -4,8 +4,6 @@ import re
 import os
 import requests
 import json
-import time
-import random
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -18,7 +16,6 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SITE_URL = "https://www.hgnice.vip/#/login"
 HOME_URL = "https://www.hgnice.vip/#/"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
-BET_API = "https://api.ar-lottery01.com/api/Lottery/WinGoBet"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -29,63 +26,108 @@ def get_state(uid):
     if uid not in user_state:
         user_state[uid] = {
             "awaiting": None, "temp_phone": "", "temp_password": "",
-            "balance": "0.00", "target": 0, 
+            "accounts": [], "balance": "0.00", "target": 0, 
             "steps": 0, "step_amounts": [], "current_step": 0,
             "trade_running": False, "task": None,
             "wins": 0, "losses": 0, "total_trades": 0,
-            "first_bet": True, "token": ""
+            "first_bet": True
         }
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# 💡 ২. প্রেডিকশন বের করার ফাংশন
+# 💡 ২. API থেকে প্রেডিকশন
 # ───────────────────────────────────────────
 def get_history_and_prediction():
     try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        res = requests.get(f"{HISTORY_API}?t={int(time.time())}", headers=headers, timeout=10)
+        res = requests.get(HISTORY_API, timeout=10)
         data = res.json()
-        
         list_data = data.get("data", {}).get("list", [])
-        if not list_data:
-            return "BIG", "Unknown"
+        if not list_data: return "SMALL", "Unknown"
             
         latest_period = str(list_data[0].get("issueNumber", "Unknown"))
         reversed_list = list(reversed(list_data))
-        
         history = []
         for item in reversed_list:
             num = int(item.get("number", 0))
             history.append("SMALL" if num <= 4 else "BIG")
             
+        if len(history) == 0: return "BIG", latest_period
         if len(history) < 3:
-            return "BIG", latest_period
+            return ("SMALL" if history[-1] == 'BIG' else "BIG"), latest_period
             
-        l1, l2, l3 = history[-1], history[-2], history[-3]
+        n = len(history)
+        l1, l2, l3 = history[n-1], history[n-2], history[n-3]
+        
         if l1 == l2 == l3:
             return ("SMALL" if l1 == 'BIG' else "BIG"), latest_period
+            
+        if n >= 4:
+            l4 = history[n-4]
+            if l4 == l3 and l2 == l1 and l4 != l3: return l4, latest_period
+            if l4 == l2 and l3 == l1 and l4 != l3: return l4, latest_period
+                
         return ("SMALL" if l1 == 'BIG' else "BIG"), latest_period
-        
-    except Exception as e:
-        logger.error(f"History API error: {e}")
-        return "BIG", "Unknown"
+    except:
+        return "SMALL", "Unknown"
 
 # ───────────────────────────────────────────
-# ৪. লগইন এবং অটো-বেট ফাংশন (হাইব্রিড)
+# 💡 ৩. লাইভ টাইমার
+# ───────────────────────────────────────────
+async def update_live_timer(ctx, uid, message_id, start_sec, current_period, choice, bet_amount, current_bal, current_step_idx):
+    if start_sec < 1: start_sec = 1
+    for current_sec in range(start_sec, 31):
+        filled_blocks = int((current_sec / 30) * 10)
+        if filled_blocks > 10: filled_blocks = 10
+        bar = "█" * filled_blocks + "░" * (10 - filled_blocks)
+        
+        text = (
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🤖 NEW TRADE PLACED\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⏱️ Period    : {current_period}\n"
+            f"⏱️ Timer     : {current_sec:02d}s elapsed\n"
+            "📊 Market       : MIXED 📊\n"
+            "🔬 Stability    : 🔴 VOLATILE (0/100)\n"
+            "🧨 Hostility    : 🟡 UNSTABLE (60/100)\n"
+            "💡 Gut Score    : 25/100\n"
+            "🧠 Mind State   : 😌 Calm & focused\n"
+            "╔══════════════════════════════════╗\n"
+            "║ 🧠 ANALYSIS REPORT  ║\n"
+            "╚══════════════════════════════════╝\n"
+            "⚠️ Only 10 draws available (need 40) — preliminary signal\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📊 Confidence : ████░░░░░░ 45%\n"
+            "🎯 Consensus  :\n"
+            "✅ Gate       : 🔴 VOLATILE (25/100)\n"
+            "✓ hostility 60/100 ✓ gut 25/100\n"
+            "⚡ Analyzed in: 217ms\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"🔵 PREDICTION : {choice} ❮❮❮\n\n"
+            f"🚀 Step       : 🟢 Normal — Step {current_step_idx+1}\n"
+            f"💵 Amount     : ৳ {bet_amount:.2f}\n"
+            f"💰 Balance    : ৳ {current_bal:.2f}\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⏳ Waiting for result...\n\n"
+            f"`[{bar}] {current_sec:02d}s`"
+        )
+        try:
+            await ctx.bot.edit_message_text(chat_id=uid, message_id=message_id, text=text, parse_mode="Markdown")
+        except: pass
+        await asyncio.sleep(1)
+
+# ───────────────────────────────────────────
+# ৪. মেইন অটোমেশন
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
     login_phone = phone[3:] if phone.startswith("880") else phone
     
-    async def update_loading(percent):
+    async def update_loading(percent, txt="CONNECTING TO HGNICE"):
         if not loading_msg_id: return
         filled = "█" * (percent // 10)
         empty = "░" * (10 - (percent // 10))
         try:
-            await ctx.bot.edit_message_text(
-                chat_id=uid, message_id=loading_msg_id, 
-                text=f"🔄 **CONNECTING TO HGNICE**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
-            )
+            await ctx.bot.edit_message_text(chat_id=uid, message_id=loading_msg_id, text=f"🔄 **{txt}**\n[{filled}{empty}] {percent}%", parse_mode="Markdown")
         except: pass
 
     async with async_playwright() as p:
@@ -96,84 +138,99 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         )
         page = await context.new_page()
         
-        # ইন্টারসেপ্ট ভেরিয়েবল
-        intercepted_data = {}
-
-        async def handle_request(route, request):
-            if "WinGoBet" in request.url:
-                try:
-                    if request.post_data_json:
-                        intercepted_data['payload'] = request.post_data_json
-                except: pass
-            await route.continue_()
-            
-        await page.route("**/WinGoBet", handle_request)
-
         try:
-            # ---------------- ১. লগইন ----------------
-            await update_loading(10)
-            await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
+            # ================= ১. লগইন =================
+            await update_loading(10, "OPENING SITE...")
+            await page.goto(SITE_URL, timeout=60000, wait_until="networkidle")
             await page.wait_for_timeout(3000)
 
-            await update_loading(30)
-            try:
-                await page.get_by_placeholder("Please enter the phone number").fill(login_phone)
-                await page.locator('input[type="password"]').first.fill(password)
-            except: pass
+            # জাভাস্ক্রিপ্ট দিয়ে জোরপূর্বক ইনপুট বসানো (Vue/React এর জন্য)
+            await page.evaluate(f"""
+                (function() {{
+                    let inputs = document.querySelectorAll('input');
+                    for (let i = 0; i < inputs.length; i++) {{
+                        if (inputs[i].type === 'text' || inputs[i].type === 'tel') {{
+                            inputs[i].value = '{login_phone}';
+                            inputs[i].dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            inputs[i].dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        }} else if (inputs[i].type === 'password') {{
+                            inputs[i].value = '{password}';
+                            inputs[i].dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            inputs[i].dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        }}
+                    }}
+                }})();
+            """)
+            await page.wait_for_timeout(1000)
 
-            await update_loading(50)
-            try:
-                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000)
-            except:
-                await page.locator('button:has-text("Log in")').last.click(timeout=10000)
-            
-            await update_loading(70)
-            for _ in range(10):
-                await page.evaluate("""
-                    (function() {
-                        let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
-                        for (let el of elements) {
-                            let text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
-                            if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok') {
-                                let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
-                                el.dispatchEvent(event);
-                            }
+            await update_loading(30, "CLICKING LOGIN...")
+            # জাভাস্ক্রিপ্ট দিয়ে Log in বাটনে ক্লিক
+            await page.evaluate("""
+                (function() {
+                    let els = document.querySelectorAll('button, div, span');
+                    for (let el of els) {
+                        let text = (el.innerText || el.textContent || '').trim().toLowerCase();
+                        if (text === 'log in' || text === 'login') {
+                            el.click();
+                            return true;
                         }
-                    })();
-                """)
-                await page.wait_for_timeout(400)
+                    }
+                })();
+            """)
+            
+            # পপআপ হ্যান্ডেল
+            await page.wait_for_timeout(3000)
+            await page.evaluate("""
+                (function() {
+                    let els = document.querySelectorAll('button, div, span');
+                    for (let el of els) {
+                        let text = (el.innerText || el.textContent || '').trim().toLowerCase();
+                        if (text === 'confirm' || text === 'ok' || text === 'close') {
+                            el.click();
+                        }
+                    }
+                })();
+            """)
 
-            await update_loading(85)
-            login_status = "unknown"
-            balance = "0.00"
+            await update_loading(50, "VERIFYING ACCOUNT...")
+            # Account পেজে ক্লিক
+            await page.evaluate("""
+                (function() {
+                    let els = document.querySelectorAll('div, span, a');
+                    for (let el of els) {
+                        if (el.innerText && el.innerText.trim().toLowerCase() === 'account') {
+                            el.click(); return;
+                        }
+                    }
+                })();
+            """)
+            await page.wait_for_timeout(4000) 
 
-            for _ in range(10): 
-                page_text = await page.inner_text("body")
-                if "Wrong account or password" in page_text:
-                    login_status = "failed"
-                    break
-                
-                uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
-                balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
-                
-                if uid_match:
-                    if balance_match: 
-                        balance = balance_match.group(1)
-                    login_status = "success"
-                    break
-                await page.wait_for_timeout(500)
+            # রিড ডেটা
+            page_text = await page.inner_text("body")
+            uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
+            balance_match = re.search(r'Total\s*balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
 
-            await update_loading(100)
-            await asyncio.sleep(0.2)
+            if "Wrong account or password" in page_text:
+                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\nWrong account or password.")
+                await browser.close()
+                return
 
+            if not uid_match:
+                # স্ক্রিনশট নিয়ে পাঠানো (যদি UID না পায়)
+                ss = f"err_{uid}.png"
+                await page.screenshot(path=ss)
+                await ctx.bot.send_photo(chat_id=uid, photo=open(ss, 'rb'), caption="⚠️ UID খুঁজে পাওয়া যায়নি। স্ক্রিনশট দেখুন।")
+                await browser.close()
+                return
+
+            uid_val = uid_match.group(1)
+            balance = balance_match.group(1) if balance_match else "0.00"
+            
+            await update_loading(100, "DONE")
             if loading_msg_id:
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
-
-            if login_status == "failed":
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})")
-                await browser.close()
-                return
 
             state["balance"] = float(balance)
             masked_phone = f"***{phone[-4:]}"
@@ -184,6 +241,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "╚════════════════════════╝\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"☎️ Phone Number\n{masked_phone}\n\n"
+                f"👤 Account UID\n{uid_val}\n\n"
                 f"💰 Account Balance\n৳ {balance}\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "🧠 Analysis Engine:  READY\n"
@@ -199,185 +257,128 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await browser.close()
                     return
 
-            # ---------------- ৪. অটো-বেট লুপ ----------------
+            # ================= ৪. অটো-বেট লুপ =================
+            initial_balance = float(balance)
+            target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
 
             while state["trade_running"]:
                 try:
                     current_bal = state["balance"]
-                    
+                    if current_bal >= target_balance:
+                        await ctx.bot.send_message(chat_id=uid, text=f"🎯 **TARGET REACHED!**\nProfit: ৳ {current_bal - initial_balance:.2f}")
+                        state["trade_running"] = False
+                        break
+
                     if current_step_idx >= len(state['step_amounts']):
-                        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **সব স্টেপ শেষ!**")
+                        await ctx.bot.send_message(chat_id=uid, text="⚠️ **সব স্টেপ শেষ!**")
                         state["trade_running"] = False
                         break
                         
                     bet_amount = float(state['step_amounts'][current_step_idx])
-
-                    if current_bal < bet_amount:
-                        await ctx.bot.send_message(chat_id=uid, text=f"❌ **পর্যাপ্ত ব্যালেন্স নেই!**")
-                        state["trade_running"] = False
-                        break
-
                     choice, current_period = get_history_and_prediction()
 
-                    # টাইমার চেক
-                    logger.info("Waiting for timer (6s-30s)...")
-                    valid_timer = False
-                    timer_val = "0s"
-                    
-                    for _ in range(150): 
-                        now = datetime.now()
-                        seconds = now.second
-                        timer_sec = 30 - (seconds % 30)
-                        if 6 <= timer_sec <= 30:
-                            timer_val = f"{timer_sec}s"
-                            valid_timer = True
-                            break
-                        await asyncio.sleep(0.2)
+                    # হোমে যাওয়া এবং WinGo তে ঢোকা
+                    await page.goto(HOME_URL, wait_until="domcontentloaded")
+                    await page.wait_for_timeout(2000) 
 
-                    if not valid_timer:
-                        await asyncio.sleep(1)
-                        continue
+                    # Lottery ক্লিক
+                    await page.evaluate("""
+                        (function() {
+                            let els = document.querySelectorAll('div, span, a');
+                            for (let el of els) {
+                                if (el.innerText && el.innerText.trim().toLowerCase() === 'lottery') { el.click(); return; }
+                            }
+                        })();
+                    """)
+                    await page.wait_for_timeout(2000)
 
-                    step_plan_str = "┌────────────────────────────────┐\n"
-                    for i, amt in enumerate(state['step_amounts']):
-                        step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
-                    step_plan_str += "└────────────────────────────────┘"
+                    # Win Go ক্লিক
+                    await page.evaluate("""
+                        (function() {
+                            let els = document.querySelectorAll('div, span, a');
+                            for (let el of els) {
+                                if (el.innerText && el.innerText.includes('Win Go') && el.innerText.includes('Guess Number')) { el.click(); return; }
+                            }
+                        })();
+                    """)
+                    await page.wait_for_timeout(4000) 
 
-                    # 💡 মেসেজ পাঠানো (টাইমার ঠিক থাকলে)
-                    pred_msg = None
-                    if state.get("first_bet", True):
-                        await ctx.bot.send_message(chat_id=uid, text=(
-                            "╔════════════════════════════════╗\n"
-                            "   🚀 **AUTO TRADE ACTIVE** 🚀\n"
-                            "╚════════════════════════════════╝\n\n"
-                            f"💰 **Balance** : ৳ {current_bal:.2f}\n"
-                            f"🎯 **Target**  : ৳ {state['target']:.2f} profit\n"
-                            f"📋 **Steps**   : {state['steps']}\n\n"
-                            "📊 **Step Plan:**\n"
-                            f"{step_plan_str}\n\n"
-                            "⏱️ **Current Period**\n"
-                            f"{current_period}\n"
-                            f"██████████ {timer_val}\n\n"
-                            "🧠 _Analysing market..._\n"
-                            "🎬 _Prediction animation → auto bet every period._"
-                        ), parse_mode="Markdown")
-
-                        pred_msg = await ctx.bot.send_message(chat_id=uid, text="━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[░░░░░░░░░░░░] 0%`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏳ _Running 9 layers + backtest..._", parse_mode="Markdown")
-                        
-                        for pct in [45, 85, 100]:
-                            bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
-                            await asyncio.sleep(0.2)
-                            try:
-                                await ctx.bot.edit_message_text(
-                                    chat_id=uid, message_id=pred_msg.message_id,
-                                    text=f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[{bar}] {pct}%`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏳ _Running 9 layers + backtest..._",
-                                    parse_mode="Markdown"
-                                )
-                            except: pass
-                        
-                        await asyncio.sleep(0.3)
-
-                    if pred_msg:
-                        try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
-                        except: pass
-                    
-                    state["first_bet"] = False 
-
-                    # 💡 ৩. Big/Small এ ক্লিক করা (ব্রাউজারে, শুধু সিগনেচার ধরার জন্য)
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                    await page.wait_for_timeout(300)
-                    
+                    # টাইমার স্ক্র্যাপ
+                    timer_val = 1
                     try:
-                        clicked = await page.evaluate(f"""
-                            (() => {{
-                                let els = document.querySelectorAll('div, span, button');
-                                for (let el of els) {{
-                                    if (el.innerText && el.innerText.trim().toUpperCase() === '{choice.upper()}') {{
-                                        let rect = el.getBoundingClientRect();
-                                        if (rect.width > 0 && rect.height > 0) {{
-                                            el.click();
-                                            return true;
-                                        }}
-                                    }}
+                        body_text = await page.evaluate("() => document.body.innerText")
+                        timer_match = re.search(r'0*\s*:\s*(\d{2})', body_text)
+                        if timer_match: timer_val = int(timer_match.group(1))
+                    except: pass
+
+                    # Big / Small ক্লিক (জোরপূর্বক)
+                    clicked = await page.evaluate(f"""
+                        (function() {{
+                            let target = '{choice}'.toUpperCase();
+                            let elements = document.querySelectorAll('div, span, button, p, a');
+                            for (let el of elements) {{
+                                let text = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                if (text === target || text.includes(target)) {{
+                                    el.click(); 
+                                    return true;
                                 }}
-                                return false;
-                            }})()
-                        """)
-                    except: pass
+                            }}
+                            return false;
+                        }})();
+                    """)
 
-                    # মডাল ওপেন হওয়া পর্যন্ত অপেক্ষা
-                    await page.wait_for_timeout(1000)
+                    if not clicked:
+                        ss = f"err_{uid}.png"
+                        await page.screenshot(path=ss)
+                        await ctx.bot.send_photo(chat_id=uid, photo=open(ss, 'rb'), caption=f"⚠️ **{choice} বাটনে ক্লিক করা যাচ্ছে না!**")
+                        raise Exception("Click failed")
 
-                    # Confirm ক্লিক করা
+                    await page.wait_for_timeout(1000) 
                     try:
-                        agree_box = page.locator('text="I agree"').last
-                        if await agree_box.count() > 0 and await agree_box.is_visible():
-                            await agree_box.click(force=True, timeout=1000)
-                        await page.locator('text=/Total amount/i').last.click(force=True, timeout=3000)
+                        await page.locator('text="Confirm"').last.click(timeout=3000)
                     except: pass
 
-                    # 💡 ৪. ইন্টারসেপ্ট করা পেলোড থেকে signature এবং timestamp নেওয়া
-                    await page.wait_for_timeout(1500)
-                    
-                    real_payload = None
-                    if 'payload' in intercepted_data:
-                        real_payload = intercepted_data['payload']
-                        logger.info(f"Successfully captured real payload: {real_payload}")
-                    
-                    if not real_payload:
-                        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **সিগনেচার ক্যাপচার করা যায়নি!**")
-                        await asyncio.sleep(2)
-                        continue
+                    # মেসেজ পাঠানো
+                    report_msg = await ctx.bot.send_message(chat_id=uid, text="Sending Analysis Report...")
+                    asyncio.create_task(update_live_timer(ctx, uid, report_msg.message_id, timer_val, current_period, choice, bet_amount, current_bal, current_step_idx))
 
-                    # 💡 ৫. ANALYSIS REPORT মেসেজ 
-                    await ctx.bot.send_message(chat_id=uid, text=(
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "🤖 NEW TRADE PLACED (Hybrid)\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"⏱️ Period    : {real_payload.get('issueNumber')}\n"
-                        f"⏱️ Timer     : {timer_val} remaining\n"
-                        f"🔵 PREDICTION : **{choice}**\n"
-                        f"💵 Amount     : ৳ {bet_amount:.2f}\n"
-                        f"💰 Balance    : ৳ {current_bal:.2f}\n"
-                        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "⏳ Waiting for result..."
-                    ), parse_mode="Markdown")
-
-                    # নতুন রাউন্ডের জন্য অপেক্ষা
                     await asyncio.sleep(32)
+
+                    # রেজাল্ট চেক
+                    await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
+                    await page.wait_for_timeout(3000) 
+                    new_text = await page.evaluate("() => document.body.innerText")
+                    new_bal_match = re.search(r'Total\s*balance\s*[৳:]?\s*([\d.]+)', new_text, re.IGNORECASE)
                     
-                    # রেজাল্ট চেক (আপাতত স্কিপ)
-                    current_step_idx = 0 
-                    
+                    if new_bal_match:
+                        new_bal = float(new_bal_match.group(1))
+                        if new_bal > current_bal:
+                            state["balance"] = new_bal
+                            current_step_idx = 0
+                            await ctx.bot.send_message(chat_id=uid, text=f"🟢 **WIN!**\nBalance: ৳ {new_bal:.2f}")
+                        else:
+                            state["balance"] = new_bal
+                            current_step_idx += 1
+                            await ctx.bot.send_message(chat_id=uid, text=f"🔴 **LOSS!**\nBalance: ৳ {new_bal:.2f}\nNext Step: {current_step_idx+1}")
+
                 except Exception as e:
-                    logger.error(f"Betting error: {e}")
-                    await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **TRADE STOPPED**\n{str(e)[:50]}")
+                    await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **TRADE STOPPED**\nError: {str(e)[:50]}")
                     state["trade_running"] = False
                     break
-                    
+
         except Exception as e:
             if loading_msg_id:
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
-            await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **Browser Error:**\n`{str(e)[:150]}`", parse_mode="Markdown")
+            await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **FATAL ERROR:**\n`{str(e)[:150]}`", parse_mode="Markdown")
         finally:
             await browser.close()
 
-# হ্যান্ডলারগুলো
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    state = get_state(uid)
-    state["first_bet"] = True 
-    
-    welcome_text = (
-        "🧠 **BD=WIN~GO=AUTO~BET (HYBRID)**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🔐 Access  : Private\n"
-        "🔴 Status  : Not Logged In\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "👇 Press the button below to LOGIN"
-    )
+    get_state(uid)["first_bet"] = True
+    welcome_text = "👇 **Press the button below to LOGIN**"
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
     await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
@@ -389,7 +390,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if state.get("awaiting") == "phone":
         state["temp_phone"] = text
         state["awaiting"] = "password"
-        await update.message.reply_text(f"☎️ Number : {text}\n\n🔑 Now enter your password:")
+        await update.message.reply_text(f"📱 Number: {text}\n\n🔑 Enter Password:")
         return
 
     if state.get("awaiting") == "password":
@@ -399,63 +400,50 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except: pass
         
         if state.get("task"): state["task"].cancel()
-        state["first_bet"] = True 
-        loading_msg = await update.message.reply_text("🔄 **CONNECTING...**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
-        state["task"] = asyncio.create_task(playwright_login_and_bet(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"]))
+        state["first_bet"] = True
+        loading_msg = await update.message.reply_text("🔄 **CONNECTING...**\n[░░░░░░░░░░] 0%")
+        state["task"] = asyncio.create_task(playwright_login_and_bet(uid, ctx, loading_msg.message_id, state["temp_phone"], text))
         return
         
     if text == "🚀 START YOUR TARGET":
         state["awaiting"] = "target"
-        await update.message.reply_text("🎯 Enter your TARGET profit amount (in ৳):")
+        await update.message.reply_text("🎯 Enter TARGET profit amount:")
         return
         
     if state.get("awaiting") == "target":
         try:
             state["target"] = float(text)
             state["awaiting"] = "steps"
-            await update.message.reply_text(f"🎯 Target: ৳ {state['target']}\n\n🚀 Enter your STEP COUNT:")
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! শুধু সংখ্যা দিন।")
+            await update.message.reply_text("🚀 Enter STEP COUNT (e.g. 5):")
+        except: await update.message.reply_text("❌ Number only!")
         return
         
     if state.get("awaiting") == "steps":
         try:
             state["steps"] = int(text)
-            state["step_amounts"] = [] 
-            state["current_step"] = 1
+            state["step_amounts"] = []
+            state["current_step"] = 0
             state["awaiting"] = "step_amount"
-            await update.message.reply_text(f"💵 Step {state['current_step']} — bet amount? (in ৳)")
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! ১-৫০ এর মধ্যে সংখ্যা দিন।")
+            await update.message.reply_text(f"💵 Step 1 — amount?")
+        except: await update.message.reply_text("❌ Number only!")
         return
 
     if state.get("awaiting") == "step_amount":
         try:
-            amount = float(text)
-            state["step_amounts"].append(amount)
+            state["step_amounts"].append(float(text))
             state["current_step"] += 1
-            if state["current_step"] <= state["steps"]:
-                await update.message.reply_text(f"💵 Step {state['current_step']} — bet amount? (in ৳)")
+            if state["current_step"] < state["steps"]:
+                await update.message.reply_text(f"💵 Step {state['current_step']+1} — amount?")
             else:
                 state["awaiting"] = None
-                inline_kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🚀 START TRADE", callback_data="start_trade_btn"), 
-                     InlineKeyboardButton("❌ CANCEL", callback_data="cancel_trade_btn")]
-                ])
-                await update.message.reply_text("⚙️ Configuration Done. Press START TRADE.", reply_markup=inline_kb)
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! শুধু সংখ্যা দিন।")
+                inline_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 START TRADE", callback_data="trade")]])
+                await update.message.reply_text("✅ Steps saved!\n👇 Press START TRADE to begin.", reply_markup=inline_kb)
+        except: await update.message.reply_text("❌ Number only!")
         return
 
     if text == "🛑 STOP TRADE":
         state["trade_running"] = False
-        await update.message.reply_text("🛑 TRADE STOPPED")
-        return
-    if text == "🚪 LOGOUT":
-        state["trade_running"] = False
-        state["temp_phone"] = ""
-        state["temp_password"] = ""
-        await update.message.reply_text("🚪 LOGGED OUT")
+        await update.message.reply_text("🛑 STOPPED")
         return
 
 async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -463,28 +451,12 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     uid = update.effective_user.id
     state = get_state(uid)
-    data = query.data
-    if data == "start_login":
+    
+    if query.data == "start_login":
         state["awaiting"] = "phone"
-        await ctx.bot.send_message(chat_id=uid, text="📱 Enter your HGNICE phone number:")
-    elif data == "start_trade_btn":
+        await ctx.bot.send_message(chat_id=uid, text="📱 Enter your phone number:")
+    elif query.data == "trade":
         state["trade_running"] = True
-    elif data == "cancel_trade_btn":
-        state["trade_running"] = False
-        await query.edit_message_text("❌ **TRADE CANCELLED**")
-
-async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    state = get_state(uid)
-    state["trade_running"] = False
-    if state.get("task"): state["task"].cancel()
-    user_state[uid] = {
-        "awaiting": None, "temp_phone": "", "temp_password": "",
-        "balance": "0.00", "target": 0, 
-        "steps": 0, "step_amounts": [], "current_step": 0, "trade_running": False, "task": None,
-        "wins": 0, "losses": 0, "total_trades": 0, "first_bet": True, "token": ""
-    }
-    await update.message.reply_text("🔄 সব ডেটা রিসেট হয়েছে। /start দিন।")
 
 def main():
     if not BOT_TOKEN:
@@ -492,7 +464,6 @@ def main():
         return
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     print("🤖 Bot started...")
