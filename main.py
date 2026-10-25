@@ -346,7 +346,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
                     step_plan_str += "└────────────────────────────────┘"
 
-                    # 💡 ২. প্রথমবার AUTO TRADE ACTIVE এবং GENERATING PREDICTION মেসেজ (সাথে সাথে)
+                    # 💡 ২. প্রথমবার AUTO TRADE ACTIVE এবং GENERATING PREDICTION মেসেজ (বাটনে চাপ দেওয়ার সাথে সাথে)
                     pred_msg = None
                     if state.get("first_bet", True):
                         await ctx.bot.send_message(chat_id=uid, text=(
@@ -387,20 +387,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৩. শুধু Big অথবা Small এ ক্লিক করা (স্ক্রিনশট সহ এরর হ্যান্ডলিং)
+                    # 💡 ৩. শুধু Big অথবা Small এ ক্লিক করা
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(300)
                     
-                    click_success = False
                     try:
                         if choice.upper() == "BIG":
                             await page.locator('div, button, span').filter(has_text=re.compile(r'^Big$', re.IGNORECASE)).last.click(force=True, timeout=3000)
                         else:
                             await page.locator('div, button, span').filter(has_text=re.compile(r'^Small$', re.IGNORECASE)).last.click(force=True, timeout=3000)
-                        click_success = True
                     except Exception as e:
                         logger.error(f"Big/Small Click Error: {e}")
-                        # স্ক্রিনশট নেওয়া
                         stuck_path = f"stuck_bigsmall_{uid}.png"
                         await page.screenshot(path=stuck_path)
                         await ctx.bot.send_photo(
@@ -411,17 +408,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
-                    # 💡 ৪. সাথে সাথে Total amount এ ক্লিক করা (স্ক্রিনশট সহ এরর হ্যান্ডলিং)
-                    total_amount_success = False
+                    # 💡 ৪. সাথে সাথে Total amount এ ক্লিক করা
                     try:
                         agree = page.locator('text="I agree"')
                         if await agree.count() > 0 and await agree.first.is_visible():
                             await agree.first.click(force=True)
                         await page.locator('text=/Total amount/i').last.click(force=True, timeout=5000)
-                        total_amount_success = True
                     except Exception as e:
                         logger.error(f"Total Amount Click Error: {e}")
-                        # স্ক্রিনশট নেওয়া
                         stuck_path = f"stuck_total_{uid}.png"
                         await page.screenshot(path=stuck_path)
                         await ctx.bot.send_photo(
