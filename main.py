@@ -18,7 +18,6 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SITE_URL = "https://www.hgnice.vip/#/login"
 HOME_URL = "https://www.hgnice.vip/#/"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
-BET_API = "https://api.ar-lottery01.com/api/Lottery/WinGoBet"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -38,7 +37,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# 💡 ২. API থেকে রেজাল্ট ও প্রেডিকশন বের করার ফাংশন
+# 💡 ২. প্রেডিকশন বের করার ফাংশন
 # ───────────────────────────────────────────
 def get_history_and_prediction():
     try:
@@ -69,41 +68,6 @@ def get_history_and_prediction():
     except Exception as e:
         logger.error(f"History API error: {e}")
         return "BIG", "Unknown"
-
-# ───────────────────────────────────────────
-# 💡 ৩. API দিয়ে বেট করার ফাংশন
-# ───────────────────────────────────────────
-def place_bet_via_api(token, issue_number, amount, choice, signature, timestamp):
-    bet_content = "BigSmall_Big" if choice.upper() == "BIG" else "BigSmall_Small"
-    
-    payload = {
-        "gameCode": "WinGo_30S",
-        "issueNumber": str(issue_number),
-        "amount": int(amount),
-        "betMultiple": 1,
-        "betContent": bet_content,
-        "language": "en",
-        "random": random.randint(100000000000, 999999999999),
-        "signature": signature,
-        "timestamp": timestamp
-    }
-    
-    headers = {
-        'authority': 'api.ar-lottery01.com',
-        'accept': 'application/json',
-        'authorization': f'Bearer {token}',
-        'content-type': 'application/json',
-        'origin': 'https://www.hgnice.vip',
-        'referer': 'https://www.hgnice.vip/',
-        'user-agent': 'Mozilla/5.0'
-    }
-
-    try:
-        response = requests.post(BET_API, headers=headers, json=payload, timeout=10)
-        return response.json()
-    except Exception as e:
-        logger.error(f"Bet API Error: {e}")
-        return None
 
 # ───────────────────────────────────────────
 # ৪. লগইন এবং অটো-বেট ফাংশন (হাইব্রিড)
