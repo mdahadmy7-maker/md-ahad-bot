@@ -81,7 +81,57 @@ def get_history_and_prediction():
         return random.choice(["BIG", "SMALL"]), fallback_period
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন
+# 💡 ৩. WinGo পেজে যাওয়ার আলাদা ফাংশন (পপআপ ব্লক দূর করতে)
+# ───────────────────────────────────────────
+async def navigate_to_win_go(page):
+    for attempt in range(3):
+        try:
+            await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
+            await page.wait_for_timeout(3000)
+            
+            # পপআপ ক্লোজ করা
+            for _ in range(5):
+                await page.evaluate("""
+                    (function() {
+                        let elements = document.querySelectorAll('button, div, span, a, i');
+                        for (let el of elements) {
+                            let text = (el.innerText || el.textContent || '').trim().toLowerCase();
+                            if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok' || text === '×') {
+                                let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
+                                el.dispatchEvent(event);
+                            }
+                        }
+                    })();
+                """)
+                await page.wait_for_timeout(500)
+
+            try:
+                await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
+            except:
+                await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if((el.innerText||'').toLowerCase().includes('lottery')) { el.click(); return true; } } return false; }""")
+            
+            await page.wait_for_timeout(2500)
+            
+            try:
+                win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
+                await win_go_card.click(timeout=5000, force=True)
+            except:
+                await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } return false; }""")
+            
+            await page.wait_for_timeout(3000)
+            
+            body_text = await page.evaluate("() => document.body.innerText")
+            if "Time remaining" in body_text or "WinGo" in body_text:
+                return True
+                
+        except Exception as e:
+            logger.error(f"Navigation attempt {attempt+1} failed: {e}")
+            await page.wait_for_timeout(2000)
+            
+    return False
+
+# ───────────────────────────────────────────
+# ৪. লগইন এবং অটো-বেট ফাংশন
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -219,26 +269,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # 💡 একবারই WinGo পেজে যাবে, বারবার রিলোড হবে না
-            await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(2000) 
+            # 💡 WinGo পেজে ঢোকার চেষ্টা
+            await ctx.bot.send_message(chat_id=uid, text="⏳ **WinGo পেজে ঢোকার চেষ্টা করছি...** অপেক্ষা করুন।")
+            nav_success = await navigate_to_win_go(page)
             
-            for _ in range(3):
-                await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span, a')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
-                await page.wait_for_timeout(500)
-                
-            try:
-                await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
-            except:
-                await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if((el.innerText||'').toLowerCase().includes('lottery')) { el.click(); return true; } } return false; }""")
-            await page.wait_for_timeout(2000)
-            
-            try:
-                win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
-                await win_go_card.click(timeout=5000, force=True)
-            except:
-                await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } return false; }""")
-            await page.wait_for_timeout(3000) 
+            if not nav_success:
+                await ctx.bot.send_message(chat_id=uid, text="❌ **WinGo পেজে ঢুকতে পারছি না!**\nসম্ভবত সাইট স্লো বা পপআপ আটকে আছে। বট বন্ধ করা হচ্ছে।")
+                state["trade_running"] = False
+                await browser.close()
+                return
+
+            await ctx.bot.send_message(chat_id=uid, text="✅ **WinGo পেজে ঢুকে গেছি!**\n\nএখন বট টাইমার চেক করে বিট করা শুরু করবে।")
 
             while state["trade_running"]:
                 try:
@@ -276,7 +317,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     choice, current_period = get_history_and_prediction()
 
                     # 💡 ১. টাইমার চেক (৬ থেকে ৩০)
-                    logger.info("Waiting for new round to start...")
+                    logger.info("Waiting for timer (6s-30s)...")
                     timer_val = "0s"
                     valid_timer = False
                     
@@ -284,7 +325,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
                             
-                            # 0 0 পপআপ থাকলে স্কিপ করবে
                             if "Select Big" in body_text or "Total amount" in body_text or "0 0" == body_text.strip():
                                 await asyncio.sleep(0.2)
                                 continue
@@ -350,9 +390,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ২. Big/Small ক্লিক করা (শুধুমাত্র একটাতে)
+                    # 💡 ২. শুধু Big অথবা Small এ ক্লিক করা
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                    await page.wait_for_timeout(500)
+                    await page.wait_for_timeout(300)
                     
                     try:
                         if choice.upper() == "BIG":
@@ -368,7 +408,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         else:
                             await page.mouse.click(309, 890)
 
-                    # 💡 ৩. সাথে সাথে Total amount এ ক্লিক করা (কোনো অপেক্ষা নেই)
+                    # 💡 ৩. সাথে সাথে Total amount এ ক্লিক করা
                     try:
                         # I agree চেকবক্স চেক করা
                         agree = page.locator('text="I agree"')
@@ -502,15 +542,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             ))
 
                     # পরের রাউন্ডের জন্য আবার WinGo পেজে ফিরে যাবে
-                    await page.goto(HOME_URL, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(1500)
-                    try:
-                        await page.locator('text="Lottery"').first.click(timeout=3000, force=True)
-                        await page.wait_for_timeout(1000)
-                        win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
-                        await win_go_card.click(timeout=3000, force=True)
-                    except: pass
-                    await page.wait_for_timeout(2000)
+                    await navigate_to_win_go(page)
 
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
