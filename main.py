@@ -81,7 +81,7 @@ def get_history_and_prediction():
         return random.choice(["BIG", "SMALL"]), fallback_period
 
 # ───────────────────────────────────────────
-# 💡 ৩. WinGo পেজে যাওয়ার আলাদা ফাংশন (পপআপ ব্লক দূর করতে)
+# 💡 ৩. WinGo পেজে যাওয়ার ফাংশন
 # ───────────────────────────────────────────
 async def navigate_to_win_go(page):
     for attempt in range(3):
@@ -89,7 +89,6 @@ async def navigate_to_win_go(page):
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(3000)
             
-            # পপআপ ক্লোজ করা
             for _ in range(5):
                 await page.evaluate("""
                     (function() {
@@ -269,17 +268,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # 💡 WinGo পেজে ঢোকার চেষ্টা
-            await ctx.bot.send_message(chat_id=uid, text="⏳ **WinGo পেজে ঢোকার চেষ্টা করছি...** অপেক্ষা করুন।")
+            # 💡 WinGo পেজে ঢোকার চেষ্টা (কোনো মেসেজ ছাড়া)
             nav_success = await navigate_to_win_go(page)
             
             if not nav_success:
-                await ctx.bot.send_message(chat_id=uid, text="❌ **WinGo পেজে ঢুকতে পারছি না!**\nসম্ভবত সাইট স্লো বা পপআপ আটকে আছে। বট বন্ধ করা হচ্ছে।")
+                await ctx.bot.send_message(chat_id=uid, text="❌ **WinGo পেজে ঢুকতে পারছি না!** বট বন্ধ করা হচ্ছে।")
                 state["trade_running"] = False
                 await browser.close()
                 return
-
-            await ctx.bot.send_message(chat_id=uid, text="✅ **WinGo পেজে ঢুকে গেছি!**\n\nএখন বট টাইমার চেক করে বিট করা শুরু করবে।")
 
             while state["trade_running"]:
                 try:
@@ -350,6 +346,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
                     step_plan_str += "└────────────────────────────────┘"
 
+                    # 💡 ২. প্রথমবার AUTO TRADE ACTIVE এবং GENERATING PREDICTION মেসেজ
                     pred_msg = None
                     if state.get("first_bet", True):
                         await ctx.bot.send_message(chat_id=uid, text=(
@@ -390,48 +387,31 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ২. শুধু Big অথবা Small এ ক্লিক করা
+                    # 💡 ৩. শুধু Big অথবা Small এ ক্লিক করা
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(300)
                     
                     try:
                         if choice.upper() == "BIG":
-                            # কেবল বিগ বাটনে ক্লিক করবে
                             await page.locator('div, button, span').filter(has_text=re.compile(r'^Big$', re.IGNORECASE)).last.click(force=True, timeout=3000)
                         else:
-                            # কেবল স্মল বাটনে ক্লিক করবে
                             await page.locator('div, button, span').filter(has_text=re.compile(r'^Small$', re.IGNORECASE)).last.click(force=True, timeout=3000)
                     except:
-                        # ফলব্যাক: যদি টেক্সট না পায়, তবে নির্দিষ্ট কোঅর্ডিনেটে ক্লিক করবে
                         if choice.upper() == "BIG":
                             await page.mouse.click(103, 890)
                         else:
                             await page.mouse.click(309, 890)
 
-                    # 💡 ৩. সাথে সাথে Total amount এ ক্লিক করা
+                    # 💡 ৪. সাথে সাথে Total amount এ ক্লিক করা
                     try:
-                        # I agree চেকবক্স চেক করা
                         agree = page.locator('text="I agree"')
                         if await agree.count() > 0 and await agree.first.is_visible():
                             await agree.first.click(force=True)
-
-                        # Total amount বাটনে ক্লিক করা (Playwright নিজেই অটো-ওয়েট করবে)
                         await page.locator('text=/Total amount/i').last.click(force=True, timeout=5000)
                     except Exception as e:
                         logger.error(f"Error clicking Total Amount: {e}")
 
-                    # 💡 ৪. ২ সেকেন্ড অপেক্ষা করে স্ক্রিনশট নেওয়া (যাতে 0 0 পপআপ চলে যায়)
-                    await page.wait_for_timeout(2000)
-                    proof_path = f"proof_success_{uid}.png"
-                    await page.screenshot(path=proof_path)
-                    
-                    await ctx.bot.send_photo(
-                        chat_id=uid, 
-                        photo=open(proof_path, 'rb'), 
-                        caption=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice}**\n💵 Amount: ৳ {bet_amount:.2f}\n📱 স্ক্রিনশটে দেখুন সাইটে কি হয়েছে ↓"
-                    )
-
-                    # 💡 ৫. ANALYSIS REPORT মেসেজ
+                    # 💡 ৫. ANALYSIS REPORT মেসেজ (Total amount এ ক্লিক করার পর)
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
@@ -462,9 +442,20 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
+                    # 💡 ৬. ২ সেকেন্ড অপেক্ষা করে স্ক্রিনশট নেওয়া
+                    await page.wait_for_timeout(2000)
+                    proof_path = f"proof_success_{uid}.png"
+                    await page.screenshot(path=proof_path)
+                    
+                    await ctx.bot.send_photo(
+                        chat_id=uid, 
+                        photo=open(proof_path, 'rb'), 
+                        caption=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice}**\n💵 Amount: ৳ {bet_amount:.2f}\n📱 স্ক্রিনশটে দেখুন সাইটে কি হয়েছে ↓"
+                    )
+
                     await asyncio.sleep(32)
 
-                    # 💡 ৬. রেজাল্ট চেক
+                    # 💡 ৭. রেজাল্ট চেক
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
                     await page.wait_for_timeout(2000) 
                     
