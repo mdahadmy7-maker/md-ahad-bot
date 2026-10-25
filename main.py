@@ -38,7 +38,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# 💡 ২. প্রেডিকশন বের করার ফাংশন
+# 💡 ২. API থেকে রেজাল্ট ও প্রেডিকশন বের করার ফাংশন
 # ───────────────────────────────────────────
 def get_history_and_prediction():
     try:
@@ -71,16 +71,10 @@ def get_history_and_prediction():
         return "BIG", "Unknown"
 
 # ───────────────────────────────────────────
-# 💡 ৩. বেট প্লেস করার ফাংশন (API দিয়ে)
+# 💡 ৩. API দিয়ে বেট করার ফাংশন
 # ───────────────────────────────────────────
-def place_bet_via_api(token, issue_number, amount, choice):
+def place_bet_via_api(token, issue_number, amount, choice, signature, timestamp):
     bet_content = "BigSmall_Big" if choice.upper() == "BIG" else "BigSmall_Small"
-    timestamp = int(time.time())
-    random_num = random.randint(100000000000, 999999999999)
-    
-    # ⚠️ দ্রষ্টব্য: এখানে আপনার পুরানো সিগনেচার ব্যবহার করা হলো। 
-    # এটি কাজ না করলে আমাদের সঠিক সিগনেচার বের করতে হবে।
-    signature = "3A050CD5B2B57B3DB446427B5571C0BC" 
     
     payload = {
         "gameCode": "WinGo_30S",
@@ -89,7 +83,7 @@ def place_bet_via_api(token, issue_number, amount, choice):
         "betMultiple": 1,
         "betContent": bet_content,
         "language": "en",
-        "random": random_num,
+        "random": random.randint(100000000000, 999999999999),
         "signature": signature,
         "timestamp": timestamp
     }
@@ -112,7 +106,7 @@ def place_bet_via_api(token, issue_number, amount, choice):
         return None
 
 # ───────────────────────────────────────────
-# ৪. লগইন এবং অটো-বেট ফাংশন
+# ৪. লগইন এবং অটো-বেট ফাংশন (হাইব্রিড)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -137,8 +131,20 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         )
         page = await context.new_page()
         
+        intercepted_data = {}
+        
+        async def handle_request(route, request):
+            if "WinGoBet" in request.url:
+                try:
+                    if request.post_data_json:
+                        intercepted_data['payload'] = request.post_data_json
+                except: pass
+            await route.continue_()
+            
+        await page.route("**/WinGoBet", handle_request)
+
         try:
-            # ---------------- ১. লগইন (ব্রাউজার দিয়ে) ----------------
+            # ---------------- ১. লগইন ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(3000)
@@ -191,10 +197,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     break
                 await page.wait_for_timeout(500)
 
-            await update_loading(95)
-            # টোকেন সংগ্রহ করা
-            token = await page.evaluate("() => localStorage.getItem('access_token') || localStorage.getItem('token') || ''")
-
             await update_loading(100)
             await asyncio.sleep(0.2)
 
@@ -202,18 +204,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
 
-            if login_status == "failed" or not token:
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\n\nটোকেন পাওয়া যায়নি।")
+            if login_status == "failed":
+                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})")
                 await browser.close()
                 return
 
-            state["token"] = token
             state["balance"] = float(balance)
-            
-            # 💡 ব্রাউজার বন্ধ করে দিচ্ছি, এখন শুধু API দিয়ে কাজ হবে
-            await browser.close()
-
             masked_phone = f"***{phone[-4:]}"
+            
             dashboard_msg = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -232,9 +230,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             while not state.get("trade_running", False):
                 await asyncio.sleep(1)
                 if state.get("task") != asyncio.current_task():
+                    await browser.close()
                     return
 
-            # ---------------- ২. অটো-বেট লুপ (API দিয়ে) ----------------
+            # ---------------- ৪. অটো-বেট লুপ ----------------
             current_step_idx = 0
 
             while state["trade_running"]:
@@ -255,7 +254,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 টাইমার চেক
+                    # টাইমার চেক
                     logger.info("Waiting for timer (6s-30s)...")
                     valid_timer = False
                     timer_val = "0s"
@@ -318,20 +317,59 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 API দিয়ে বেট করা
-                    api_response = place_bet_via_api(state["token"], current_period, bet_amount, choice)
+                    # 💡 ৩. Big/Small এ ক্লিক করা (ব্রাউজারে, শুধু সিগনেচার ধরার জন্য)
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                    await page.wait_for_timeout(300)
                     
-                    if not api_response or not api_response.get("success"):
-                        error_msg = api_response.get("msg", "Unknown Error") if api_response else "No Response"
-                        await ctx.bot.send_message(chat_id=uid, text=f"❌ **API BET FAILED!**\nError: {error_msg}")
-                        state["trade_running"] = False
-                        break
+                    try:
+                        clicked = await page.evaluate(f"""
+                            (() => {{
+                                let els = document.querySelectorAll('div, span, button');
+                                for (let el of els) {{
+                                    if (el.innerText && el.innerText.trim().toUpperCase() === '{choice.upper()}') {{
+                                        let rect = el.getBoundingClientRect();
+                                        if (rect.width > 0 && rect.height > 0) {{
+                                            el.click();
+                                            return true;
+                                        }}
+                                    }}
+                                }}
+                                return false;
+                            }})()
+                        """)
+                    except: pass
 
+                    # মডাল ওপেন হওয়া পর্যন্ত অপেক্ষা
+                    await page.wait_for_timeout(1000)
+
+                    # Confirm ক্লিক করা
+                    try:
+                        agree_box = page.locator('text="I agree"').last
+                        if await agree_box.count() > 0 and await agree_box.is_visible():
+                            await agree_box.click(force=True, timeout=1000)
+                        await page.locator('text=/Total amount/i').last.click(force=True, timeout=3000)
+                    except: pass
+
+                    # 💡 ৪. ইন্টারসেপ্ট করা পেলোড থেকে signature এবং timestamp নেওয়া
+                    await page.wait_for_timeout(1500)
+                    
+                    real_payload = None
+                    if 'payload' in intercepted_data:
+                        real_payload = intercepted_data['payload']
+                        logger.info(f"Successfully captured real payload: {real_payload}")
+                    
+                    if not real_payload:
+                        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **সিগনেচার ক্যাপচার করা যায়নি!**")
+                        await asyncio.sleep(2)
+                        continue
+
+                    # 💡 ৫. ANALYSIS REPORT মেসেজ 
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        "🤖 NEW TRADE PLACED (API)\n"
+                        "🤖 NEW TRADE PLACED (Hybrid)\n"
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"⏱️ Period    : {current_period}\n"
+                        f"⏱️ Period    : {real_payload.get('issueNumber')}\n"
+                        f"⏱️ Timer     : {timer_val} remaining\n"
                         f"🔵 PREDICTION : **{choice}**\n"
                         f"💵 Amount     : ৳ {bet_amount:.2f}\n"
                         f"💰 Balance    : ৳ {current_bal:.2f}\n"
@@ -342,8 +380,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # নতুন রাউন্ডের জন্য অপেক্ষা
                     await asyncio.sleep(32)
                     
-                    # রেজাল্ট চেক করার জন্য ব্যালেন্স আপডেট (আপাতত স্কিপ)
-                    current_step_idx = 0 # যদি জিতে যায় তবে ১ম স্টেপে ফিরবে
+                    # রেজাল্ট চেক (আপাতত স্কিপ)
+                    current_step_idx = 0 
                     
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
@@ -356,6 +394,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
             await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **Browser Error:**\n`{str(e)[:150]}`", parse_mode="Markdown")
+        finally:
+            await browser.close()
 
 # হ্যান্ডলারগুলো
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
@@ -364,7 +404,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state["first_bet"] = True 
     
     welcome_text = (
-        "🧠 **BD=WIN~GO=AUTO~BET (HYBRID VERSION)**\n"
+        "🧠 **BD=WIN~GO=AUTO~BET (HYBRID)**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🔐 Access  : Private\n"
         "🔴 Status  : Not Logged In\n"
