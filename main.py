@@ -679,7 +679,4 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             target_amount = float(text)
             state["target"] = target_amount
             balance = float(state.get('balance', '0.00'))
-            stop_at = balance + target_amount
-            target_set_msg = (
-                "╔════════════════════════╗\n"
-                "║   🎯 TARGET SET
+            stop
