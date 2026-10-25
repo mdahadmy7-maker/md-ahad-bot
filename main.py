@@ -676,4 +676,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         
     if state.get("awaiting") == "target":
         try:
-           
+            target_amount = float(text)
+            state["target"] = target_amount
+            balance = float(state.get('balance', '
