@@ -18,6 +18,7 @@ BOT_TOKEN = os.environ.get("BOT_TOKEN")
 SITE_URL = "https://www.hgnice.vip/#/login"
 HOME_URL = "https://www.hgnice.vip/#/"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
+BET_API = "https://api.ar-lottery01.com/api/Lottery/WinGoBet"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -95,8 +96,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         )
         page = await context.new_page()
         
+        # ইন্টারসেপ্ট ভেরিয়েবল
         intercepted_data = {}
-        
+
         async def handle_request(route, request):
             if "WinGoBet" in request.url:
                 try:
@@ -242,6 +244,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
                     step_plan_str += "└────────────────────────────────┘"
 
+                    # 💡 মেসেজ পাঠানো (টাইমার ঠিক থাকলে)
                     pred_msg = None
                     if state.get("first_bet", True):
                         await ctx.bot.send_message(chat_id=uid, text=(
@@ -315,7 +318,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     except: pass
 
                     # 💡 ৪. ইন্টারসেপ্ট করা পেলোড থেকে signature এবং timestamp নেওয়া
-                    await page.wait_for_timeout(1500)
+                    await page.wait_for_timeout(1500) # রিকোয়েস্ট ফায়ার হওয়ার জন্য অপেক্ষা
                     
                     real_payload = None
                     if 'payload' in intercepted_data:
