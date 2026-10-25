@@ -275,32 +275,41 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. ফাস্ট টাইমার চেক (নতুন রাউন্ড শুরু হওয়া মাত্রই ক্লিক করবে)
+                    # 💡 ১. টাইমার চেক (৬ থেকে ৩০)
                     logger.info("Waiting for new round to start...")
                     timer_val = "0s"
-                    for _ in range(350): # ৩৫ সেকেন্ড পর্যন্ত অপেক্ষা করবে
+                    valid_timer = False
+                    
+                    for _ in range(150): 
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
+                            
                             # 0 0 পপআপ থাকলে স্কিপ করবে
-                            if "0 0" in body_text and "Time remaining" not in body_text:
-                                await asyncio.sleep(0.1)
+                            if "Select Big" in body_text or "Total amount" in body_text or "0 0" == body_text.strip():
+                                await asyncio.sleep(0.2)
                                 continue
                                 
                             match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
                             if match:
                                 sec = int(match.group(1))
-                                if 25 <= sec <= 29: # ২৯ বা ২৮ সেকেন্ডে গেলেই সাথে সাথে বিট করবে
+                                if 6 <= sec <= 30: 
                                     timer_val = f"{sec}s"
+                                    valid_timer = True
+                                    break
+                                elif sec < 6:
                                     break
                         except: pass
-                        await asyncio.sleep(0.1) # খুব দ্রুত চেক করবে
+                        await asyncio.sleep(0.2)
+
+                    if not valid_timer:
+                        await asyncio.sleep(2)
+                        continue
 
                     step_plan_str = "┌────────────────────────────────┐\n"
                     for i, amt in enumerate(state['step_amounts']):
                         step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
                     step_plan_str += "└────────────────────────────────┘"
 
-                    # 💡 ২. প্রথমবার AUTO TRADE ACTIVE মেসেজ
                     pred_msg = None
                     if state.get("first_bet", True):
                         await ctx.bot.send_message(chat_id=uid, text=(
@@ -341,74 +350,37 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৩. সুপার ফাস্ট Big/Small ক্লিক (JS দিয়ে সরাসরি)
+                    # 💡 ২. Big/Small ক্লিক করা (শুধুমাত্র একটাতে)
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                    await page.wait_for_timeout(200)
+                    await page.wait_for_timeout(500)
                     
-                    js_click_script = f"""
-                    (() => {{
-                        let els = document.querySelectorAll('div, span, button');
-                        for (let el of els) {{
-                            if (el.innerText && el.innerText.trim().toUpperCase() === '{choice.upper()}') {{
-                                let rect = el.getBoundingClientRect();
-                                if (rect.width > 0 && rect.height > 0) {{
-                                    el.click();
-                                    return true;
-                                }}
-                            }}
-                        }}
-                        return false;
-                    }})()
-                    """
-                    clicked = await page.evaluate(js_click_script)
-                    
-                    if not clicked:
-                        try:
-                            if choice.upper() == "BIG":
-                                await page.mouse.click(103, 890)
-                            else:
-                                await page.mouse.click(309, 890)
-                        except: pass
-
-                    # 💡 ৪. মডাল ওপেন হওয়া পর্যন্ত দ্রুত অপেক্ষা
-                    await page.wait_for_timeout(1000)
-
-                    # 💡 ৫. মডালে অ্যামাউন্ট বসানো এবং Confirm (Total amount) ক্লিক করা
                     try:
-                        inputs = await page.locator('input[type="text"], input[type="number"]').all()
-                        for inp in inputs:
-                            if await inp.is_visible():
-                                await inp.click(force=True)
-                                await page.keyboard.press("Control+A")
-                                await page.keyboard.press("Backspace")
-                                await inp.type(str(int(bet_amount)), delay=20)
-                                break
-                    except: pass
+                        if choice.upper() == "BIG":
+                            # কেবল বিগ বাটনে ক্লিক করবে
+                            await page.locator('div, button, span').filter(has_text=re.compile(r'^Big$', re.IGNORECASE)).last.click(force=True, timeout=3000)
+                        else:
+                            # কেবল স্মল বাটনে ক্লিক করবে
+                            await page.locator('div, button, span').filter(has_text=re.compile(r'^Small$', re.IGNORECASE)).last.click(force=True, timeout=3000)
+                    except:
+                        # ফলব্যাক: যদি টেক্সট না পায়, তবে নির্দিষ্ট কোঅর্ডিনেটে ক্লিক করবে
+                        if choice.upper() == "BIG":
+                            await page.mouse.click(103, 890)
+                        else:
+                            await page.mouse.click(309, 890)
 
-                    # "I agree" চেকবক্স ক্লিক
+                    # 💡 ৩. সাথে সাথে Total amount এ ক্লিক করা (কোনো অপেক্ষা নেই)
                     try:
-                        agree_box = page.locator('text="I agree"').last
-                        if await agree_box.count() > 0 and await agree_box.is_visible():
-                            await agree_box.click(force=True, timeout=1000)
-                            await page.wait_for_timeout(200)
-                    except: pass
+                        # I agree চেকবক্স চেক করা
+                        agree = page.locator('text="I agree"')
+                        if await agree.count() > 0 and await agree.first.is_visible():
+                            await agree.first.click(force=True)
 
-                    # "Total amount" বাটন ক্লিক
-                    confirm_success = False
-                    try:
-                        confirm_btn = page.locator('text=/Total amount/i').last
-                        if await confirm_btn.count() > 0 and await confirm_btn.is_visible():
-                            await confirm_btn.click(timeout=2000, force=True)
-                            confirm_success = True
-                    except: pass
+                        # Total amount বাটনে ক্লিক করা (Playwright নিজেই অটো-ওয়েট করবে)
+                        await page.locator('text=/Total amount/i').last.click(force=True, timeout=5000)
+                    except Exception as e:
+                        logger.error(f"Error clicking Total Amount: {e}")
 
-                    if not confirm_success:
-                        try:
-                            await page.mouse.click(309, 880)
-                            confirm_success = True
-                        except: pass
-
-                    # 💡 ৬. সফলভাবে বিট হওয়ার পর ২ সেকেন্ড অপেক্ষা করে স্ক্রিনশট নেওয়া (যাতে 0 0 পপআপ চলে যায়)
+                    # 💡 ৪. ২ সেকেন্ড অপেক্ষা করে স্ক্রিনশট নেওয়া (যাতে 0 0 পপআপ চলে যায়)
                     await page.wait_for_timeout(2000)
                     proof_path = f"proof_success_{uid}.png"
                     await page.screenshot(path=proof_path)
@@ -419,7 +391,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         caption=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice}**\n💵 Amount: ৳ {bet_amount:.2f}\n📱 স্ক্রিনশটে দেখুন সাইটে কি হয়েছে ↓"
                     )
 
-                    # 💡 ৭. ANALYSIS REPORT মেসেজ
+                    # 💡 ৫. ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
@@ -452,7 +424,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     await asyncio.sleep(32)
 
-                    # 💡 ৮. রেজাল্ট চেক (পেজ রিলোড না করে সরাসরি অ্যাকাউন্ট সেকশনে গিয়ে চেক করবে)
+                    # 💡 ৬. রেজাল্ট চেক
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
                     await page.wait_for_timeout(2000) 
                     
@@ -529,7 +501,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 f"{next_step_txt}"
                             ))
 
-                    # রেজাল্ট চেক করার পর আবার WinGo পেজে ফিরে যাবে পরের রাউন্ডের জন্য
+                    # পরের রাউন্ডের জন্য আবার WinGo পেজে ফিরে যাবে
                     await page.goto(HOME_URL, wait_until="domcontentloaded")
                     await page.wait_for_timeout(1500)
                     try:
