@@ -214,6 +214,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
+            # 💡 WinGo পেজে ঢুকবে (শুধু একবার)
             await ctx.bot.send_message(chat_id=uid, text="🔄 **OPENING WINGO PAGE...**\nPlease wait a few seconds.")
             
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
@@ -236,7 +237,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } }""")
             await page.wait_for_timeout(3000) 
 
-            await ctx.bot.send_message(chat_id=uid, text="✅ **WinGo Page Opened!**\nWaiting for timer (30s/29s) and popup to clear...")
+            await ctx.bot.send_message(chat_id=uid, text="✅ **WinGo Page Opened!**\nWaiting for timer (30s/29s)...")
 
             # 💡 এখান থেকে পেজ আর কখনো রিলোড হবে না। একদম WinGo পেজেই থাকবে।
             while state["trade_running"]:
@@ -274,7 +275,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. টাইমার চেক (শুধুমাত্র ৩০ অথবা ২৯ সেকেন্ড)
+                    # 💡 ১. টাইমার চেক (শুধুমাত্র ৩০ অথবা ২৯ সেকেন্ড) এবং পপআপ চেক
                     logger.info("Waiting for timer (30 or 29s)...")
                     timer_val = "0s"
                     timer_found = False
@@ -348,7 +349,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ২. Big অথবা Small ক্লিক (একদম নিখুঁতভাবে)
+                    # 💡 ২. Big অথবা Small ক্লিক (একদম নিখুঁতভাবে, JS দিয়ে সরাসরি)
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     
                     if choice.upper() == "BIG":
@@ -386,32 +387,24 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         """
                         await page.evaluate(js_click_small)
 
-                    # 💡 ৩. কোনো অপেক্ষা না করেই সাথে সাথে Total amount-এ ক্লিক
-                    try:
-                        # Playwright সরাসরি "Total amount" লেখাটি খুঁজে সেখানে ক্লিক করবে
-                        await page.locator('text=/Total amount/i').last.wait_for(state="visible", timeout=2000)
-                        await page.locator('text=/Total amount/i').last.click(force=True, timeout=1000)
-                        logger.info("Total amount clicked via Playwright")
-                    except Exception as e:
-                        logger.error(f"Playwright click failed, trying JS: {e}")
-                        # ফলব্যাক হিসেবে JS দিয়ে ক্লিক (যদি Playwright মিস করে)
-                        js_confirm_script = """
-                        (() => {
-                            let els = document.querySelectorAll('div, span, button, p');
-                            for (let el of els) {
-                                let text = (el.innerText || el.textContent || '').toLowerCase();
-                                if (text.includes('total amount')) {
-                                    let rect = el.getBoundingClientRect();
-                                    if (rect.width > 0 && rect.height > 0) {
-                                        el.click();
-                                        return true;
-                                    }
+                    # 💡 ৩. কোনো অপেক্ষা ছাড়াই সরাসরি Total amount-এ ক্লিক (JS দিয়ে)
+                    js_confirm_script = """
+                    (() => {
+                        let els = document.querySelectorAll('div, span, button, p');
+                        for (let el of els) {
+                            let text = (el.innerText || el.textContent || '').toLowerCase();
+                            if (text.includes('total amount')) {
+                                let rect = el.getBoundingClientRect();
+                                if (rect.width > 0 && rect.height > 0) {
+                                    el.click();
+                                    return true;
                                 }
                             }
-                            return false;
-                        })()
-                        """
-                        await page.evaluate(js_confirm_script)
+                        }
+                        return false;
+                    })()
+                    """
+                    await page.evaluate(js_confirm_script)
 
                     # 💡 ৪. স্ক্রিনশট নেওয়া
                     await page.wait_for_timeout(2000)
