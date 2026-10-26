@@ -240,9 +240,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
             except: pass
             
-            await ctx.bot.send_message(chat_id=uid, text="✅ **Bot is now in WinGo!**\nWaiting for timer to hit 30-6 seconds...")
+            await ctx.bot.send_message(chat_id=uid, text="✅ **Bot is now in WinGo!**\nWaiting for timer to hit exactly between 30 and 6...")
 
-            # 💡 এখান থেকে পেজ আর কখনো রিলোড হবে না। একদম WinGo পেজেই থাকবে।
+            # 💡 এখান থেকে পেজ আর কখনো রিলোড হবে না।
             while state["trade_running"]:
                 try:
                     current_bal = state["balance"]
@@ -278,7 +278,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. টাইমার চেক (৬ থেকে ৩০ সেকেন্ড)
+                    # 💡 ১. টাইমার চেক (৩০ সেকেন্ড থেকে ৬ সেকেন্ড)
                     logger.info("Waiting for timer (30-06s)...")
                     timer_val = "0s"
                     timer_found = False
@@ -286,9 +286,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     for _ in range(600):
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
-                            match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
+                            # স্পেস রিমুভ করে টাইমার খোঁজা (যেমন: "0 0 : 2 8" -> "00:28")
+                            clean_text = "".join(body_text.split())
+                            match = re.search(r'00:(\d{2})', clean_text)
                             if match:
                                 sec = int(match.group(1))
+                                # ৩০ থেকে ৬ এর মধ্যে হলে ট্রু হবে
                                 if 6 <= sec <= 30: 
                                     timer_val = f"{sec}s"
                                     timer_found = True
@@ -382,34 +385,32 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         """
                         await page.evaluate(js_click_small)
 
-                    # 💡 ৩. কোনো টাকা ইনপুট না দিয়ে সরাসরি Total amount ক্লিক (একদম সাথে সাথে)
-                    # পপআপ রেন্ডার হওয়ার জন্য মাত্র আধা সেকেন্ড অপেক্ষা
-                    await page.wait_for_timeout(500) 
-
+                    # 💡 ৩. পপআপ ওপেন হওয়া এবং Total amount বাটন আসার জন্য অপেক্ষা করা
                     try:
-                        agree_box = page.locator('text="I agree"').last
-                        if await agree_box.count() > 0:
-                            await agree_box.click(force=True, timeout=500)
-                    except: pass
-
-                    # Total amount বাটনে ক্লিক (JS দিয়ে সরাসরি)
-                    js_confirm_script = """
-                    (() => {
-                        let els = document.querySelectorAll('div, span, button, p');
-                        for (let el of els) {
-                            let text = (el.innerText || el.textContent || '').toLowerCase();
-                            if (text.includes('total amount')) {
-                                let rect = el.getBoundingClientRect();
-                                if (rect.width > 0 && rect.height > 0) {
-                                    el.click();
-                                    return true;
+                        # Playwright সরাসরি "Total amount" লেখাটি খুঁজে বাটনটি আসা মাত্রই ক্লিক করবে
+                        await page.locator('text=/Total amount/i').last.wait_for(state="visible", timeout=5000)
+                        await page.locator('text=/Total amount/i').last.click(timeout=3000)
+                        logger.info("Total amount clicked via Playwright")
+                    except Exception as e:
+                        logger.error(f"Playwright click failed, trying JS: {e}")
+                        # ফলব্যাক হিসেবে JS দিয়ে ক্লিক
+                        js_confirm_script = """
+                        (() => {
+                            let els = document.querySelectorAll('div, span, button, p');
+                            for (let el of els) {
+                                let text = (el.innerText || el.textContent || '').toLowerCase();
+                                if (text.includes('total amount')) {
+                                    let rect = el.getBoundingClientRect();
+                                    if (rect.width > 0 && rect.height > 0) {
+                                        el.click();
+                                        return true;
+                                    }
                                 }
                             }
-                        }
-                        return false;
-                    })()
-                    """
-                    await page.evaluate(js_confirm_script)
+                            return false;
+                        })()
+                        """
+                        await page.evaluate(js_confirm_script)
 
                     # 💡 ৪. স্ক্রিনশট
                     await page.wait_for_timeout(2000)
@@ -419,7 +420,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await ctx.bot.send_photo(
                         chat_id=uid, 
                         photo=open(proof_path, 'rb'), 
-                        caption=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice}**\n💵 Amount: ৳ {bet_amount:.2f} (Default Amount)\n📱 স্ক্রিনশটে দেখুন সাইটে কি হয়েছে ↓"
+                        caption=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice}**\n💵 Amount: ৳ (Default Amount)\n📱 স্ক্রিনশটে দেখুন সাইটে কি হয়েছে ↓"
                     )
 
                     # 💡 ৫. রেজাল্ট এর জন্য অপেক্ষা (৩২ সেকেন্ড)
