@@ -240,7 +240,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
             except: pass
             
-            await ctx.bot.send_message(chat_id=uid, text="✅ **Bot is now in WinGo!**\nWaiting for the timer to drop to 20-30 seconds...")
+            await ctx.bot.send_message(chat_id=uid, text="✅ **Bot is now in WinGo!**\nWaiting for 30, 29, or 28 seconds to place bet...")
 
             while state["trade_running"]:
                 try:
@@ -277,25 +277,25 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 টাইমার চেক (খুবই ফ্লেক্সিবল করা হয়েছে)
-                    logger.info("Waiting for timer...")
+                    # 💡 টাইমার চেক (স্পেস এবং ':' সহ)
+                    logger.info("Waiting for 30, 29, or 28 seconds...")
                     timer_val = "0s"
                     timer_found = False
+                    
                     for _ in range(600): # ১ মিনিট পর্যন্ত অপেক্ষা করবে
                         try:
                             b_text = await page.evaluate("() => document.body.innerText")
                             
-                            # '0 0' পপআপ চেক
+                            # '0 0' পপআপ থাকলে স্কিপ করবে (তবে "Time remaining" থাকলে স্কিপ করবে না)
                             if "0 0" in b_text and "Time remaining" not in b_text:
                                 await asyncio.sleep(0.1)
                                 continue
                                 
-                            # টাইমার রিড করা (যেমন: 0 0 : 29)
+                            # Regex: '0 0 : 1 4' অথবা '00:14' দুটোই ধরবে
                             match = re.search(r'0\s*0\s*:\s*(\d{2})', b_text)
                             if match:
                                 sec = int(match.group(1))
-                                # ২০ থেকে ৩০ সেকেন্ডের মধ্যে পড়লেই আমরা ধরব
-                                if 20 <= sec <= 30: 
+                                if 28 <= sec <= 30: 
                                     timer_val = f"{sec}s"
                                     timer_found = True
                                     break
@@ -303,7 +303,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await asyncio.sleep(0.1) 
 
                     if not timer_found:
-                        logger.info("Timer not found, retrying...")
                         continue
 
                     step_plan_str = "┌────────────────────────────────┐\n"
@@ -354,6 +353,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(200)
                     
+                    # 💡 Big অথবা Small ক্লিক
                     js_click_script = f"""
                     (() => {{
                         let els = document.querySelectorAll('div, span, button, p');
@@ -371,6 +371,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     }})()
                     """
                     clicked = await page.evaluate(js_click_script)
+                    
                     if not clicked:
                         try:
                             if choice.upper() == "BIG":
@@ -381,6 +382,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     await page.wait_for_timeout(1500)
 
+                    # 💡 Amount বসানো এবং Total amount ক্লিক
                     try:
                         inputs = await page.locator('input[type="text"], input[type="number"]').all()
                         for inp in inputs:
