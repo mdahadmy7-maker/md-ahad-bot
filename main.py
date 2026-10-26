@@ -26,7 +26,7 @@ def get_state(uid):
     if uid not in user_state:
         user_state[uid] = {
             "awaiting": None, "temp_phone": "", "temp_password": "",
-            "accounts": [], "balance": "0.00", "target": 0, 
+            "accounts": [], "balance": 0.0, "target": 0, 
             "steps": 0, "step_amounts": [], "current_step": 0,
             "trade_running": False, "task": None,
             "wins": 0, "losses": 0, "total_trades": 0,
@@ -48,8 +48,9 @@ def get_history_and_prediction():
             raise Exception("No data")
             
         latest_period = str(list_data[0].get("issueNumber", "Unknown"))
-        reversed_list = list(reversed(list_data))
+        latest_number = int(list_data[0].get("number", 0))
         
+        reversed_list = list(reversed(list_data))
         history = []
         for item in reversed_list:
             num = int(item.get("number", 0))
@@ -79,6 +80,22 @@ def get_history_and_prediction():
         fallback_period = datetime.now().strftime("%Y%m%d%H%M%S")
         import random
         return random.choice(["BIG", "SMALL"]), fallback_period
+
+# API দিয়ে রেজাল্ট চেক করা (পেজ রিলোড ছাড়াই)
+def check_api_result(period):
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        res = requests.get(HISTORY_API, headers=headers, timeout=10)
+        data = res.json()
+        list_data = data.get("data", {}).get("list", [])
+        
+        for item in list_data:
+            if str(item.get("issueNumber")) == str(period):
+                num = int(item.get("number", 0))
+                return "SMALL" if num <= 4 else "BIG", num
+        return None, None
+    except:
+        return None, None
 
 # ───────────────────────────────────────────
 # ৩. লগইন এবং অটো-বেট ফাংশন
@@ -214,7 +231,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await browser.close()
                     return
 
-            # ---------------- ৪. অটো-বেট লুপ (একবার WinGo পেজে যাবে, আর বের হবে না) ----------------
+            # ---------------- ৪. অটো-বেট লুপ ----------------
             initial_balance = float(balance)
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
@@ -240,23 +257,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } return false; }""")
             await page.wait_for_timeout(3000) 
 
+            # 💡 WinGo পেজে থাকবে, আর কোথাও যাবে না
             while state["trade_running"]:
                 try:
-                    # 💡 WinGo পেজের ব্যালেন্স রিড করা (একাধিক ৳ চিহ্ন থেকে সঠিক ব্যালেন্স বের করা)
-                    body_text = await page.evaluate("() => document.body.innerText")
-                    bal_matches = re.findall(r'৳\s*([\d.]+)', body_text)
-                    
-                    current_bal = state["balance"] # ডিফল্ট আগের ব্যালেন্স
-                    if bal_matches:
-                        # ০.০০ বাদ দিয়ে আসল ব্যালেন্সটি খোঁজা হবে
-                        for b in bal_matches:
-                            try:
-                                b_val = float(b)
-                                if b_val > 0: 
-                                    current_bal = b_val
-                                    state["balance"] = current_bal
-                                    break
-                            except: pass
+                    current_bal = state["balance"] # স্ক্রিন থেকে না পড়ে নিজের হিসাব ব্যবহার করবে
 
                     if current_bal >= target_balance:
                         profit = current_bal - initial_balance
@@ -468,25 +472,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # 💡 ৩২ সেকেন্ড অপেক্ষা (পেজ রিলোড হবে না)
                     await asyncio.sleep(32)
 
-                    # 💡 রেজাল্ট চেক (একই WinGo পেজের উপরের ব্যালেন্স থেকে)
-                    new_page_text = await page.evaluate("() => document.body.innerText")
-                    new_bal_matches = re.findall(r'৳\s*([\d.]+)', new_page_text)
+                    # 💡 রেজাল্ট চেক (API দিয়ে, স্ক্রিন থেকে নয়)
+                    actual_result, result_num = check_api_result(current_period)
                     
-                    new_balance = current_bal
-                    if new_bal_matches:
-                        for b in new_bal_matches:
-                            try:
-                                b_val = float(b)
-                                if b_val > 0: # ০.০০ বাদ দিবে
-                                    new_balance = b_val
-                                    break
-                            except: pass
-                    
-                    if new_balance != current_bal:
+                    if actual_result:
                         state['total_trades'] += 1
                         
-                        if new_balance > current_bal:
-                            state["balance"] = new_balance
+                        if actual_result == choice: # WIN
+                            state["balance"] = state["balance"] + (bet_amount * 0.96)
                             state["wins"] += 1
                             current_step_idx = 0
                             p_l = bet_amount * 0.96
@@ -502,9 +495,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 f"🔵 Side : {choice} ❮❮❮\n"
                                 f"🚀 Step : {current_step_idx+1}\n"
                                 f"💵 Amount : ৳ {bet_amount:.2f}\n\n"
+                                f"🎲 Result Number: {result_num}\n"
                                 "📊 Result : WIN ✅\n"
                                 f"💹 P/L : +৳ {p_l:.2f}\n"
-                                f"💰 Balance : ৳ {new_balance:.2f}\n"
+                                f"💰 Balance : ৳ {state['balance']:.2f}\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "—\n"
                                 f"🏆 Wins : {state['wins']} 🔴 Losses : {state['losses']} 📈 Rate :\n"
@@ -515,11 +509,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 "➡️ Next Step : 1\n"
                                 "🟢 Recovered! Back to Step 1."
                             ))
-                        else:
-                            state["balance"] = new_balance
+                        else: # LOSS
+                            state["balance"] = state["balance"] - bet_amount
                             state["losses"] += 1
                             current_step_idx += 1
-                            p_l = -bet_amount
                             
                             win_rate = (state['wins'] / state['total_trades'] * 100) if state['total_trades'] > 0 else 0
                             
@@ -538,9 +531,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 f"🔵 Side : {choice} ❮❮❮\n"
                                 f"🚀 Step : {current_step_idx}\n"
                                 f"💵 Amount : ৳ {bet_amount:.2f}\n\n"
+                                f"🎲 Result Number: {result_num}\n"
                                 "📊 Result : LOSS ❌\n"
                                 f"💹 P/L : -৳ {bet_amount:.2f}\n"
-                                f"💰 Balance : ৳ {new_balance:.2f}\n"
+                                f"💰 Balance : ৳ {state['balance']:.2f}\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "—\n"
                                 f"🏆 Wins : {state['wins']} 🔴 Losses : {state['losses']} 📈 Rate :\n"
@@ -550,6 +544,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 "—\n"
                                 f"{next_step_txt}"
                             ))
+                    else:
+                        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **রেজাল্ট পাওয়া যায়নি (API Timeout)!** ব্যালেন্স চেক করুন।")
 
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
@@ -634,7 +630,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
             "💰 YOUR BALANCE\n"
-            f"৳ {state.get('balance', '0.00')}\n"
+            f"৳ {state.get('balance', 0.0):.2f}\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
             "🎯 Enter your TARGET profit amount:\n"
@@ -647,7 +643,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         try:
             target_amount = float(text)
             state["target"] = target_amount
-            balance = float(state.get('balance', '0.00'))
+            balance = float(state.get('balance', 0.0))
             stop_at = balance + target_amount
             target_set_msg = (
                 "╔════════════════════════╗\n"
@@ -701,7 +697,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             else:
                 state["awaiting"] = None
                 total_risk = sum(state["step_amounts"])
-                balance = float(state.get('balance', '0.00'))
+                balance = float(state.get('balance', 0.0))
                 target = float(state.get('target', 0))
                 stop_at = balance + target
                 step_plan_text = ""
@@ -771,7 +767,7 @@ async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if state.get("task"): state["task"].cancel()
     user_state[uid] = {
         "awaiting": None, "temp_phone": "", "temp_password": "",
-        "accounts": [], "balance": "0.00", "target": 0, 
+        "accounts": [], "balance": 0.0, "target": 0, 
         "steps": 0, "step_amounts": [], "current_step": 0, "trade_running": False, "task": None,
         "wins": 0, "losses": 0, "total_trades": 0, "first_bet": True
     }
