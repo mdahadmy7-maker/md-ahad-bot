@@ -220,7 +220,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # 💡 একবারই WinGo পেজে যাবে, বারবার রিলোড হবে না
+            # 💡 WinGo পেজে ঢুকবে শুধু একবার
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000) 
             
@@ -339,11 +339,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৩. বিগ বা স্মলে ক্লিক (force=True বাদ দেওয়া হয়েছে)
-                    # Playwright নিজে থেকেই অপেক্ষা করবে, পপআপের কারণে ক্লিক ব্লক হলে সে অপেক্ষা করবে
+                    # 💡 ৩. বিগ বা স্মলে ক্লিক (Playwright-এর নিজস্ব Auto-Wait ক্লিক)
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     logger.info(f"Clicking {choice}...")
                     try:
                         if choice.upper() == "BIG":
+                            # Playwright নিজে থেকেই অপেক্ষা করবে বাটনটি ক্লিকযোগ্য হওয়া পর্যন্ত
                             await page.locator('div, span, button').filter(has_text=re.compile(r'^BIG$', re.IGNORECASE)).last.click(timeout=15000)
                         else:
                             await page.locator('div, span, button').filter(has_text=re.compile(r'^SMALL$', re.IGNORECASE)).last.click(timeout=15000)
@@ -362,20 +363,44 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             }})()
                         """)
 
-                    # 💡 ৪. Total amount বাটনটি আসার জন্য অপেক্ষা করা এবং ক্লিক করা
+                    # 💡 ৪. Total amount বাটনটি আসার জন্য অপেক্ষা করা এবং ক্লিক করা (কোনো ফিক্সড ওয়েট ছাড়াই)
                     logger.info("Waiting for Total Amount modal...")
                     bet_success = False
-                    try:
-                        # Playwright অপেক্ষা করবে বাটনটি ভিজিবল হওয়া পর্যন্ত (সর্বোচ্চ ৪ সেকেন্ড)
-                        total_btn = page.locator('text=/Total amount/i').last
-                        await total_btn.wait_for(state="visible", timeout=4000)
-                        await total_btn.click(timeout=2000)
-                        bet_success = True
-                    except Exception as e:
-                        logger.error(f"Total amount click failed: {e}")
+                    
+                    # ৩ সেকেন্ড পর্যন্ত বারবার চেষ্টা করবে (কারণ পপআপ আসতে মিলি-সেকেন্ড লাগে)
+                    for _ in range(15):
+                        try:
+                            # ১. Playwright দিয়ে টোটাল অ্যামাউন্ট বাটনে ক্লিক করার চেষ্টা
+                            total_btn = page.locator('text=/Total amount/i').last
+                            if await total_btn.count() > 0 and await total_btn.is_visible():
+                                await total_btn.click(timeout=1000, force=True)
+                                bet_success = True
+                                break
+
+                            # ২. ফলব্যাক হিসেবে JS দিয়ে ক্লিক
+                            js_confirm_script = """
+                            (() => {
+                                let els = document.querySelectorAll('div, span, button, p');
+                                for (let el of els) {
+                                    let text = (el.innerText || el.textContent || '').toLowerCase();
+                                    if (text.includes('total amount')) {
+                                        let rect = el.getBoundingClientRect();
+                                        if (rect.width > 0 && rect.height > 0) {
+                                            el.click();
+                                            return true;
+                                        }
+                                    }
+                                }
+                                return false;
+                            })()
+                            """
+                            if await page.evaluate(js_confirm_script):
+                                bet_success = True
+                                break
+                        except: pass
+                        await asyncio.sleep(0.2) # ০.২ সেকেন্ড অপেক্ষা করে আবার চেষ্টা করবে
 
                     if not bet_success:
-                        # 💡 বাংলায় এরর মেসেজ দেওয়া হলো
                         await ctx.bot.send_message(chat_id=uid, text="❌ **বেট ব্যর্থ হয়েছে!**\n'Total amount' বাটনে ক্লিক করা যায়নি। পরের রাউন্ডে আবার চেষ্টা করা হচ্ছে...")
                         await asyncio.sleep(5)
                         continue
@@ -424,7 +449,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     await asyncio.sleep(32)
 
-                    # 💡 ৭. রেজাল্ট চেক (পেজ রিলোড না করে সরাসরি অ্যাকাউন্ট সেকশনে গিয়ে চেক করবে)
+                    # 💡 ৭. রেজাল্ট চেক
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
                     await page.wait_for_timeout(2000) 
                     
@@ -514,7 +539,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
-                    # 💡 বাংলায় এরর মেসেজ দেওয়া হলো
                     await ctx.bot.send_message(chat_id=uid, text=f"🛑 **ট্রেড বন্ধ হয়েছে!**\nবেট করতে সমস্যা হয়েছে: {str(e)[:50]}")
                     state["trade_running"] = False
                     break
