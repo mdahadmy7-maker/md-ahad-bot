@@ -219,7 +219,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # WinGo পেজে যাওয়া (আপনার অরিজিনাল লজিক)
+            # WinGo পেজে যাওয়া
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000) 
             
@@ -275,23 +275,21 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. '0 0' বা '00' পপআপ চলে যাওয়া পর্যন্ত অপেক্ষা করা
-                    logger.info("Waiting for screen to be normal...")
+                    # 💡 ১. টাইমার চেক (শুধুমাত্র ৩০ অথবা ২৯ সেকেন্ড)
+                    # এতে পপআপ ১০০% চলে যাবে এবং নতুন রাউন্ড শুরু হবে
+                    logger.info("Waiting for timer to hit 30 or 29...")
                     timer_val = "0s"
                     for _ in range(600): 
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
-                            
-                            # টাইমার খোঁজা (যেমন 00:26)
                             match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
                             if match:
                                 sec = int(match.group(1))
-                                # টাইমার ৩০ থেকে ৬ এর মধ্যে থাকলেই ক্লিক করবে
-                                if 6 <= sec <= 30: 
+                                if sec in [30, 29]: 
                                     timer_val = f"{sec}s"
                                     break
                         except: pass
-                        await asyncio.sleep(0.1) 
+                        await asyncio.sleep(0.05) 
 
                     step_plan_str = "┌────────────────────────────────┐\n"
                     for i, amt in enumerate(state['step_amounts']):
@@ -339,19 +337,18 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৩. বিগ অথবা স্মল ক্লিক (Playwright-এর নিজস্ব Auto-Wait)
+                    # 💡 ৩. বিগ অথবা স্মল ক্লিক (force=True ব্যবহার করা হয়েছে যাতে পপআপ ব্লক না করে)
                     logger.info(f"Clicking {choice}...")
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     
                     try:
-                        # Playwright অপেক্ষা করবে পপআপ চলে যাওয়া পর্যন্ত, তারপর ক্লিক করবে
                         if choice.upper() == "BIG":
-                            await page.locator('div, span, button, p').filter(has_text=re.compile(r'^BIG$', re.IGNORECASE)).last.click(timeout=15000)
+                            await page.locator('div, span, button, p').filter(has_text=re.compile(r'^BIG$', re.IGNORECASE)).last.click(timeout=10000, force=True)
                         else:
-                            await page.locator('div, span, button, p').filter(has_text=re.compile(r'^SMALL$', re.IGNORECASE)).last.click(timeout=15000)
+                            await page.locator('div, span, button, p').filter(has_text=re.compile(r'^SMALL$', re.IGNORECASE)).last.click(timeout=10000, force=True)
                     except Exception as e:
                         logger.error(f"Playwright click failed: {e}")
-                        await ctx.bot.send_message(chat_id=uid, text="⚠️ **ক্লিক করতে ব্যর্থ!** পপআপের কারণে ক্লিক ব্লক হয়েছে।")
+                        await ctx.bot.send_message(chat_id=uid, text="⚠️ **ক্লিক করতে ব্যর্থ!**")
                         await asyncio.sleep(5)
                         continue
 
@@ -416,11 +413,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
-                    # 💡 ৭. ৩২ সেকেন্ড অপেক্ষা (উইন বা লস বক্স আসার জন্য)
+                    # 💡 ৭. ৩২ সেকেন্ড অপেক্ষা
                     await asyncio.sleep(32)
 
                     # 💡 ৮. রেজাল্ট চেক (স্ক্রল করে ব্যালেন্স চেক করবে)
-                    await page.evaluate("window.scrollTo(0, 0);") # উপরে স্ক্রল করবে ব্যালেন্স দেখতে
+                    await page.evaluate("window.scrollTo(0, 0);") 
                     await page.wait_for_timeout(1000)
                     
                     new_page_text = await page.evaluate("() => document.body.innerText")
