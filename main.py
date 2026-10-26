@@ -341,15 +341,16 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৩. সুপার ফাস্ট Big/Small ক্লিক (JS দিয়ে সরাসরি)
+                    # 💡 ৩. সুপার ফাস্ট Big/Small ক্লিক (স্ক্রিনশট ১ অনুযায়ী)
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                    await page.wait_for_timeout(200)
+                    await page.wait_for_timeout(300)
                     
                     js_click_script = f"""
                     (() => {{
-                        let els = document.querySelectorAll('div, span, button');
+                        let els = document.querySelectorAll('div, span, button, p');
                         for (let el of els) {{
-                            if (el.innerText && el.innerText.trim().toUpperCase() === '{choice.upper()}') {{
+                            let text = (el.innerText || el.textContent || '').trim().toUpperCase();
+                            if (text === '{choice.upper()}') {{
                                 let rect = el.getBoundingClientRect();
                                 if (rect.width > 0 && rect.height > 0) {{
                                     el.click();
@@ -370,10 +371,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 await page.mouse.click(309, 890)
                         except: pass
 
-                    # 💡 ৪. মডাল ওপেন হওয়া পর্যন্ত দ্রুত অপেক্ষা
-                    await page.wait_for_timeout(1000)
+                    # 💡 ৪. অপেক্ষা করা যতক্ষণ না পপআপ (Total amount) ওপেন হয় (স্ক্রিনশট ২ অনুযায়ী)
+                    await page.wait_for_timeout(1500)
 
-                    # 💡 ৫. মডালে অ্যামাউন্ট বসানো এবং Confirm (Total amount) ক্লিক করা
+                    # 💡 ৫. পপআপে টাকার পরিমাণ বসানো এবং সরাসরি "Total amount" ক্লিক করা
                     try:
                         inputs = await page.locator('input[type="text"], input[type="number"]').all()
                         for inp in inputs:
@@ -381,34 +382,39 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 await inp.click(force=True)
                                 await page.keyboard.press("Control+A")
                                 await page.keyboard.press("Backspace")
-                                await inp.type(str(int(bet_amount)), delay=20)
+                                await inp.type(str(int(bet_amount)), delay=50)
                                 break
-                    except: pass
-
-                    # "I agree" চেকবক্স ক্লিক
+                    except Exception as e:
+                        logger.error(f"Input error: {e}")
+                        
+                    # "I agree" চেকবক্স ক্লিক (থাকলে)
                     try:
                         agree_box = page.locator('text="I agree"').last
-                        if await agree_box.count() > 0 and await agree_box.is_visible():
-                            await agree_box.click(force=True, timeout=1000)
-                            await page.wait_for_timeout(200)
-                    except: pass
+                        if await agree_box.count() > 0:
+                            await agree_box.click(force=True, timeout=2000)
+                            await page.wait_for_timeout(300)
+                    except Exception as e:
+                        logger.error(f"Agree box error: {e}")
 
-                    # "Total amount" বাটন ক্লিক
+                    # "Total amount" বাটনে ক্লিক করা
                     confirm_success = False
                     try:
                         confirm_btn = page.locator('text=/Total amount/i').last
-                        if await confirm_btn.count() > 0 and await confirm_btn.is_visible():
-                            await confirm_btn.click(timeout=2000, force=True)
+                        if await confirm_btn.count() > 0:
+                            await confirm_btn.click(timeout=3000, force=True)
                             confirm_success = True
-                    except: pass
+                            logger.info(f"Bet placed successfully: {choice} ৳{bet_amount}")
+                    except Exception as e:
+                        logger.error(f"Total amount click error: {e}")
 
+                    # যদি "Total amount" না পাওয়া যায়, তবে স্ক্রিনের নিচে ডানদিকে ক্লিক করবে (Fallback)
                     if not confirm_success:
                         try:
-                            await page.mouse.click(309, 880)
-                            confirm_success = True
+                            await page.mouse.click(309, 880) 
+                            logger.info("Fallback click used.")
                         except: pass
 
-                    # 💡 ৬. সফলভাবে বিট হওয়ার পর ২ সেকেন্ড অপেক্ষা করে স্ক্রিনশট নেওয়া (যাতে 0 0 পপআপ চলে যায়)
+                    # 💡 ৬. সফলভাবে বিট হওয়ার পর ২ সেকেন্ড অপেক্ষা করে স্ক্রিনশট নেওয়া
                     await page.wait_for_timeout(2000)
                     proof_path = f"proof_success_{uid}.png"
                     await page.screenshot(path=proof_path)
@@ -644,5 +650,4 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "╚════════════════════════╝\n\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"💰 Balance  : ৳ {balance:.2f}\n"
-                f"🎯 Target   : ৳ {target_amount
+                f"
