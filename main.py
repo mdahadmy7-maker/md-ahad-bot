@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import os
+import time  # <--- এটি যোগ করা হয়েছে
 import requests
 import json
 from datetime import datetime
@@ -77,7 +78,7 @@ def get_history_and_prediction():
     except Exception as e:
         logger.error(f"History API error: {e}")
         import random
-        return random.choice(["BIG", "SMALL"]), str(int(time.time()))
+        return random.choice(["BIG", "SMALL"]), str(int(time.time())) # time ব্যবহার করা হয়েছে
 
 def check_api_result(period):
     try:
