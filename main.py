@@ -366,16 +366,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     logger.info("Waiting for Total Amount modal...")
                     bet_success = False
                     try:
-                        # Playwright অপেক্ষা করবে বাটনটি ভিজিবল হওয়া পর্যন্ত
+                        # Playwright অপেক্ষা করবে বাটনটি ভিজিবল হওয়া পর্যন্ত (সর্বোচ্চ ৪ সেকেন্ড)
                         total_btn = page.locator('text=/Total amount/i').last
-                        await total_btn.wait_for(state="visible", timeout=5000)
+                        await total_btn.wait_for(state="visible", timeout=4000)
                         await total_btn.click(timeout=2000)
                         bet_success = True
                     except Exception as e:
                         logger.error(f"Total amount click failed: {e}")
 
                     if not bet_success:
-                        await ctx.bot.send_message(chat_id=uid, text="⚠️ **BET FAILED**\nCould not click 'Total amount'. Retrying next round...")
+                        # 💡 বাংলায় এরর মেসেজ দেওয়া হলো
+                        await ctx.bot.send_message(chat_id=uid, text="❌ **বেট ব্যর্থ হয়েছে!**\n'Total amount' বাটনে ক্লিক করা যায়নি। পরের রাউন্ডে আবার চেষ্টা করা হচ্ছে...")
                         await asyncio.sleep(5)
                         continue
 
@@ -513,7 +514,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
-                    await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **TRADE STOPPED**\nCould not place bet. Error: {str(e)[:50]}")
+                    # 💡 বাংলায় এরর মেসেজ দেওয়া হলো
+                    await ctx.bot.send_message(chat_id=uid, text=f"🛑 **ট্রেড বন্ধ হয়েছে!**\nবেট করতে সমস্যা হয়েছে: {str(e)[:50]}")
                     state["trade_running"] = False
                     break
                     
