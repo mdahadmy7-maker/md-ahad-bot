@@ -35,7 +35,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# 💡 ২. API থেকে রেজাল্ট ও প্রেডিকশন বের করার ফাংশন
+# 💡 ২. API থেকে রেজাল্ট ও প্রেডিকশন
 # ───────────────────────────────────────────
 def get_history_and_prediction():
     try:
@@ -282,24 +282,29 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 টাইমার চেক (৩০, ২৯ বা ২৮ সেকেন্ড)
+                    # 💡 টাইমার চেক (৩০ বা ২৯ সেকেন্ড)
                     logger.info("Waiting for 30/29s timer...")
                     timer_val = "0s"
-                    for _ in range(400): 
+                    timer_found = False
+                    for _ in range(600): # ৩০ সেকেন্ড পর্যন্ত অপেক্ষা করবে
                         try:
-                            body_text = await page.evaluate("() => document.body.innerText")
-                            if "0 0" in body_text:
+                            b_text = await page.evaluate("() => document.body.innerText")
+                            if "0 0" in b_text:
                                 await asyncio.sleep(0.1)
                                 continue
                                 
-                            match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
+                            match = re.search(r'0\s*0\s*:\s*(\d{2})', b_text)
                             if match:
                                 sec = int(match.group(1))
-                                if sec in [30, 29, 28]: 
+                                if sec == 30 or sec == 29: 
                                     timer_val = f"{sec}s"
+                                    timer_found = True
                                     break
                         except: pass
                         await asyncio.sleep(0.05) 
+
+                    if not timer_found:
+                        continue
 
                     step_plan_str = "┌────────────────────────────────┐\n"
                     for i, amt in enumerate(state['step_amounts']):
@@ -366,15 +371,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         return false;
                     }})()
                     """
-                    clicked = await page.evaluate(js_click_script)
-                    
-                    if not clicked:
-                        try:
-                            if choice.upper() == "BIG":
-                                await page.mouse.click(103, 890)
-                            else:
-                                await page.mouse.click(309, 890)
-                        except: pass
+                    await page.evaluate(js_click_script)
 
                     # 💡 পপআপ ওপেন হওয়া পর্যন্ত অপেক্ষা
                     await page.wait_for_timeout(1000)
@@ -387,32 +384,38 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 await inp.click(force=True)
                                 await page.keyboard.press("Control+A")
                                 await page.keyboard.press("Backspace")
-                                await inp.type(str(int(bet_amount)), delay=50)
+                                await inp.type(str(int(bet_amount)), delay=20)
                                 break
-                    except Exception as e:
-                        logger.error(f"Input error: {e}")
+                    except: pass
                         
                     try:
                         agree_box = page.locator('text="I agree"').last
                         if await agree_box.count() > 0:
-                            await agree_box.click(force=True, timeout=2000)
-                            await page.wait_for_timeout(300)
-                    except Exception as e:
-                        logger.error(f"Agree box error: {e}")
+                            await agree_box.click(force=True, timeout=1000)
+                    except: pass
 
-                    confirm_success = False
+                    # Total Amount বাটন ক্লিক (JS এবং Playwright দুটোই ব্যবহার করা হচ্ছে)
                     try:
                         confirm_btn = page.locator('text=/Total amount/i').last
                         if await confirm_btn.count() > 0:
-                            await confirm_btn.click(timeout=3000, force=True)
-                            confirm_success = True
-                    except Exception as e:
-                        logger.error(f"Total amount click error: {e}")
-
-                    if not confirm_success:
-                        try:
-                            await page.mouse.click(309, 880) 
-                        except: pass
+                            await confirm_btn.click(timeout=2000, force=True)
+                    except:
+                        await page.evaluate("""
+                            () => {
+                                let els = document.querySelectorAll('button, div, span');
+                                for (let el of els) {
+                                    let text = (el.innerText || el.textContent || '').toLowerCase();
+                                    if (text.includes('total amount')) {
+                                        let rect = el.getBoundingClientRect();
+                                        if (rect.width > 0 && rect.height > 0) {
+                                            el.click();
+                                            return true;
+                                        }
+                                    }
+                                }
+                                return false;
+                            }
+                        """)
 
                     # 💡 স্ক্রিনশট নেওয়া
                     await page.wait_for_timeout(2000)
