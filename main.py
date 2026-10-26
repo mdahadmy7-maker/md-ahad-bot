@@ -2,6 +2,7 @@ import asyncio
 import logging
 import re
 import os
+import time
 import requests
 import json
 from datetime import datetime
@@ -219,6 +220,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
+            # 💡 একবারই WinGo পেজে যাবে, বারবার রিলোড হবে না
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000) 
             
@@ -274,116 +276,56 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. টাইমার রিড করা (শুধু মেসেজে দেখানোর জন্য, ক্লিকে কোনো প্রভাব ফেলবে না)
-                    timer_val = "0s"
+                    # 💡 ১. '0 0' পপআপ চলে যাওয়ার জন্য অপেক্ষা করা (Playwright Auto-wait)
+                    logger.info("Waiting for '00' popup to clear...")
                     try:
-                        body_text = await page.evaluate("() => document.body.innerText")
-                        match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
-                        if match:
-                            timer_val = f"{match.group(1)}s"
-                    except: pass
+                        # Playwright অপেক্ষা করবে '0 0' টেক্সটটি স্ক্রিন থেকে মিলিয়ে যাওয়া পর্যন্ত
+                        await page.locator('text="0 0"').first.wait_for(state="hidden", timeout=60000)
+                    except:
+                        pass # যদি পপআপ না থাকে, তবে সরাসরি পরের স্টেপে যাবে
 
-                    step_plan_str = "┌────────────────────────────────┐\n"
-                    for i, amt in enumerate(state['step_amounts']):
-                        step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
-                    step_plan_str += "└────────────────────────────────┘"
-
-                    # 💡 ২. প্রথমবার AUTO TRADE ACTIVE মেসেজ
-                    pred_msg = None
-                    if state.get("first_bet", True):
-                        await ctx.bot.send_message(chat_id=uid, text=(
-                            "╔════════════════════════════════╗\n"
-                            "   🚀 **AUTO TRADE ACTIVE** 🚀\n"
-                            "╚════════════════════════════════╝\n\n"
-                            f"💰 **Balance** : ৳ {current_bal:.2f}\n"
-                            f"🎯 **Target**  : ৳ {state['target']:.2f} profit\n"
-                            f"🏛️ **Stop At** : ৳ {target_balance:.2f}\n"
-                            f"📋 **Steps**   : {state['steps']}\n\n"
-                            "📊 **Step Plan:**\n"
-                            f"{step_plan_str}\n\n"
-                            "⏱️ **Current Period**\n"
-                            f"{current_period}\n"
-                            f"██████████ {timer_val}\n\n"
-                            "🧠 _Analysing market..._\n"
-                            "🎬 _Prediction animation → auto bet every period._"
-                        ), parse_mode="Markdown")
-
-                        pred_msg = await ctx.bot.send_message(chat_id=uid, text="━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[░░░░░░░░░░░░] 0%`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏳ _Running 9 layers + backtest..._", parse_mode="Markdown")
-                        
-                        for pct in [45, 85, 100]:
-                            bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
-                            await asyncio.sleep(0.2)
-                            try:
-                                await ctx.bot.edit_message_text(
-                                    chat_id=uid, message_id=pred_msg.message_id,
-                                    text=f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[{bar}] {pct}%`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏳ _Running 9 layers + backtest..._",
-                                    parse_mode="Markdown"
-                                )
-                            except: pass
-                        
-                        await asyncio.sleep(0.3)
-
-                    if pred_msg:
-                        try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
-                        except: pass
-                    
-                    state["first_bet"] = False 
-
-                    # 💡 ৩. সুপার ফাস্ট Big/Small ক্লিক (Playwright Auto-Wait ব্যবহার করছে)
-                    # এটি পপআপ থাকলে নিজে থেকেই অপেক্ষা করবে, পপআপ চলে গেলেই ক্লিক করবে
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                    logger.info("Waiting for popup to clear and clicking Big/Small...")
-                    
+                    # 💡 ২. পপআপ চলে যাওয়া মাত্রই বিগ অথবা স্মলে ক্লিক
+                    logger.info(f"Clicking {choice}...")
                     try:
                         if choice.upper() == "BIG":
-                            await page.locator('div, span, button').filter(has_text=re.compile(r'^BIG$', re.IGNORECASE)).last.click(timeout=45000)
+                            await page.locator('div, span, button').filter(has_text=re.compile(r'^BIG$', re.IGNORECASE)).last.click(timeout=5000, force=True)
                         else:
-                            await page.locator('div, span, button').filter(has_text=re.compile(r'^SMALL$', re.IGNORECASE)).last.click(timeout=45000)
+                            await page.locator('div, span, button').filter(has_text=re.compile(r'^SMALL$', re.IGNORECASE)).last.click(timeout=5000, force=True)
                     except Exception as e:
                         logger.error(f"Playwright click failed, trying JS: {e}")
-                        # ফলব্যাক (যদি কোনো কারণে Playwright ফেল করে)
-                        js_click_script = f"""
-                        (() => {{
-                            let els = document.querySelectorAll('div, span, button');
-                            for (let el of els) {{
-                                if (el.innerText && el.innerText.trim().toUpperCase() === '{choice.upper()}') {{
-                                    let rect = el.getBoundingClientRect();
-                                    if (rect.width > 0 && rect.height > 0) {{
-                                        el.click();
-                                        return true;
+                        # ফলব্যাক
+                        await page.evaluate(f"""
+                            (() => {{
+                                let els = document.querySelectorAll('div, span, button');
+                                for (let el of els) {{
+                                    if (el.innerText && el.innerText.trim().toUpperCase() === '{choice.upper()}') {{
+                                        el.click(); return true;
                                     }}
                                 }}
-                            }}
-                            return false;
-                        }})()
-                        """
-                        await page.evaluate(js_click_script)
+                                return false;
+                            }})()
+                        """)
 
-                    # 💡 ৪. কোনো দেরি না করে সাথে সাথে Total amount-এ ক্লিক
+                    # 💡 ৩. কোনো অপেক্ষা ছাড়াই সাথে সাথে Total amount-এ ক্লিক
                     logger.info("Clicking Total Amount immediately...")
                     try:
                         await page.locator('text=/Total amount/i').last.click(timeout=5000, force=True)
                     except Exception as e:
                         logger.error(f"Playwright Total amount click failed, trying JS: {e}")
-                        js_confirm_script = """
-                        (() => {
-                            let els = document.querySelectorAll('div, span, button, p');
-                            for (let el of els) {
-                                let text = (el.innerText || el.textContent || '').toLowerCase();
-                                if (text.includes('total amount')) {
-                                    let rect = el.getBoundingClientRect();
-                                    if (rect.width > 0 && rect.height > 0) {
-                                        el.click();
-                                        return true;
+                        await page.evaluate("""
+                            (() => {
+                                let els = document.querySelectorAll('div, span, button, p');
+                                for (let el of els) {
+                                    let text = (el.innerText || el.textContent || '').toLowerCase();
+                                    if (text.includes('total amount')) {
+                                        el.click(); return true;
                                     }
                                 }
-                            }
-                            return false;
-                        })()
-                        """
-                        await page.evaluate(js_confirm_script)
+                                return false;
+                            })()
+                        """)
 
-                    # 💡 ৬. সফলভাবে বিট হওয়ার পর ২ সেকেন্ড অপেক্ষা করে স্ক্রিনশট নেওয়া
+                    # 💡 ৪. সফলভাবে বিট হওয়ার পর ২ সেকেন্ড অপেক্ষা করে স্ক্রিনশট নেওয়া
                     await page.wait_for_timeout(2000)
                     proof_path = f"proof_success_{uid}.png"
                     await page.screenshot(path=proof_path)
@@ -394,13 +336,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         caption=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice}**\n💵 Amount: ৳ {bet_amount:.2f}\n📱 স্ক্রিনশটে দেখুন সাইটে কি হয়েছে ↓"
                     )
 
-                    # 💡 ৭. ANALYSIS REPORT মেসেজ
+                    # 💡 ৫. ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         f"⏱️ Period    : {current_period}\n"
-                        f"⏱️ Timer     : {timer_val} remaining\n"
                         "📊 Market       : MIXED 📊\n"
                         "🔬 Stability    : 🔴 VOLATILE (0/100)\n"
                         "🧨 Hostility    : 🟡 UNSTABLE (60/100)\n"
@@ -427,7 +368,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     await asyncio.sleep(32)
 
-                    # 💡 ৮. রেজাল্ট চেক (পেজ রিলোড না করে সরাসরি অ্যাকাউন্ট সেকশনে গিয়ে চেক করবে)
+                    # 💡 ৬. রেজাল্ট চেক (পেজ রিলোড না করে সরাসরি অ্যাকাউন্ট সেকশনে গিয়ে চেক করবে)
                     await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
                     await page.wait_for_timeout(2000) 
                     
