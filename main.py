@@ -220,25 +220,38 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # 💡 WinGo পেজে ঢুকবে শুধু একবার
+            # 💡 WinGo পেজে যাওয়ার নতুন লজিক (স্ক্রিনশট অনুযায়ী)
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000) 
             
-            for _ in range(3):
-                await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span, a')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
-                await page.wait_for_timeout(500)
-                
+            # ১. Home বাটনে ক্লিক
             try:
-                await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
-            except:
-                await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if((el.innerText||'').toLowerCase().includes('lottery')) { el.click(); return true; } } return false; }""")
-            await page.wait_for_timeout(2000)
+                await page.locator('text="Home"').last.click(timeout=5000, force=True)
+                await page.wait_for_timeout(1000)
+            except: pass
             
-            try:
-                win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
-                await win_go_card.click(timeout=5000, force=True)
-            except:
-                await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } return false; }""")
+            # ২. হালকা স্ক্রল করা
+            await page.evaluate("window.scrollTo(0, 300);")
+            await page.wait_for_timeout(1000)
+
+            # ৩. Win Go কার্ডে ক্লিক (JS ব্যবহার করে নিখুঁতভাবে খোঁজা)
+            js_click_wingo = """
+            (() => {
+                let els = document.querySelectorAll('div, span');
+                for (let el of els) {
+                    let text = (el.innerText || '').trim();
+                    if (text.includes('Win Go') && text.includes('Guess Number')) {
+                        let rect = el.getBoundingClientRect();
+                        if (rect.width > 0 && rect.height > 0) {
+                            el.click();
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            })()
+            """
+            await page.evaluate(js_click_wingo)
             await page.wait_for_timeout(3000) 
 
             while state["trade_running"]:
@@ -276,8 +289,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. স্ক্রিন স্বাভাবিক হওয়া পর্যন্ত অপেক্ষা করা
-                    # স্ক্রিনে পপআপ থাকলে (০০:০৫ থেকে ০০:০০ পর্যন্ত) অপেক্ষা করবে
+                    # 💡 ১. '0 0' বা '00' পপআপ চলে যাওয়া পর্যন্ত অপেক্ষা করা
                     logger.info("Waiting for screen to be normal (Timer 29 to 06)...")
                     timer_val = "0s"
                     for _ in range(600): 
@@ -286,7 +298,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
                             if match:
                                 sec = int(match.group(1))
-                                # টাইমার ৬ থেকে ২৯ এর মধ্যে থাকলেই ক্লিক করবে
                                 if 6 <= sec <= 29: 
                                     timer_val = f"{sec}s"
                                     break
@@ -339,18 +350,15 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৩. বিগ বা স্মলে ক্লিক (Playwright-এর নিজস্ব Auto-Wait ক্লিক)
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                    # 💡 ৩. বিগ বা স্মলে ক্লিক (Playwright)
                     logger.info(f"Clicking {choice}...")
                     try:
                         if choice.upper() == "BIG":
-                            # Playwright নিজে থেকেই অপেক্ষা করবে বাটনটি ক্লিকযোগ্য হওয়া পর্যন্ত
-                            await page.locator('div, span, button').filter(has_text=re.compile(r'^BIG$', re.IGNORECASE)).last.click(timeout=15000)
+                            await page.locator('div, span, button').filter(has_text=re.compile(r'^BIG$', re.IGNORECASE)).last.click(timeout=10000)
                         else:
-                            await page.locator('div, span, button').filter(has_text=re.compile(r'^SMALL$', re.IGNORECASE)).last.click(timeout=15000)
+                            await page.locator('div, span, button').filter(has_text=re.compile(r'^SMALL$', re.IGNORECASE)).last.click(timeout=10000)
                     except Exception as e:
                         logger.error(f"Playwright click failed: {e}")
-                        # ফলব্যাক
                         await page.evaluate(f"""
                             (() => {{
                                 let els = document.querySelectorAll('div, span, button');
@@ -363,22 +371,26 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             }})()
                         """)
 
-                    # 💡 ৪. Total amount বাটনটি আসার জন্য অপেক্ষা করা এবং ক্লিক করা (কোনো ফিক্সড ওয়েট ছাড়াই)
-                    logger.info("Waiting for Total Amount modal...")
+                    # 💡 ৪. "I agree" চেকবক্স এবং "Total amount" ক্লিক করা
+                    logger.info("Handling Total Amount modal...")
                     bet_success = False
                     
-                    # ৩ সেকেন্ড পর্যন্ত বারবার চেষ্টা করবে (কারণ পপআপ আসতে মিলি-সেকেন্ড লাগে)
-                    for _ in range(15):
+                    for _ in range(15): # ৩ সেকেন্ড পর্যন্ত অপেক্ষা করবে
                         try:
-                            # ১. Playwright দিয়ে টোটাল অ্যামাউন্ট বাটনে ক্লিক করার চেষ্টা
+                            # ১. I agree চেক করা
+                            agree_box = page.locator('text="I agree"').last
+                            if await agree_box.count() > 0 and await agree_box.is_visible():
+                                await agree_box.click(force=True)
+
+                            # ২. Total amount বাটন খোঁজা ও ক্লিক করা
                             total_btn = page.locator('text=/Total amount/i').last
                             if await total_btn.count() > 0 and await total_btn.is_visible():
                                 await total_btn.click(timeout=1000, force=True)
                                 bet_success = True
                                 break
 
-                            # ২. ফলব্যাক হিসেবে JS দিয়ে ক্লিক
-                            js_confirm_script = """
+                            # JS Fallback
+                            js_confirm = """
                             (() => {
                                 let els = document.querySelectorAll('div, span, button, p');
                                 for (let el of els) {
@@ -394,11 +406,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 return false;
                             })()
                             """
-                            if await page.evaluate(js_confirm_script):
+                            if await page.evaluate(js_confirm):
                                 bet_success = True
                                 break
                         except: pass
-                        await asyncio.sleep(0.2) # ০.২ সেকেন্ড অপেক্ষা করে আবার চেষ্টা করবে
+                        await asyncio.sleep(0.2) 
 
                     if not bet_success:
                         await ctx.bot.send_message(chat_id=uid, text="❌ **বেট ব্যর্থ হয়েছে!**\n'Total amount' বাটনে ক্লিক করা যায়নি। পরের রাউন্ডে আবার চেষ্টা করা হচ্ছে...")
@@ -526,16 +538,19 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 f"{next_step_txt}"
                             ))
 
-                    # রেজাল্ট চেক করার পর আবার WinGo পেজে ফিরে যাবে পরের রাউন্ডের জন্য
+                    # রেজাল্ট চেক করার পর আবার WinGo পেজে ফিরে যাবে পরের রাউন্ডের জন্য (নতুন লজিক)
                     await page.goto(HOME_URL, wait_until="domcontentloaded")
                     await page.wait_for_timeout(1500)
+                    
                     try:
-                        await page.locator('text="Lottery"').first.click(timeout=3000, force=True)
+                        await page.locator('text="Home"').last.click(timeout=3000, force=True)
                         await page.wait_for_timeout(1000)
-                        win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
-                        await win_go_card.click(timeout=3000, force=True)
                     except: pass
-                    await page.wait_for_timeout(2000)
+                    
+                    await page.evaluate("window.scrollTo(0, 300);")
+                    await page.wait_for_timeout(1000)
+                    await page.evaluate(js_click_wingo)
+                    await page.wait_for_timeout(3000)
 
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
