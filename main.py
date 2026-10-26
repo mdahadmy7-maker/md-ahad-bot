@@ -240,7 +240,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
             except: pass
             
-            await ctx.bot.send_message(chat_id=uid, text="✅ **Bot is now in WinGo!**\nWaiting for timer to hit exactly between 30 and 6...")
+            await ctx.bot.send_message(chat_id=uid, text="✅ **Bot is now in WinGo!**\nWaiting for timer to hit exactly 30 or 29 seconds...")
 
             # 💡 এখান থেকে পেজ আর কখনো রিলোড হবে না।
             while state["trade_running"]:
@@ -278,26 +278,26 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. টাইমার চেক (৩০ সেকেন্ড থেকে ৬ সেকেন্ড)
-                    logger.info("Waiting for timer (30-06s)...")
+                    # 💡 ১. টাইমার চেক (শুধুমাত্র ৩০ অথবা ২৯ সেকেন্ড)
+                    logger.info("Waiting for timer (30 or 29s)...")
                     timer_val = "0s"
                     timer_found = False
                     
                     for _ in range(600):
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
-                            # স্পেস রিমুভ করে টাইমার খোঁজা (যেমন: "0 0 : 2 8" -> "00:28")
+                            # স্পেস রিমুভ করে টাইমার খোঁজা (যেমন: "0 0 : 2 9" -> "00:29")
                             clean_text = "".join(body_text.split())
                             match = re.search(r'00:(\d{2})', clean_text)
                             if match:
                                 sec = int(match.group(1))
-                                # ৩০ থেকে ৬ এর মধ্যে হলে ট্রু হবে
-                                if 6 <= sec <= 30: 
+                                # শুধুমাত্র ৩০ অথবা ২৯ হলে ট্রু হবে
+                                if sec in [30, 29]: 
                                     timer_val = f"{sec}s"
                                     timer_found = True
                                     break
                         except: pass
-                        await asyncio.sleep(0.1) 
+                        await asyncio.sleep(0.05) # খুব দ্রুত চেক করবে টাইমার মিস না করার জন্য
 
                     if not timer_found:
                         continue
@@ -389,7 +389,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     try:
                         # Playwright সরাসরি "Total amount" লেখাটি খুঁজে বাটনটি আসা মাত্রই ক্লিক করবে
                         await page.locator('text=/Total amount/i').last.wait_for(state="visible", timeout=5000)
-                        await page.locator('text=/Total amount/i').last.click(timeout=3000)
+                        await page.locator('text=/Total amount/i').last.click(force=True, timeout=3000)
                         logger.info("Total amount clicked via Playwright")
                     except Exception as e:
                         logger.error(f"Playwright click failed, trying JS: {e}")
