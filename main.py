@@ -240,7 +240,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
             except: pass
             
-            await ctx.bot.send_message(chat_id=uid, text="✅ **Bot is now in WinGo!**\nWaiting for 30, 29, or 28 seconds to place bet...")
+            await ctx.bot.send_message(chat_id=uid, text="✅ **Bot is now in WinGo!**\nMonitoring the timer specifically around 'Time remaining'...")
 
             while state["trade_running"]:
                 try:
@@ -277,22 +277,35 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 টাইমার চেক (স্পেস এবং ':' সহ)
-                    logger.info("Waiting for 30, 29, or 28 seconds...")
+                    # 💡 টাইমার চেক (শুধুমাত্র "Time remaining" এর পাশের টাইমারটি পড়বে)
+                    logger.info("Waiting for timer (30, 29, 28)...")
                     timer_val = "0s"
                     timer_found = False
                     
-                    for _ in range(600): # ১ মিনিট পর্যন্ত অপেক্ষা করবে
+                    for _ in range(600): 
                         try:
-                            b_text = await page.evaluate("() => document.body.innerText")
+                            # সরাসরি "Time remaining" লেখাটির প্যারেন্ট এলিমেন্ট থেকে টেক্সট নেওয়া হচ্ছে
+                            timer_text = await page.evaluate("""
+                                () => {
+                                    let els = document.querySelectorAll('div, span, p');
+                                    for (let el of els) {
+                                        if (el.innerText && el.innerText.includes('Time remaining')) {
+                                            let parent = el.parentElement;
+                                            if (parent) return parent.innerText;
+                                        }
+                                    }
+                                    return '';
+                                }
+                            """)
                             
-                            # '0 0' পপআপ থাকলে স্কিপ করবে (তবে "Time remaining" থাকলে স্কিপ করবে না)
-                            if "0 0" in b_text and "Time remaining" not in b_text:
+                            if not timer_text:
                                 await asyncio.sleep(0.1)
                                 continue
                                 
-                            # Regex: '0 0 : 1 4' অথবা '00:14' দুটোই ধরবে
-                            match = re.search(r'0\s*0\s*:\s*(\d{2})', b_text)
+                            # সব স্পেস মুছে ফেলা হচ্ছে (যেমন: "0 0 : 2 8" -> "00:28")
+                            clean_text = "".join(timer_text.split())
+                            
+                            match = re.search(r'0*:(\d{2})', clean_text)
                             if match:
                                 sec = int(match.group(1))
                                 if 28 <= sec <= 30: 
