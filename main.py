@@ -281,19 +281,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     for _ in range(600): 
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
-                            # পপআপ চেক
-                            if "0 0" in body_text and "Time remaining" not in body_text:
-                                await asyncio.sleep(0.1)
-                                continue
-                                
+                            
+                            # টাইমার খোঁজা (যেমন 00:26)
                             match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
                             if match:
                                 sec = int(match.group(1))
+                                # টাইমার ৩০ থেকে ৬ এর মধ্যে থাকলেই ক্লিক করবে
                                 if 6 <= sec <= 30: 
                                     timer_val = f"{sec}s"
                                     break
                         except: pass
-                        await asyncio.sleep(0.05) 
+                        await asyncio.sleep(0.1) 
 
                     step_plan_str = "┌────────────────────────────────┐\n"
                     for i, amt in enumerate(state['step_amounts']):
@@ -341,55 +339,40 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৩. বিগ অথবা স্মল ক্লিক (আপনার নির্দেশ অনুযায়ী ১টি বাটনে)
+                    # 💡 ৩. বিগ অথবা স্মল ক্লিক (Playwright-এর নিজস্ব Auto-Wait)
                     logger.info(f"Clicking {choice}...")
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                    await page.wait_for_timeout(500) # স্ক্রল হওয়ার পর হালকা অপেক্ষা
-
-                    # JavaScript দিয়ে নিখুঁতভাবে শুধুমাত্র একটিতে ক্লিক করা
-                    js_click_script = f"""
-                    (() => {{
-                        let els = document.querySelectorAll('div, span, button');
-                        for (let el of els) {{
-                            let text = (el.innerText || el.textContent || '').trim().toUpperCase();
-                            if (text === '{choice.upper()}') {{
-                                let rect = el.getBoundingClientRect();
-                                if (rect.width > 0 && rect.height > 0) {{
-                                    el.click();
-                                    return true; // ক্লিক করার সাথে সাথেই লুপ বন্ধ হবে
-                                }}
-                            }}
-                        }}
-                        return false;
-                    }})()
-                    """
-                    clicked = await page.evaluate(js_click_script)
-                    if not clicked:
-                        logger.error("JS click failed. Element not found or not visible.")
-
-                    # 💡 ৪. কোনো দেরি না করে সাথে সাথে Total amount-এ ক্লিক
-                    logger.info("Clicking Total Amount immediately...")
                     
-                    # Playwright অপেক্ষা করবে বাটনটি ভেসে ওঠা পর্যন্ত
                     try:
-                        total_btn = page.locator('text=/Total amount/i').last
-                        await total_btn.wait_for(state="visible", timeout=4000)
-                        await total_btn.click(timeout=2000, force=True)
+                        # Playwright অপেক্ষা করবে পপআপ চলে যাওয়া পর্যন্ত, তারপর ক্লিক করবে
+                        if choice.upper() == "BIG":
+                            await page.locator('div, span, button, p').filter(has_text=re.compile(r'^BIG$', re.IGNORECASE)).last.click(timeout=15000)
+                        else:
+                            await page.locator('div, span, button, p').filter(has_text=re.compile(r'^SMALL$', re.IGNORECASE)).last.click(timeout=15000)
                     except Exception as e:
-                        logger.error(f"Total amount click failed: {e}")
-                        # ফলব্যাক JS
-                        await page.evaluate("""
-                            (() => {
-                                let els = document.querySelectorAll('div, span, button, p');
-                                for (let el of els) {
-                                    let text = (el.innerText || el.textContent || '').toLowerCase();
-                                    if (text.includes('total amount')) {
-                                        el.click(); return true;
-                                    }
-                                }
-                                return false;
-                            })()
-                        """)
+                        logger.error(f"Playwright click failed: {e}")
+                        await ctx.bot.send_message(chat_id=uid, text="⚠️ **ক্লিক করতে ব্যর্থ!** পপআপের কারণে ক্লিক ব্লক হয়েছে।")
+                        await asyncio.sleep(5)
+                        continue
+
+                    # 💡 ৪. কোনো দেরি না করে Total amount-এ ক্লিক
+                    logger.info("Clicking Total Amount immediately...")
+                    bet_success = False
+                    
+                    for _ in range(15):
+                        try:
+                            total_btn = page.locator('text=/Total amount/i').last
+                            if await total_btn.count() > 0 and await total_btn.is_visible():
+                                await total_btn.click(timeout=1000, force=True)
+                                bet_success = True
+                                break
+                        except: pass
+                        await asyncio.sleep(0.2)
+
+                    if not bet_success:
+                        await ctx.bot.send_message(chat_id=uid, text="❌ **বেট ব্যর্থ হয়েছে!**\n'Total amount' বাটনে ক্লিক করা যায়নি।")
+                        await asyncio.sleep(5)
+                        continue
 
                     # 💡 ৫. স্ক্রিনশট
                     await page.wait_for_timeout(2000)
@@ -436,7 +419,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # 💡 ৭. ৩২ সেকেন্ড অপেক্ষা (উইন বা লস বক্স আসার জন্য)
                     await asyncio.sleep(32)
 
-                    # 💡 ৮. রেজাল্ট চেক (স্ক্রল করে ব্যালেন্স চেক করবে, অ্যাকাউন্টে যাবে না)
+                    # 💡 ৮. রেজাল্ট চেক (স্ক্রল করে ব্যালেন্স চেক করবে)
                     await page.evaluate("window.scrollTo(0, 0);") # উপরে স্ক্রল করবে ব্যালেন্স দেখতে
                     await page.wait_for_timeout(1000)
                     
@@ -513,7 +496,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 f"{next_step_txt}"
                             ))
 
-                    # রেজাল্ট চেক করার পর পেজে থাকবে, শুধু স্ক্রল করে নিচে নামবে নতুন রাউন্ডের জন্য
+                    # পেজে থাকবে, শুধু স্ক্রল করে নিচে নামবে নতুন রাউন্ডের জন্য
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(2000)
 
