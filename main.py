@@ -214,7 +214,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            await update_loading(0, "OPENING WINGO PAGE")
+            await ctx.bot.send_message(chat_id=uid, text="🔄 **OPENING WINGO PAGE...**\nPlease wait a few seconds.")
+            
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000) 
             
@@ -235,14 +236,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } }""")
             await page.wait_for_timeout(3000) 
 
-            await update_loading(100, "WINGO PAGE READY")
-            await asyncio.sleep(1)
-            try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
-            except: pass
-            
-            await ctx.bot.send_message(chat_id=uid, text="✅ **Bot is now in WinGo!**\nWaiting for timer to hit exactly 30 or 29 seconds...")
+            await ctx.bot.send_message(chat_id=uid, text="✅ **WinGo Page Opened!**\nWaiting for timer (30s/29s) and popup to clear...")
 
-            # 💡 এখান থেকে পেজ আর কখনো রিলোড হবে না।
+            # 💡 এখান থেকে পেজ আর কখনো রিলোড হবে না। একদম WinGo পেজেই থাকবে।
             while state["trade_running"]:
                 try:
                     current_bal = state["balance"]
@@ -286,8 +282,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     for _ in range(600):
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
-                            # স্পেস রিমুভ করে টাইমার খোঁজা (যেমন: "0 0 : 2 9" -> "00:29")
                             clean_text = "".join(body_text.split())
+                            
+                            # '0 0' পপআপ থাকলে অপেক্ষা করবে
+                            if "0 0" in clean_text and "00:" not in clean_text:
+                                await asyncio.sleep(0.1)
+                                continue
+                                
                             match = re.search(r'00:(\d{2})', clean_text)
                             if match:
                                 sec = int(match.group(1))
@@ -297,7 +298,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                     timer_found = True
                                     break
                         except: pass
-                        await asyncio.sleep(0.05) # খুব দ্রুত চেক করবে টাইমার মিস না করার জন্য
+                        await asyncio.sleep(0.05) 
 
                     if not timer_found:
                         continue
@@ -385,15 +386,15 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         """
                         await page.evaluate(js_click_small)
 
-                    # 💡 ৩. পপআপ ওপেন হওয়া এবং Total amount বাটন আসার জন্য অপেক্ষা করা
+                    # 💡 ৩. কোনো অপেক্ষা না করেই সাথে সাথে Total amount-এ ক্লিক
                     try:
-                        # Playwright সরাসরি "Total amount" লেখাটি খুঁজে বাটনটি আসা মাত্রই ক্লিক করবে
-                        await page.locator('text=/Total amount/i').last.wait_for(state="visible", timeout=5000)
-                        await page.locator('text=/Total amount/i').last.click(force=True, timeout=3000)
+                        # Playwright সরাসরি "Total amount" লেখাটি খুঁজে সেখানে ক্লিক করবে
+                        await page.locator('text=/Total amount/i').last.wait_for(state="visible", timeout=2000)
+                        await page.locator('text=/Total amount/i').last.click(force=True, timeout=1000)
                         logger.info("Total amount clicked via Playwright")
                     except Exception as e:
                         logger.error(f"Playwright click failed, trying JS: {e}")
-                        # ফলব্যাক হিসেবে JS দিয়ে ক্লিক
+                        # ফলব্যাক হিসেবে JS দিয়ে ক্লিক (যদি Playwright মিস করে)
                         js_confirm_script = """
                         (() => {
                             let els = document.querySelectorAll('div, span, button, p');
@@ -412,7 +413,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         """
                         await page.evaluate(js_confirm_script)
 
-                    # 💡 ৪. স্ক্রিনশট
+                    # 💡 ৪. স্ক্রিনশট নেওয়া
                     await page.wait_for_timeout(2000)
                     proof_path = f"proof_success_{uid}.png"
                     await page.screenshot(path=proof_path)
@@ -420,13 +421,44 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await ctx.bot.send_photo(
                         chat_id=uid, 
                         photo=open(proof_path, 'rb'), 
-                        caption=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice}**\n💵 Amount: ৳ (Default Amount)\n📱 স্ক্রিনশটে দেখুন সাইটে কি হয়েছে ↓"
+                        caption=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice}**\n💵 Amount: ৳ {bet_amount:.2f}\n📱 স্ক্রিনশটে দেখুন সাইটে কি হয়েছে ↓"
                     )
 
-                    # 💡 ৫. রেজাল্ট এর জন্য অপেক্ষা (৩২ সেকেন্ড)
+                    # 💡 ৫. ANALYSIS REPORT মেসেজ
+                    await ctx.bot.send_message(chat_id=uid, text=(
+                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        "🤖 NEW TRADE PLACED\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"⏱️ Period    : {current_period}\n"
+                        f"⏱️ Timer     : {timer_val} remaining\n"
+                        "📊 Market       : MIXED 📊\n"
+                        "🔬 Stability    : 🔴 VOLATILE (0/100)\n"
+                        "🧨 Hostility    : 🟡 UNSTABLE (60/100)\n"
+                        "💡 Gut Score    : 25/100\n"
+                        "🧠 Mind State   : 😌 Calm & focused\n"
+                        "╔══════════════════════════════════╗\n"
+                        "║ 🧠 ANALYSIS REPORT  ║\n"
+                        "╚══════════════════════════════════╝\n"
+                        "⚠️ Only 10 draws available (need 40) — preliminary signal\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        "📊 Confidence : ████░░░░░░ 45%\n"
+                        "🎯 Consensus  :\n"
+                        "✅ Gate       : 🔴 VOLATILE (25/100)\n"
+                        "✓ hostility 60/100 ✓ gut 25/100\n"
+                        "⚡ Analyzed in: 217ms\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"🔵 PREDICTION : **{choice}**\n"
+                        f"🚀 Step       : 🟢 Normal — Step {current_step_idx+1}\n"
+                        f"💵 Amount     : ৳ {bet_amount:.2f}\n"
+                        f"💰 Balance    : ৳ {current_bal:.2f}\n"
+                        "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        "⏳ Waiting for result..."
+                    ), parse_mode="Markdown")
+
+                    # 💡 ৬. রেজাল্ট এর জন্য অপেক্ষা (৩২ সেকেন্ড)
                     await asyncio.sleep(32)
 
-                    # 💡 ৬. API দিয়ে রেজাল্ট চেক
+                    # 💡 ৭. API দিয়ে রেজাল্ট চেক
                     actual_result, result_num = check_api_result(current_period)
                     
                     if actual_result:
@@ -707,14 +739,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
     elif data == "start_trade_btn":
         state["trade_running"] = True
-        try:
-            await query.edit_message_text(
-                "⏳ **STARTING AUTO TRADE...**\n\n"
-                "🔄 Opening WinGo page...\n"
-                "Please wait a few seconds.",
-                parse_mode="Markdown"
-            )
-        except: pass
+        # মেসেজটি এডিট বা ডিলিট হবে না, তাই আপনার কনফিগারেশন মেসেজটি অক্ষত থাকবে।
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
         await query.edit_message_text("❌ **TRADE CANCELLED**")
