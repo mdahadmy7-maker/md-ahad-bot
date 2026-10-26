@@ -214,7 +214,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # 💡 WinGo পেজে ঢুকবে শুধু একবার
             await update_loading(0, "OPENING WINGO PAGE")
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000) 
@@ -241,9 +240,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
             except: pass
             
-            await ctx.bot.send_message(chat_id=uid, text="✅ **Bot is now in WinGo!**\nWaiting for timer to hit 30-6 seconds...")
+            await ctx.bot.send_message(chat_id=uid, text="✅ **Bot is now in WinGo!**\nWaiting for timer to be between 06 and 30 seconds...")
 
-            # 💡 এখান থেকে পেজ আর কখনো রিলোড হবে না
             while state["trade_running"]:
                 try:
                     current_bal = state["balance"]
@@ -279,19 +277,38 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. টাইমার চেক (৬ থেকে ৩০ সেকেন্ড)
-                    logger.info("Waiting for timer (30-06s)...")
+                    # 💡 টাইমার চেক (৬ থেকে ৩০ সেকেন্ডের মধ্যে)
+                    logger.info("Waiting for timer between 06 and 30 seconds...")
                     timer_val = "0s"
                     timer_found = False
                     
-                    for _ in range(600): # ৬০ সেকেন্ড পর্যন্ত অপেক্ষা করবে
+                    for _ in range(600): 
                         try:
-                            body_text = await page.evaluate("() => document.body.innerText")
+                            # "Time remaining" এর পাশের টাইমারটি পড়া
+                            timer_text = await page.evaluate("""
+                                () => {
+                                    let els = document.querySelectorAll('div, span, p');
+                                    for (let el of els) {
+                                        if (el.innerText && el.innerText.includes('Time remaining')) {
+                                            let parent = el.parentElement;
+                                            if (parent) return parent.innerText;
+                                        }
+                                    }
+                                    return '';
+                                }
+                            """)
                             
-                            # '0 0 : 2 8' অথবা '00:28' এরকম প্যাটার্ন খুঁজবে
-                            match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
+                            if not timer_text:
+                                await asyncio.sleep(0.1)
+                                continue
+                                
+                            # সব স্পেস মুছে ফেলা হচ্ছে (যেমন: "0 0 : 2 8" -> "00:28")
+                            clean_text = "".join(timer_text.split())
+                            
+                            match = re.search(r'0*:(\d{2})', clean_text)
                             if match:
                                 sec = int(match.group(1))
+                                # ৩০ থেকে ৬ সেকেন্ডের মধ্যে হলে ট্রু হবে
                                 if 6 <= sec <= 30: 
                                     timer_val = f"{sec}s"
                                     timer_found = True
@@ -347,10 +364,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ২. Big অথবা Small ক্লিক
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(200)
                     
+                    # 💡 Big অথবা Small ক্লিক
                     js_click_script = f"""
                     (() => {{
                         let els = document.querySelectorAll('div, span, button, p');
@@ -377,10 +394,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 await page.mouse.click(309, 890)
                         except: pass
 
-                    # 💡 ৩. পপআপ ওপেন হওয়া পর্যন্ত অপেক্ষা
                     await page.wait_for_timeout(1500)
 
-                    # 💡 ৪. Amount বসানো এবং Total amount ক্লিক
+                    # 💡 Amount বসানো এবং Total amount ক্লিক
                     try:
                         inputs = await page.locator('input[type="text"], input[type="number"]').all()
                         for inp in inputs:
@@ -411,7 +427,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             await page.mouse.click(309, 880) 
                         except: pass
 
-                    # 💡 ৫. স্ক্রিনশট নেওয়া (কোনো পেজ রিলোড নেই)
                     await page.wait_for_timeout(2000)
                     proof_path = f"proof_success_{uid}.png"
                     await page.screenshot(path=proof_path)
@@ -452,10 +467,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
-                    # 💡 ৬. ৩২ সেকেন্ড অপেক্ষা (পেজে থাকবে)
                     await asyncio.sleep(32)
 
-                    # 💡 ৭. API দিয়ে রেজাল্ট চেক
                     actual_result, result_num = check_api_result(current_period)
                     
                     if actual_result:
