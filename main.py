@@ -242,14 +242,21 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             while state["trade_running"]:
                 try:
-                    # WinGo পেজের উপরের ব্যালেন্স রিড করা (পেজ রিলোড হবে না)
+                    # 💡 WinGo পেজের ব্যালেন্স রিড করা (একাধিক ৳ চিহ্ন থেকে সঠিক ব্যালেন্স বের করা)
                     body_text = await page.evaluate("() => document.body.innerText")
-                    bal_match = re.search(r'৳\s*([\d.]+)', body_text)
-                    if bal_match:
-                        current_bal = float(bal_match.group(1))
-                        state["balance"] = current_bal
-                    else:
-                        current_bal = state["balance"]
+                    bal_matches = re.findall(r'৳\s*([\d.]+)', body_text)
+                    
+                    current_bal = state["balance"] # ডিফল্ট আগের ব্যালেন্স
+                    if bal_matches:
+                        # ০.০০ বাদ দিয়ে আসল ব্যালেন্সটি খোঁজা হবে
+                        for b in bal_matches:
+                            try:
+                                b_val = float(b)
+                                if b_val > 0: 
+                                    current_bal = b_val
+                                    state["balance"] = current_bal
+                                    break
+                            except: pass
 
                     if current_bal >= target_balance:
                         profit = current_bal - initial_balance
@@ -286,7 +293,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     logger.info("Waiting for 30/29s timer...")
                     timer_val = "0s"
                     timer_found = False
-                    for _ in range(600): # ৩০ সেকেন্ড পর্যন্ত অপেক্ষা করবে
+                    for _ in range(600): 
                         try:
                             b_text = await page.evaluate("() => document.body.innerText")
                             if "0 0" in b_text:
@@ -351,7 +358,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 Big অথবা Small ক্লিক (শুধুমাত্র একটাতে)
+                    # 💡 Big অথবা Small ক্লিক
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(200)
                     
@@ -394,7 +401,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             await agree_box.click(force=True, timeout=1000)
                     except: pass
 
-                    # Total Amount বাটন ক্লিক (JS এবং Playwright দুটোই ব্যবহার করা হচ্ছে)
                     try:
                         confirm_btn = page.locator('text=/Total amount/i').last
                         if await confirm_btn.count() > 0:
@@ -464,10 +470,19 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     # 💡 রেজাল্ট চেক (একই WinGo পেজের উপরের ব্যালেন্স থেকে)
                     new_page_text = await page.evaluate("() => document.body.innerText")
-                    new_bal_match = re.search(r'৳\s*([\d.]+)', new_page_text)
+                    new_bal_matches = re.findall(r'৳\s*([\d.]+)', new_page_text)
                     
-                    if new_bal_match:
-                        new_balance = float(new_bal_match.group(1))
+                    new_balance = current_bal
+                    if new_bal_matches:
+                        for b in new_bal_matches:
+                            try:
+                                b_val = float(b)
+                                if b_val > 0: # ০.০০ বাদ দিবে
+                                    new_balance = b_val
+                                    break
+                            except: pass
+                    
+                    if new_balance != current_bal:
                         state['total_trades'] += 1
                         
                         if new_balance > current_bal:
