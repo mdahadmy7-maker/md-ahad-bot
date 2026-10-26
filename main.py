@@ -341,7 +341,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৩. সুপার ফাস্ট Big/Small ক্লিক (স্ক্রিনশট ১ অনুযায়ী)
+                    # 💡 ৩. শুধুমাত্র একটিতে ক্লিক করা (Big অথবা Small) - স্ক্রিনশট ১ অনুযায়ী
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(300)
                     
@@ -638,16 +638,4 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(target_msg)
         return
         
-    if state.get("awaiting") == "target":
-        try:
-            target_amount = float(text)
-            state["target"] = target_amount
-            balance = float(state.get('balance', '0.00'))
-            stop_at = balance + target_amount
-            target_set_msg = (
-                "╔════════════════════════╗\n"
-                "║   🎯 TARGET SET 🎯   ║\n"
-                "╚════════════════════════╝\n\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"
+    if state.get("
