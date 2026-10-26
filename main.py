@@ -344,9 +344,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     logger.info(f"Clicking {choice}...")
                     try:
                         if choice.upper() == "BIG":
-                            await page.locator('div, span, button').filter(has_text=re.compile(r'^BIG$', re.IGNORECASE)).last.click(timeout=10000)
+                            await page.locator('div, span, button').filter(has_text=re.compile(r'^BIG$', re.IGNORECASE)).last.click(timeout=15000)
                         else:
-                            await page.locator('div, span, button').filter(has_text=re.compile(r'^SMALL$', re.IGNORECASE)).last.click(timeout=10000)
+                            await page.locator('div, span, button').filter(has_text=re.compile(r'^SMALL$', re.IGNORECASE)).last.click(timeout=15000)
                     except Exception as e:
                         logger.error(f"Playwright click failed: {e}")
                         # ফলব্যাক
@@ -362,18 +362,21 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             }})()
                         """)
 
-                    # 💡 ৪. কোনো অপেক্ষা ছাড়াই Total amount-এ ক্লিক (force=True বাদ দেওয়া হয়েছে)
-                    logger.info("Clicking Total Amount immediately...")
+                    # 💡 ৪. Total amount বাটনটি আসার জন্য অপেক্ষা করা এবং ক্লিক করা
+                    logger.info("Waiting for Total Amount modal...")
                     bet_success = False
                     try:
-                        await page.locator('text=/Total amount/i').last.click(timeout=5000)
+                        # Playwright অপেক্ষা করবে বাটনটি ভিজিবল হওয়া পর্যন্ত
+                        total_btn = page.locator('text=/Total amount/i').last
+                        await total_btn.wait_for(state="visible", timeout=5000)
+                        await total_btn.click(timeout=2000)
                         bet_success = True
                     except Exception as e:
                         logger.error(f"Total amount click failed: {e}")
 
                     if not bet_success:
-                        await ctx.bot.send_message(chat_id=uid, text="⚠️ **BET FAILED**\nCould not click 'Total amount'. Popup might have blocked.")
-                        await asyncio.sleep(2)
+                        await ctx.bot.send_message(chat_id=uid, text="⚠️ **BET FAILED**\nCould not click 'Total amount'. Retrying next round...")
+                        await asyncio.sleep(5)
                         continue
 
                     # 💡 ৫. সফলভাবে বিট হওয়ার পর ২ সেকেন্ড অপেক্ষা করে স্ক্রিনশট নেওয়া
