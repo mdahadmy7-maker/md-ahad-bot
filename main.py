@@ -2,7 +2,7 @@ import asyncio
 import logging
 import re
 import os
-import time  # <--- এটি যোগ করা হয়েছে
+import time
 import requests
 import json
 from datetime import datetime
@@ -78,7 +78,7 @@ def get_history_and_prediction():
     except Exception as e:
         logger.error(f"History API error: {e}")
         import random
-        return random.choice(["BIG", "SMALL"]), str(int(time.time())) # time ব্যবহার করা হয়েছে
+        return random.choice(["BIG", "SMALL"]), str(int(time.time()))
 
 def check_api_result(period):
     try:
@@ -244,7 +244,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             while state["trade_running"]:
                 try:
-                    current_bal = state["balance"] # স্ক্রিন থেকে না পড়ে নিজের হিসাব ব্যবহার করবে
+                    current_bal = state["balance"]
 
                     if current_bal >= target_balance:
                         profit = current_bal - initial_balance
@@ -277,14 +277,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 টাইমার চেক (২৯, ২৮ বা ৩০ সেকেন্ড)
                     logger.info("Waiting for 30/29s timer...")
                     timer_val = "0s"
                     timer_found = False
                     for _ in range(600): 
                         try:
                             b_text = await page.evaluate("() => document.body.innerText")
-                            if "0 0" in b_text: # রেজাল্ট পপআপ থাকলে স্কিপ
+                            if "0 0" in b_text:
                                 await asyncio.sleep(0.1)
                                 continue
                                 
@@ -346,7 +345,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 Big অথবা Small ক্লিক
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(200)
                     
@@ -375,10 +373,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 await page.mouse.click(309, 890)
                         except: pass
 
-                    # 💡 পপআপ ওপেন হওয়া পর্যন্ত অপেক্ষা
                     await page.wait_for_timeout(1500)
 
-                    # 💡 পপআপে টাকা বসানো এবং Total amount ক্লিক
                     try:
                         inputs = await page.locator('input[type="text"], input[type="number"]').all()
                         for inp in inputs:
@@ -409,7 +405,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             await page.mouse.click(309, 880) 
                         except: pass
 
-                    # 💡 স্ক্রিনশট নেওয়া
                     await page.wait_for_timeout(2000)
                     proof_path = f"proof_success_{uid}.png"
                     await page.screenshot(path=proof_path)
@@ -420,7 +415,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         caption=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice}**\n💵 Amount: ৳ {bet_amount:.2f}\n📱 স্ক্রিনশটে দেখুন সাইটে কি হয়েছে ↓"
                     )
 
-                    # 💡 ANALYSIS REPORT
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
@@ -451,16 +445,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
-                    # 💡 ৩২ সেকেন্ড অপেক্ষা
                     await asyncio.sleep(32)
 
-                    # 💡 রেজাল্ট চেক (API দিয়ে)
                     actual_result, result_num = check_api_result(current_period)
                     
                     if actual_result:
                         state['total_trades'] += 1
                         
-                        if actual_result == choice: # WIN
+                        if actual_result == choice:
                             state["balance"] = state["balance"] + (bet_amount * 0.96)
                             state["wins"] += 1
                             current_step_idx = 0
@@ -491,7 +483,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 "➡️ Next Step : 1\n"
                                 "🟢 Recovered! Back to Step 1."
                             ))
-                        else: # LOSS
+                        else:
                             state["balance"] = state["balance"] - bet_amount
                             state["losses"] += 1
                             current_step_idx += 1
@@ -578,51 +570,51 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     text = update.message.text.strip()
     
-    if state.get("awaiting") == "phone":
-        state["temp_phone"] = text
-        state["awaiting"] = "password"
-        await update.message.reply_text(
-            "╔════════════════════════╗\n"
-            "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
-            "╚════════════════════════╝\n"
-            f"☎️ Number : {text}\n\n"
-            "🔑 Now enter your password:\n"
-            "Your message will be deleted immediately for security."
-        )
-        return
+    try:
+        if state.get("awaiting") == "phone":
+            state["temp_phone"] = text
+            state["awaiting"] = "password"
+            await update.message.reply_text(
+                "╔════════════════════════╗\n"
+                "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
+                "╚════════════════════════╝\n"
+                f"☎️ Number : {text}\n\n"
+                "🔑 Now enter your password:\n"
+                "Your message will be deleted immediately for security."
+            )
+            return
 
-    if state.get("awaiting") == "password":
-        state["temp_password"] = text
-        state["awaiting"] = None 
-        try: await update.message.delete()
-        except: pass
-        
-        if state.get("task"): state["task"].cancel()
-        state["first_bet"] = True 
-        loading_msg = await update.message.reply_text("🔄 **CONNECTING TO HGNICE**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
-        state["task"] = asyncio.create_task(playwright_login_and_bet(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"]))
-        return
-        
-    if text == "🚀 START YOUR TARGET":
-        state["awaiting"] = "target"
-        target_msg = (
-            "╔════════════════════════╗\n"
-            "║   🚀 START YOUR TARGET 🚀   ║\n"
-            "╚════════════════════════╝\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "💰 YOUR BALANCE\n"
-            f"৳ {state.get('balance', 0.0):.2f}\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🎯 Enter your TARGET profit amount:\n"
-            "How much do you want to earn? (in ৳)"
-        )
-        await update.message.reply_text(target_msg)
-        return
-        
-    if state.get("awaiting") == "target":
-        try:
+        if state.get("awaiting") == "password":
+            state["temp_password"] = text
+            state["awaiting"] = None 
+            try: await update.message.delete()
+            except: pass
+            
+            if state.get("task"): state["task"].cancel()
+            state["first_bet"] = True 
+            loading_msg = await update.message.reply_text("🔄 **CONNECTING TO HGNICE**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
+            state["task"] = asyncio.create_task(playwright_login_and_bet(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"]))
+            return
+            
+        if text == "🚀 START YOUR TARGET":
+            state["awaiting"] = "target"
+            target_msg = (
+                "╔════════════════════════╗\n"
+                "║   🚀 START YOUR TARGET 🚀   ║\n"
+                "╚════════════════════════╝\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "💰 YOUR BALANCE\n"
+                f"৳ {state.get('balance', 0.0):.2f}\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "🎯 Enter your TARGET profit amount:\n"
+                "How much do you want to earn? (in ৳)"
+            )
+            await update.message.reply_text(target_msg)
+            return
+            
+        if state.get("awaiting") == "target":
             target_amount = float(text)
             state["target"] = target_amount
             balance = float(state.get('balance', 0.0))
@@ -643,12 +635,9 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             state["awaiting"] = "steps"
             await update.message.reply_text(target_set_msg)
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 50)।")
-        return
-        
-    if state.get("awaiting") == "steps":
-        try:
+            return
+            
+        if state.get("awaiting") == "steps":
             steps = int(text)
             if steps > 50 or steps < 1: raise ValueError("Steps must be between 1 and 50")
             state["steps"] = steps
@@ -663,12 +652,9 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"💵 Step {state['current_step']} — bet amount? (in ৳)"
             )
             await update.message.reply_text(step_msg)
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! ১ থেকে ৫০ এর মধ্যে একটি সংখ্যা দিন (যেমন: 5)।")
-        return
+            return
 
-    if state.get("awaiting") == "step_amount":
-        try:
+        if state.get("awaiting") == "step_amount":
             amount = float(text)
             if amount <= 0: raise ValueError("Amount must be greater than 0")
             state["step_amounts"].append(amount)
@@ -705,20 +691,24 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                      InlineKeyboardButton("❌ CANCEL", callback_data="cancel_trade_btn")]
                 ])
                 await update.message.reply_text(combined_msg, reply_markup=inline_kb)
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 1)।")
-        return
+            return
 
-    if text == "🛑 STOP TRADE":
-        state["trade_running"] = False
-        await update.message.reply_text("🛑 TRADE STOPPED")
-        return
-    if text == "🚪 LOGOUT":
-        state["trade_running"] = False
-        state["temp_phone"] = ""
-        state["temp_password"] = ""
-        await update.message.reply_text("🚪 LOGGED OUT")
-        return
+        if text == "🛑 STOP TRADE":
+            state["trade_running"] = False
+            await update.message.reply_text("🛑 TRADE STOPPED")
+            return
+        if text == "🚪 LOGOUT":
+            state["trade_running"] = False
+            state["temp_phone"] = ""
+            state["temp_password"] = ""
+            await update.message.reply_text("🚪 LOGGED OUT")
+            return
+
+    except ValueError:
+        await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 1)।")
+    except Exception as e:
+        # কোনো অপ্রত্যাশিত এরর হলে তা ইউজারকে জানানো হবে
+        await update.message.reply_text(f"⚠️ **Error:** {str(e)}")
 
 async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
