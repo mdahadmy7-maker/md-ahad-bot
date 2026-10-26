@@ -240,7 +240,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
             except: pass
             
-            await ctx.bot.send_message(chat_id=uid, text="✅ **Bot is now in WinGo!**\nWaiting for 30/29s timer...")
+            await ctx.bot.send_message(chat_id=uid, text="✅ **Bot is now in WinGo!**\nWaiting for the timer to drop to 20-30 seconds...")
 
             while state["trade_running"]:
                 try:
@@ -277,27 +277,33 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    logger.info("Waiting for 30/29s timer...")
+                    # 💡 টাইমার চেক (খুবই ফ্লেক্সিবল করা হয়েছে)
+                    logger.info("Waiting for timer...")
                     timer_val = "0s"
                     timer_found = False
-                    for _ in range(600): 
+                    for _ in range(600): # ১ মিনিট পর্যন্ত অপেক্ষা করবে
                         try:
                             b_text = await page.evaluate("() => document.body.innerText")
-                            if "0 0" in b_text:
+                            
+                            # '0 0' পপআপ চেক
+                            if "0 0" in b_text and "Time remaining" not in b_text:
                                 await asyncio.sleep(0.1)
                                 continue
                                 
+                            # টাইমার রিড করা (যেমন: 0 0 : 29)
                             match = re.search(r'0\s*0\s*:\s*(\d{2})', b_text)
                             if match:
                                 sec = int(match.group(1))
-                                if sec in [30, 29, 28]: 
+                                # ২০ থেকে ৩০ সেকেন্ডের মধ্যে পড়লেই আমরা ধরব
+                                if 20 <= sec <= 30: 
                                     timer_val = f"{sec}s"
                                     timer_found = True
                                     break
                         except: pass
-                        await asyncio.sleep(0.05) 
+                        await asyncio.sleep(0.1) 
 
                     if not timer_found:
+                        logger.info("Timer not found, retrying...")
                         continue
 
                     step_plan_str = "┌────────────────────────────────┐\n"
@@ -707,7 +713,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     except ValueError:
         await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 1)।")
     except Exception as e:
-        # কোনো অপ্রত্যাশিত এরর হলে তা ইউজারকে জানানো হবে
         await update.message.reply_text(f"⚠️ **Error:** {str(e)}")
 
 async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
