@@ -48,7 +48,6 @@ def get_history_and_prediction():
             raise Exception("No data")
             
         latest_period = str(list_data[0].get("issueNumber", "Unknown"))
-        latest_number = int(list_data[0].get("number", 0))
         
         reversed_list = list(reversed(list_data))
         history = []
@@ -81,7 +80,7 @@ def get_history_and_prediction():
         import random
         return random.choice(["BIG", "SMALL"]), fallback_period
 
-# API দিয়ে রেজাল্ট চেক করা (পেজ রিলোড ছাড়াই)
+# API দিয়ে রেজাল্ট চেক করা
 def check_api_result(period):
     try:
         headers = {'User-Agent': 'Mozilla/5.0'}
@@ -236,7 +235,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # WinGo পেজে ঢুকবে
+            # 💡 WinGo পেজে ঢোকার লোডিং মেসেজ
+            await ctx.bot.send_message(chat_id=uid, text="🔄 **OPENING WINGO PAGE...**\nPlease wait a few seconds.")
+            
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000) 
             
@@ -257,10 +258,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } return false; }""")
             await page.wait_for_timeout(3000) 
 
-            # 💡 WinGo পেজে থাকবে, আর কোথাও যাবে না
+            await ctx.bot.send_message(chat_id=uid, text="✅ **WinGo Page Opened!**\nWaiting for 30s timer...")
+
             while state["trade_running"]:
                 try:
-                    current_bal = state["balance"] # স্ক্রিন থেকে না পড়ে নিজের হিসাব ব্যবহার করবে
+                    current_bal = state["balance"]
 
                     if current_bal >= target_balance:
                         profit = current_bal - initial_balance
@@ -293,8 +295,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 টাইমার চেক (৩০ বা ২৯ সেকেন্ড)
-                    logger.info("Waiting for 30/29s timer...")
+                    # 💡 টাইমার চেক (৩০, ২৯ বা ২৮ সেকেন্ড)
+                    logger.info("Waiting for 30/29/28s timer...")
                     timer_val = "0s"
                     timer_found = False
                     for _ in range(600): 
@@ -307,7 +309,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             match = re.search(r'0\s*0\s*:\s*(\d{2})', b_text)
                             if match:
                                 sec = int(match.group(1))
-                                if sec == 30 or sec == 29: 
+                                if sec in [30, 29, 28]: 
                                     timer_val = f"{sec}s"
                                     timer_found = True
                                     break
@@ -469,10 +471,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
-                    # 💡 ৩২ সেকেন্ড অপেক্ষা (পেজ রিলোড হবে না)
+                    # 💡 ৩২ সেকেন্ড অপেক্ষা
                     await asyncio.sleep(32)
 
-                    # 💡 রেজাল্ট চেক (API দিয়ে, স্ক্রিন থেকে নয়)
+                    # 💡 রেজাল্ট চেক (API দিয়ে)
                     actual_result, result_num = check_api_result(current_period)
                     
                     if actual_result:
@@ -756,6 +758,14 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
     elif data == "start_trade_btn":
         state["trade_running"] = True
+        try:
+            await query.edit_message_text(
+                "⏳ **STARTING AUTO TRADE...**\n\n"
+                "🔄 Opening WinGo page...\n"
+                "Please wait a few seconds.",
+                parse_mode="Markdown"
+            )
+        except: pass
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
         await query.edit_message_text("❌ **TRADE CANCELLED**")
