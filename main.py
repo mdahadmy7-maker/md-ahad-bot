@@ -35,7 +35,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# 💡 ২. API থেকে রেজাল্ট ও প্রেডিকশন
+# 💡 ২. API থেকে রেজাল্ট ও প্রেডিকশন বের করার ফাংশন
 # ───────────────────────────────────────────
 def get_history_and_prediction():
     try:
@@ -274,29 +274,32 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
+                    # 💡 ১. ফাস্ট টাইমার চেক (নতুন রাউন্ড শুরু হওয়া মাত্রই ক্লিক করবে, 0 0 পপআপ স্কিপ করবে)
                     logger.info("Waiting for new round to start...")
                     timer_val = "0s"
-                    for _ in range(350): 
+                    for _ in range(400): # ৪০ সেকেন্ড পর্যন্ত অপেক্ষা করবে
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
-                            if "0 0" in body_text and "Time remaining" not in body_text:
+                            
+                            if "0 0" in body_text:
                                 await asyncio.sleep(0.1)
                                 continue
                                 
                             match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
                             if match:
                                 sec = int(match.group(1))
-                                if 25 <= sec <= 29: 
+                                if sec == 29 or sec == 28: # ঠিক ২৯ বা ২৮ সেকেন্ডে বিট করবে
                                     timer_val = f"{sec}s"
                                     break
                         except: pass
-                        await asyncio.sleep(0.1) 
+                        await asyncio.sleep(0.05) 
 
                     step_plan_str = "┌────────────────────────────────┐\n"
                     for i, amt in enumerate(state['step_amounts']):
                         step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
                     step_plan_str += "└────────────────────────────────┘"
 
+                    # 💡 ২. প্রথমবার AUTO TRADE ACTIVE মেসেজ
                     pred_msg = None
                     if state.get("first_bet", True):
                         await ctx.bot.send_message(chat_id=uid, text=(
@@ -318,9 +321,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                         pred_msg = await ctx.bot.send_message(chat_id=uid, text="━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[░░░░░░░░░░░░] 0%`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏳ _Running 9 layers + backtest..._", parse_mode="Markdown")
                         
-                        for pct in [45, 85, 100]:
+                        for pct in [50, 100]:
                             bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
-                            await asyncio.sleep(0.2)
+                            await asyncio.sleep(0.15)
                             try:
                                 await ctx.bot.edit_message_text(
                                     chat_id=uid, message_id=pred_msg.message_id,
@@ -329,7 +332,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 )
                             except: pass
                         
-                        await asyncio.sleep(0.3)
+                        await asyncio.sleep(0.2)
 
                     if pred_msg:
                         try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
@@ -339,7 +342,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     # 💡 ৩. Big অথবা Small ক্লিক করা
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                    await page.wait_for_timeout(300)
+                    await page.wait_for_timeout(200)
                     
                     js_click_script = f"""
                     (() => {{
@@ -368,7 +371,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except: pass
 
                     # 💡 ৪. অপেক্ষা করা যতক্ষণ না পপআপ (Total amount) ওপেন হয়
-                    await page.wait_for_timeout(1500)
+                    await page.wait_for_timeout(1000)
 
                     # 💡 ৫. পপআপে টাকার পরিমাণ বসানো এবং "Total amount" ক্লিক
                     try:
@@ -405,7 +408,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             await page.mouse.click(309, 880) 
                         except: pass
 
-                    # 💡 ৬. সফলভাবে বিট হওয়ার পর স্ক্রিনশট
+                    # 💡 ৬. সফলভাবে বিট হওয়ার পর ২ সেকেন্ড অপেক্ষা করে স্ক্রিনশট নেওয়া
                     await page.wait_for_timeout(2000)
                     proof_path = f"proof_success_{uid}.png"
                     await page.screenshot(path=proof_path)
