@@ -278,11 +278,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # 💡 ১. ফাস্ট টাইমার চেক (নতুন রাউন্ড শুরু হওয়া মাত্রই ক্লিক করবে)
                     logger.info("Waiting for new round to start...")
                     timer_val = "0s"
+                    timer_found = False
                     for _ in range(350): # ৩৫ সেকেন্ড পর্যন্ত অপেক্ষা করবে
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
-                            # 0 0 পপআপ থাকলে স্কিপ করবে
-                            if "0 0" in body_text and "Time remaining" not in body_text:
+                            # 0 0 বা 0 1 পপআপ থাকলে স্কিপ করবে
+                            if re.search(r'\b0\s*[0-5]\b', body_text):
                                 await asyncio.sleep(0.1)
                                 continue
                                 
@@ -291,9 +292,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 sec = int(match.group(1))
                                 if 6 <= sec <= 30: # ৩০ থেকে ৬ সেকেন্ডের মধ্যে হলেই বিট করবে
                                     timer_val = f"{sec}s"
+                                    timer_found = True
                                     break
                         except: pass
-                        await asyncio.sleep(0.1) # খুব দ্রুত চেক করবে
+                        await asyncio.sleep(0.1) 
+
+                    if not timer_found:
+                        continue
 
                     step_plan_str = "┌────────────────────────────────┐\n"
                     for i, amt in enumerate(state['step_amounts']):
@@ -341,44 +346,43 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৩. বিগ বা স্মলে ক্লিক (Playwright-এর নিজস্ব অরিজিনাল ক্লিক)
+                    # 💡 ৩. বিগ অথবা স্মল ক্লিক (Playwright-এর `get_by_text` ব্যবহার করে একদম নিখুঁতভাবে)
                     logger.info(f"Clicking {choice}...")
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(300)
                     
                     try:
                         if choice.upper() == "BIG":
-                            # Playwright.locator নিখুঁতভাবে বাটনটি খুঁজে বের করবে এবং ক্লিক করবে
-                            await page.locator('div, span, button').filter(has_text=re.compile(r'^BIG$', re.IGNORECASE)).last.click(timeout=10000)
+                            await page.get_by_text("Big", exact=True).click(timeout=10000)
                         else:
-                            await page.locator('div, span, button').filter(has_text=re.compile(r'^SMALL$', re.IGNORECASE)).last.click(timeout=10000)
+                            await page.get_by_text("Small", exact=True).click(timeout=10000)
                     except Exception as e:
-                        logger.error(f"Big/Small click failed: {e}")
+                        logger.error(f"Click failed: {e}")
                         await ctx.bot.send_message(chat_id=uid, text="⚠️ **বিগ/স্মলে ক্লিক করতে ব্যর্থ!**")
                         await asyncio.sleep(5)
                         continue
 
-                    # 💡 ৪. কোনো অপেক্ষা ছাড়াই সরাসরি Total amount-এ ক্লিক
-                    logger.info("Looking for Total Amount button...")
-                    bet_success = False
+                    # 💡 ৪. Total amount এ ক্লিক (কোনো দেরি না করে)
+                    logger.info("Looking for Total amount...")
+                    confirm_success = False
                     
-                    # ক্লিক করার সাথে সাথেই Total amount বাটনটি আসবে, তাই দ্রুত চেক করবে
+                    # বিগ/স্মল ক্লিক হওয়া মাত্রই বাটনটি আসে, তাই দ্রুত চেক করবে
                     for _ in range(15):
                         try:
                             total_btn = page.locator('text=/Total amount/i').last
                             if await total_btn.count() > 0 and await total_btn.is_visible():
                                 await total_btn.click(timeout=1000, force=True)
-                                bet_success = True
+                                confirm_success = True
                                 break
                         except: pass
                         await asyncio.sleep(0.2)
 
-                    if not bet_success:
+                    if not confirm_success:
                         await ctx.bot.send_message(chat_id=uid, text="❌ **বেট ব্যর্থ হয়েছে!**\n'Total amount' বাটনে ক্লিক করা যায়নি।")
                         await asyncio.sleep(5)
                         continue
 
-                    # 💡 ৫. স্ক্রিনশট নেওয়া
+                    # 💡 ৫. সফলভাবে বিট হওয়ার পর ২ সেকেন্ড অপেক্ষা করে স্ক্রিনশট নেওয়া
                     await page.wait_for_timeout(2000)
                     proof_path = f"proof_success_{uid}.png"
                     await page.screenshot(path=proof_path)
