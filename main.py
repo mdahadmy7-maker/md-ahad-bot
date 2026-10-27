@@ -275,11 +275,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. ফাস্ট টাইমার চেক (নতুন রাউন্ড শুরু হওয়া মাত্রই ক্লিক করবে)
+                    # 💡 ১. ফাস্ট টাইমার চেক (পপআপ চলে যাওয়া মাত্রই ক্লিক করবে)
                     logger.info("Waiting for new round to start...")
                     timer_val = "0s"
                     timer_found = False
-                    for _ in range(350): # ৩৫ সেকেন্ড পর্যন্ত অপেক্ষা করবে
+                    for _ in range(350): 
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
                             # 0 0 বা 0 1 পপআপ থাকলে স্কিপ করবে
@@ -346,7 +346,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৩. বিগ অথবা স্মল ক্লিক (Playwright-এর `get_by_text` ব্যবহার করে একদম নিখুঁতভাবে)
+                    # 💡 ৩. বিগ অথবা স্মল ক্লিক (Playwright-এর `get_by_text` একদম নিখুঁতভাবে)
                     logger.info(f"Clicking {choice}...")
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(300)
@@ -366,7 +366,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     logger.info("Looking for Total amount...")
                     confirm_success = False
                     
-                    # বিগ/স্মল ক্লিক হওয়া মাত্রই বাটনটি আসে, তাই দ্রুত চেক করবে
                     for _ in range(15):
                         try:
                             total_btn = page.locator('text=/Total amount/i').last
@@ -426,9 +425,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     await asyncio.sleep(32)
 
-                    # 💡 ৭. রেজাল্ট চেক (পেজ রিলোড না করে সরাসরি অ্যাকাউন্ট সেকশনে গিয়ে চেক করবে)
-                    await page.goto("https://www.hgnice.vip/#/Account", wait_until="domcontentloaded")
-                    await page.wait_for_timeout(2000) 
+                    # 💡 ৭. রেজাল্ট চেক (পেজ রিলোড না করে উপরে স্ক্রল করে ব্যালেন্স দেখবে)
+                    await page.evaluate("window.scrollTo(0, 0);") 
+                    await page.wait_for_timeout(1000)
                     
                     new_page_text = await page.evaluate("() => document.body.innerText")
                     new_balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
@@ -503,15 +502,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 f"{next_step_txt}"
                             ))
 
-                    # রেজাল্ট চেক করার পর আবার WinGo পেজে ফিরে যাবে পরের রাউন্ডের জন্য
-                    await page.goto(HOME_URL, wait_until="domcontentloaded")
-                    await page.wait_for_timeout(1500)
-                    try:
-                        await page.locator('text="Lottery"').first.click(timeout=3000, force=True)
-                        await page.wait_for_timeout(1000)
-                        win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
-                        await win_go_card.click(timeout=3000, force=True)
-                    except: pass
+                    # 💡 ৮. রেজাল্ট চেক করার পর আবার নিচে স্ক্রল করে বিট করার জায়গায় ফিরে যাবে (পেজ রিলোড হবে না)
+                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(2000)
 
                 except Exception as e:
