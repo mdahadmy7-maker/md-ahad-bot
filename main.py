@@ -278,14 +278,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. ফাস্ট টাইমার চেক (০ ০ পপআপ চলে যাওয়া মাত্রই ক্লিক করবে)
+                    # 💡 ১. ফাস্ট টাইমার চেক
                     logger.info("Waiting for new round to start...")
                     timer_val = "0s"
                     timer_found = False
-                    for _ in range(350): # ৩৫ সেকেন্ড পর্যন্ত অপেক্ষা করবে
+                    for _ in range(350): 
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
-                            # 0 0 বা 0 1 পপআপ থাকলে স্কিপ করবে
                             if re.search(r'\b0\s*[0-5]\b', body_text):
                                 await asyncio.sleep(0.1)
                                 continue
@@ -293,7 +292,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
                             if match:
                                 sec = int(match.group(1))
-                                if 6 <= sec <= 30: # ৩০ থেকে ৬ সেকেন্ডের মধ্যে হলেই বিট করবে
+                                if 6 <= sec <= 30: 
                                     timer_val = f"{sec}s"
                                     timer_found = True
                                     break
@@ -349,7 +348,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৩. বিগ অথবা স্মল ক্লিক (Playwright-এর `get_by_text` একদম নিখুঁতভাবে)
+                    # 💡 ৩. বিগ অথবা স্মল ক্লিক
                     logger.info(f"Clicking {choice}...")
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(300)
@@ -365,7 +364,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await asyncio.sleep(5)
                         continue
 
-                    # 💡 ৪. Total amount এ ক্লিক (কোনো দেরি না করে)
+                    # 💡 ৪. Total amount এ ক্লিক
                     logger.info("Looking for Total amount...")
                     confirm_success = False
                     
