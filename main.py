@@ -2,7 +2,6 @@ import asyncio
 import logging
 import re
 import os
-import time
 import requests
 import json
 from datetime import datetime
@@ -280,16 +279,24 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. টাইমার ৩০ থেকে ৬ সেকেন্ডের মধ্যে হওয়া পর্যন্ত অপেক্ষা করা
-                    logger.info("Waiting for timer (30 to 6 sec)...")
+                    # 💡 ১. পপআপ (0 0, 0 1) চলে যাওয়া পর্যন্ত অপেক্ষা করা এবং টাইমার ৬ থেকে ৩০ চেক করা
+                    logger.info("Waiting for popup (0 0, 0 1) to clear and timer 6 to 30...")
                     timer_val = "0s"
                     timer_ready = False
                     for _ in range(600): 
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
+                            
+                            # যদি স্ক্রিনে '0 0', '0 1' বা '0 2' টাইপের পপআপ থাকে, তবে অপেক্ষা করবে
+                            if re.search(r'\b0\s*[0-5]\b', body_text):
+                                await asyncio.sleep(0.1)
+                                continue
+                                
+                            # পপআপ চলে গেলে টাইমার চেক করবে
                             match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
                             if match:
                                 sec = int(match.group(1))
+                                # টাইমার ৩০ থেকে ৬ এর মধ্যে থাকলেই ক্লিক করবে
                                 if 6 <= sec <= 30: 
                                     timer_val = f"{sec}s"
                                     timer_ready = True
@@ -300,7 +307,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     if not timer_ready:
                         continue
 
-                    # 💡 ২. Big অথবা Small ক্লিক (শুধুমাত্র একটিতে, লুপ থেকে বেরিয়ে আসবে)
+                    # 💡 ২. বিগ অথবা স্মল ক্লিক (শুধুমাত্র একটিতে)
                     logger.info(f"Clicking {choice}...")
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(300)
@@ -439,7 +446,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await page.wait_for_timeout(2000)
 
                 except Exception as e:
-                    logger.error(f"Trading loop error: {e}")
+                    logger.error(f"Betting error: {e}")
                     await asyncio.sleep(2)
                     
         except Exception as e:
