@@ -309,19 +309,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. ওয়েটিং মেসেজ পাঠানো (আপনার স্ক্রিনশটের মতো)
+                    # 💡 ১. ওয়েটিং মেসেজ পাঠানো
                     wait_msg = await ctx.bot.send_message(
                         chat_id=uid, 
-                        text="⏳ **Waiting for 00 to clear...**\n_Bot will click instantly when timer shows 29/30._", 
+                        text="⏳ **Waiting for screen to be ready...**\n_Bot is waiting for 0 0 to clear._", 
                         parse_mode="Markdown"
                     )
 
-                    # 💡 ২. কঠোর টাইমার চেক (শুধুমাত্র 29 বা 30 হলে) এবং ওভারলে চেক
-                    logger.info("Waiting for exact round start (29/30s)...")
-                    timer_val = "0s"
+                    # 💡 ২. 0 0 ওভারলে অদৃশ্য হওয়া পর্যন্ত অপেক্ষা করা
+                    logger.info("Waiting for 0 0 to clear...")
                     for _ in range(600): 
                         try:
-                            # 0 0 চেক করা
                             overlay_visible = await page.evaluate("""
                                 () => {
                                     let els = document.querySelectorAll('div, span, p');
@@ -335,37 +333,42 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                     return false;
                                 }
                             """)
-                            
-                            if overlay_visible:
-                                await asyncio.sleep(0.1)
-                                continue
-                                
-                            # স্পেস রিমুভ করে টেক্সট নেওয়া (যেমন: 00:29)
-                            compact_text = await page.evaluate("() => document.body.innerText.replace(/\\s+/g, '')")
-                            match = re.search(r'00:(29|30)', compact_text)
-                            
-                            if match:
-                                timer_val = f"{match.group(1)}s"
-                                break
+                            if not overlay_visible:
+                                break # ওভারলে মুছে গেছে, লুপ থেকে বের হবে
                         except: pass
-                        await asyncio.sleep(0.05)
+                        await asyncio.sleep(0.1)
 
-                    # 💡 ৩. Playwright এর অরিজিনাল click() ব্যবহার করা (এটি 0 0 ওভারলে থাকলে ক্লিক করবে না)
+                    # 💡 ৩. Playwright Native Click দিয়ে Big/Small এ ক্লিক
+                    logger.info(f"Clicking {choice}...")
+                    if choice.upper() == "BIG":
+                        await page.get_by_text("Big", exact=True).last.click(timeout=5000)
+                    else:
+                        await page.get_by_text("Small", exact=True).last.click(timeout=5000)
+
+                    # 💡 ৪. "Total amount" বাটন আসার সাথে সাথেই ক্লিক করা
                     try:
-                        if choice.upper() == "BIG":
-                            await page.get_by_text("Big", exact=True).last.click(timeout=5000)
-                        else:
-                            await page.get_by_text("Small", exact=True).last.click(timeout=5000)
-                    except:
-                        pass # ফলব্যাক বাদ দেওয়া হলো যাতে ভুল ক্লিক না হয়
+                        total_amount_btn = page.get_by_text("Total amount", exact=False).last
+                        # ৩ সেকেন্ড পর্যন্ত অপেক্ষা করবে বাটনটি স্ক্রিনে আসার জন্য
+                        await total_amount_btn.wait_for(state="visible", timeout=3000)
+                        await total_amount_btn.click()
+                    except Exception as e:
+                        logger.error(f"Total amount click failed: {e}")
+                        # ফলব্যাক জাভাস্ক্রিপ্ট
+                        await page.evaluate("""
+                        (() => {
+                            let btns = document.querySelectorAll('div, button, span');
+                            for(let el of btns) {
+                                let txt = (el.innerText || '').toLowerCase();
+                                if(txt.includes('total amount')) {
+                                    el.click();
+                                    return true;
+                                }
+                            }
+                            return false;
+                        })()
+                        """)
 
-                    # 💡 ৪. "Total amount" বাটন আসার সাথে সাথে ক্লিক
-                    try:
-                        await page.get_by_text("Total amount", exact=False).last.click(timeout=3000)
-                    except:
-                        pass
-
-                    # 💡 ৫. ওয়েটিং মেসেজটি ডিলিট করা (যাতে বোঝা যায় পপআপ শেষ)
+                    # 💡 ৫. ওয়েটিং মেসেজটি ডিলিট করা
                     try:
                         await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
                     except: pass
@@ -386,7 +389,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "🤖 NEW TRADE PLACED\n"
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         f"⏱️ Period    : {current_period}\n"
-                        f"⏱️ Timer     : {timer_val} remaining\n"
                         f"🔵 PREDICTION : **{choice}**\n"
                         f"🚀 Step       : 🟢 Normal — Step {current_step_idx+1}\n"
                         f"💵 Amount     : ৳ {bet_amount:.2f}\n"
