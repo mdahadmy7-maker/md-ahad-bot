@@ -310,31 +310,29 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. কঠোর টাইমার চেক (শুধুমাত্র ২৫ থেকে ২৯ সেকেন্ডের মধ্যে ক্লিক করবে)
+                    # 💡 ১. কঠোর টাইমার চেক (স্পেস রিমুভ করে 00:29 খোঁজা হবে)
                     logger.info("Waiting for new round (29s)...")
                     timer_val = "0s"
                     for _ in range(600): 
                         try:
-                            body_text = await page.evaluate("() => document.body.innerText")
+                            # document.body.innerText থেকে সব স্পেস (space) মুছে ফেলা হচ্ছে
+                            # যাতে "0 0 : 2 9" -> "00:29" হয়ে যায়
+                            compact_text = await page.evaluate("() => document.body.innerText.replace(/\\s+/g, '')")
                             
-                            # 0 0 থাকলে অপেক্ষা করবে, ক্লিক করবে না
-                            if "0 0" in body_text:
-                                await asyncio.sleep(0.1)
-                                continue
-                                
-                            match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
+                            # এখন আমরা শুধু 00:XX খুঁজবো
+                            match = re.search(r'00:([0-2]\d)', compact_text)
                             if match:
                                 sec = int(match.group(1))
-                                # 00 চলে যাওয়ার পর টাইমার ২৫-২৯ হলে তখনই ক্লিক করবে
+                                # টাইমার ২৫ থেকে ২৯ হলেই কেবল ক্লিক করবে
                                 if 25 <= sec <= 29: 
                                     timer_val = f"{sec}s"
                                     break
                         except: pass
                         await asyncio.sleep(0.1)
 
-                    # 💡 ২. সুপার ফাস্ট Big/Small ক্লিক (আগে স্ক্রল করে নিচে নামবে)
+                    # 💡 ২. সুপার ফাস্ট Big/Small ক্লিক 
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                    await page.wait_for_timeout(200)
+                    await page.wait_for_timeout(300)
                     
                     clicked = False
                     try:
