@@ -214,12 +214,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await browser.close()
                     return
 
-            # ---------------- ৪. অটো-বেট লুপ ----------------
+            # ---------------- ৪. অটো-বেট লুপ (বাটনে চাপ দেওয়ার পর এক্সিকিউট হবে) ----------------
             initial_balance = float(balance)
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # 💡 একবারই WinGo পেজে যাবে, বারবার রিলোড হবে না
+            # 💡 বাটনে চাপ দেওয়ার সাথে সাথেই WinGo পেজে প্রবেশ করবে
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000) 
             
@@ -239,6 +239,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             except:
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } return false; }""")
             await page.wait_for_timeout(3000) 
+
+            # 💡 WinGo পেজে ঢুকে প্রথম মেসেজটি পাঠাবে
+            await ctx.bot.send_message(chat_id=uid, text="✅ **WinGo Page Loaded!**\nBot is now placing bets continuously...")
 
             while state["trade_running"]:
                 try:
@@ -275,8 +278,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. স্ক্রিন স্বাভাবিক হওয়া পর্যন্ত অপেক্ষা করা
-                    logger.info("Waiting for new round to start (Timer 6 to 30)...")
+                    # 💡 ১. ফাস্ট টাইমার চেক (০ ০ পপআপ চলে যাওয়া মাত্রই ক্লিক করবে)
+                    logger.info("Waiting for new round to start...")
                     timer_val = "0s"
                     timer_found = False
                     for _ in range(350): # ৩৫ সেকেন্ড পর্যন্ত অপেক্ষা করবে
@@ -290,12 +293,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
                             if match:
                                 sec = int(match.group(1))
-                                if 6 <= sec <= 30: # টাইমার ৩০ থেকে ৬ এর মধ্যে হলেই বিট করবে
+                                if 6 <= sec <= 30: # ৩০ থেকে ৬ সেকেন্ডের মধ্যে হলেই বিট করবে
                                     timer_val = f"{sec}s"
                                     timer_found = True
                                     break
                         except: pass
-                        await asyncio.sleep(0.1)
+                        await asyncio.sleep(0.1) 
 
                     if not timer_found:
                         continue
@@ -346,7 +349,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৩. সুপার ফাস্ট Big/Small ক্লিক (Playwright-এর `get_by_text` একদম নিখুঁতভাবে)
+                    # 💡 ৩. বিগ অথবা স্মল ক্লিক (Playwright-এর `get_by_text` একদম নিখুঁতভাবে)
                     logger.info(f"Clicking {choice}...")
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(300)
@@ -717,6 +720,10 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
     elif data == "start_trade_btn":
         state["trade_running"] = True
+        # 💡 বাটনে চাপ দেওয়া মাত্রই মেসেজ আপডেট হবে এবং WinGo পেজে যাওয়া শুরু হবে
+        try:
+            await query.edit_message_text("🚀 **STARTING AUTO TRADE...**\n\n🔄 Opening WinGo Page... Please wait.", parse_mode="Markdown")
+        except: pass
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
         await query.edit_message_text("❌ **TRADE CANCELLED**")
