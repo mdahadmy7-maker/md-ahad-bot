@@ -309,65 +309,71 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. কঠোর টাইমার চেক (শুধুমাত্র 29 বা 30 হলে ক্লিক করবে)
+                    # 💡 ১. কঠোর টাইমার চেক (শুধুমাত্র 29 বা 30 হলে)
                     logger.info("Waiting for exact round start (29/30s)...")
                     timer_val = "0s"
-                    for _ in range(800): # ৮০ সেকেন্ড পর্যন্ত অপেক্ষা করবে
+                    for _ in range(600): 
                         try:
                             # স্পেস রিমুভ করে টেক্সট নেওয়া (যেমন: 00:29)
                             compact_text = await page.evaluate("() => document.body.innerText.replace(/\\s+/g, '')")
                             match = re.search(r'00:(29|30)', compact_text)
                             
-                            # যদি ২৯ বা ৩০ পাওয়া যায়, সাথে সাথে লুপ থেকে বের হবে
                             if match:
                                 timer_val = f"{match.group(1)}s"
                                 break
                         except: pass
-                        await asyncio.sleep(0.02) # ০.০২ সেকেন্ড পর পর চেক করবে (সুপারফাস্ট)
+                        await asyncio.sleep(0.05)
 
-                    # 💡 ২. সাথে সাথে Big/Small এ ক্লিক
-                    js_click_script = f"""
-                    (() => {{
-                        let els = document.querySelectorAll('div, span, button');
-                        for (let el of els) {{
-                            if (el.innerText && el.innerText.trim().toUpperCase() === '{choice.upper()}') {{
-                                let rect = el.getBoundingClientRect();
-                                if (rect.width > 0 && rect.height > 0 && rect.top > 500) {{
-                                    el.click();
-                                    return true;
-                                }}
-                            }}
-                        }}
-                        return false;
-                    }})()
-                    """
-                    await page.evaluate(js_click_script)
-
-                    # 💡 ৩. "Total amount" বাটন আসার সাথে সাথে ক্লিক
-                    for _ in range(30):
-                        clicked = await page.evaluate("""
-                            (() => {
-                                for(let el of document.querySelectorAll('span, div, label')) {
-                                    if(el.innerText && el.innerText.includes('I agree')) {
-                                        let cb = el.parentElement.querySelector('input[type="checkbox"]');
-                                        if(cb && !cb.checked) cb.click();
-                                        else el.click();
-                                    }
-                                }
-                                let btns = document.querySelectorAll('div, button, span');
-                                for(let el of btns) {
-                                    let txt = (el.innerText || '').toLowerCase();
-                                    if(txt.includes('total amount')) {
+                    # 💡 ২. Playwright এর অরিজিনাল click() ব্যবহার করা (এটি 0 0 ওভারলে থাকলে ক্লিক করবে না)
+                    try:
+                        if choice.upper() == "BIG":
+                            await page.get_by_text("Big", exact=True).last.click(timeout=5000)
+                        else:
+                            await page.get_by_text("Small", exact=True).last.click(timeout=5000)
+                    except:
+                        # যদি নেটিভ ক্লিক ফেইল করে, তবে ফলব্যাক হিসেবে JS ক্লিক (খুব কম ক্ষেত্রে লাগে)
+                        js_click_script = f"""
+                        (() => {{
+                            let els = document.querySelectorAll('div, span, button');
+                            for (let el of els) {{
+                                if (el.innerText && el.innerText.trim().toUpperCase() === '{choice.upper()}') {{
+                                    let rect = el.getBoundingClientRect();
+                                    if (rect.width > 0 && rect.height > 0 && rect.top > 500) {{
                                         el.click();
                                         return true;
-                                    }
+                                    }}
+                                }}
+                            }}
+                            return false;
+                        }})()
+                        """
+                        await page.evaluate(js_click_script)
+
+                    # 💡 ৩. "Total amount" বাটন আসার সাথে সাথে ক্লিক
+                    try:
+                        await page.get_by_text("Total amount", exact=False).last.click(timeout=3000)
+                    except:
+                        js_confirm_bet = """
+                        (() => {
+                            for(let el of document.querySelectorAll('span, div, label')) {
+                                if(el.innerText && el.innerText.includes('I agree')) {
+                                    let cb = el.parentElement.querySelector('input[type="checkbox"]');
+                                    if(cb && !cb.checked) cb.click();
+                                    else el.click();
                                 }
-                                return false;
-                            })()
-                        """)
-                        if clicked:
-                            break
-                        await asyncio.sleep(0.1)
+                            }
+                            let btns = document.querySelectorAll('div, button, span');
+                            for(let el of btns) {
+                                let txt = (el.innerText || '').toLowerCase();
+                                if(txt.includes('total amount')) {
+                                    el.click();
+                                    return true;
+                                }
+                            }
+                            return false;
+                        })()
+                        """
+                        await page.evaluate(js_confirm_bet)
 
                     # 💡 ৪. স্ক্রিনশট নেওয়া
                     await page.wait_for_timeout(1500)
@@ -463,7 +469,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 f"💰 Balance : ৳ {new_balance:.2f}\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 f"🏆 Wins : {state['wins']} 🔴 Losses : {state['losses']} 📈 Rate : {win_rate:.1f}%\n"
-                                f"{next_step_text}"
+                                f"{next_step_txt}"
                             ))
 
                     # 💡 ৭. আবার নিচে স্ক্রল করে গেমে ফিরে আসা
