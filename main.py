@@ -275,11 +275,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. ফাস্ট টাইমার চেক (পপআপ চলে যাওয়া মাত্রই ক্লিক করবে)
-                    logger.info("Waiting for new round to start...")
+                    # 💡 ১. স্ক্রিন স্বাভাবিক হওয়া পর্যন্ত অপেক্ষা করা
+                    logger.info("Waiting for new round to start (Timer 6 to 30)...")
                     timer_val = "0s"
                     timer_found = False
-                    for _ in range(350): 
+                    for _ in range(350): # ৩৫ সেকেন্ড পর্যন্ত অপেক্ষা করবে
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
                             # 0 0 বা 0 1 পপআপ থাকলে স্কিপ করবে
@@ -290,12 +290,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
                             if match:
                                 sec = int(match.group(1))
-                                if 6 <= sec <= 30: # ৩০ থেকে ৬ সেকেন্ডের মধ্যে হলেই বিট করবে
+                                if 6 <= sec <= 30: # টাইমার ৩০ থেকে ৬ এর মধ্যে হলেই বিট করবে
                                     timer_val = f"{sec}s"
                                     timer_found = True
                                     break
                         except: pass
-                        await asyncio.sleep(0.1) 
+                        await asyncio.sleep(0.1)
 
                     if not timer_found:
                         continue
@@ -346,7 +346,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৩. বিগ অথবা স্মল ক্লিক (Playwright-এর `get_by_text` একদম নিখুঁতভাবে)
+                    # 💡 ৩. সুপার ফাস্ট Big/Small ক্লিক (Playwright-এর `get_by_text` একদম নিখুঁতভাবে)
                     logger.info(f"Clicking {choice}...")
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(300)
