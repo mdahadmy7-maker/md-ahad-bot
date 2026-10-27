@@ -219,9 +219,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # ==========================================
             # 💡 WinGo পেজে ঢোকার কঠোর (Strict) সিস্টেম
-            # ==========================================
             logger.info("Navigating to WinGo page...")
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(3000) 
@@ -234,7 +232,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     logger.info("Successfully entered WinGo game!")
                     break
                 
-                # পপআপ বন্ধ করা (যদি থাকে)
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span, a')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
                 await page.wait_for_timeout(500)
                 
@@ -256,8 +253,28 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 state["trade_running"] = False
                 await browser.close()
                 return
-            # ==========================================
 
+            # 💡 ৩ নাম্বার মেসেজ (AUTO TRADE ACTIVE) সাথে সাথে পাঠানো
+            step_plan_str = "┌────────────────────────────────┐\n"
+            for i, amt in enumerate(state['step_amounts']):
+                step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
+            step_plan_str += "└────────────────────────────────┘"
+
+            await ctx.bot.send_message(chat_id=uid, text=(
+                "╔════════════════════════════════╗\n"
+                "   🚀 **AUTO TRADE ACTIVE** 🚀\n"
+                "╚════════════════════════════════╝\n\n"
+                f"💰 **Balance** : ৳ {state['balance']:.2f}\n"
+                f"🎯 **Target**  : ৳ {state['target']:.2f} profit\n"
+                f"🏛️ **Stop At** : ৳ {target_balance:.2f}\n"
+                f"📋 **Steps**   : {state['steps']}\n\n"
+                "📊 **Step Plan:**\n"
+                f"{step_plan_str}\n\n"
+                "🧠 _Analysing market..._\n"
+                "🎬 _Bot is monitoring the timer._"
+            ), parse_mode="Markdown")
+
+            # ---------------- ৫. মেইন বেটিং লুপ ----------------
             while state["trade_running"]:
                 try:
                     current_bal = state["balance"]
@@ -293,14 +310,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. ফাস্ট টাইমার চেক (00 চলে গেলে ২৯ বা ২৮ হলে বিট করবে)
-                    logger.info("Waiting for new round to start...")
+                    # 💡 ১. কঠোর টাইমার চেক (শুধুমাত্র ২৫ থেকে ২৯ সেকেন্ডের মধ্যে ক্লিক করবে)
+                    logger.info("Waiting for new round (29s)...")
                     timer_val = "0s"
-                    for _ in range(600): # সর্বোচ্চ ৬০ সেকেন্ড অপেক্ষা
+                    for _ in range(600): 
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
                             
-                            # 0 0 থাকলে অপেক্ষা করবে
+                            # 0 0 থাকলে অপেক্ষা করবে, ক্লিক করবে না
                             if "0 0" in body_text:
                                 await asyncio.sleep(0.1)
                                 continue
@@ -308,61 +325,16 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
                             if match:
                                 sec = int(match.group(1))
+                                # 00 চলে যাওয়ার পর টাইমার ২৫-২৯ হলে তখনই ক্লিক করবে
                                 if 25 <= sec <= 29: 
                                     timer_val = f"{sec}s"
                                     break
                         except: pass
                         await asyncio.sleep(0.1)
 
-                    step_plan_str = "┌────────────────────────────────┐\n"
-                    for i, amt in enumerate(state['step_amounts']):
-                        step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
-                    step_plan_str += "└────────────────────────────────┘"
-
-                    # 💡 ২. প্রথমবার AUTO TRADE ACTIVE মেসেজ
-                    pred_msg = None
-                    if state.get("first_bet", True):
-                        await ctx.bot.send_message(chat_id=uid, text=(
-                            "╔════════════════════════════════╗\n"
-                            "   🚀 **AUTO TRADE ACTIVE** 🚀\n"
-                            "╚════════════════════════════════╝\n\n"
-                            f"💰 **Balance** : ৳ {current_bal:.2f}\n"
-                            f"🎯 **Target**  : ৳ {state['target']:.2f} profit\n"
-                            f"🏛️ **Stop At** : ৳ {target_balance:.2f}\n"
-                            f"📋 **Steps**   : {state['steps']}\n\n"
-                            "📊 **Step Plan:**\n"
-                            f"{step_plan_str}\n\n"
-                            "⏱️ **Current Period**\n"
-                            f"{current_period}\n"
-                            f"██████████ {timer_val}\n\n"
-                            "🧠 _Analysing market..._\n"
-                            "🎬 _Prediction animation → auto bet every period._"
-                        ), parse_mode="Markdown")
-
-                        pred_msg = await ctx.bot.send_message(chat_id=uid, text="━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[░░░░░░░░░░░░] 0%`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏳ _Running 9 layers + backtest..._", parse_mode="Markdown")
-                        
-                        for pct in [45, 85, 100]:
-                            bar = "█" * (pct // 10) + "░" * (10 - (pct // 10))
-                            await asyncio.sleep(0.2)
-                            try:
-                                await ctx.bot.edit_message_text(
-                                    chat_id=uid, message_id=pred_msg.message_id,
-                                    text=f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n🧠 **GENERATING PREDICTION**\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n⠋ _Back-testing layer hit-rates..._\n\n`[{bar}] {pct}%`\n\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n⏳ _Running 9 layers + backtest..._",
-                                    parse_mode="Markdown"
-                                )
-                            except: pass
-                        
-                        await asyncio.sleep(0.3)
-
-                    if pred_msg:
-                        try: await ctx.bot.delete_message(chat_id=uid, message_id=pred_msg.message_id)
-                        except: pass
-                    
-                    state["first_bet"] = False 
-
-                    # 💡 ৩. সুপার ফাস্ট Big/Small ক্লিক 
+                    # 💡 ২. সুপার ফাস্ট Big/Small ক্লিক (আগে স্ক্রল করে নিচে নামবে)
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                    await page.wait_for_timeout(300)
+                    await page.wait_for_timeout(200)
                     
                     clicked = False
                     try:
@@ -400,10 +372,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 await page.mouse.click(309, 890)
                         except: pass
 
-                    # 💡 ৪. মডাল ওপেন হওয়া পর্যন্ত দ্রুত অপেক্ষা
+                    # 💡 ৩. মডাল ওপেন হওয়া পর্যন্ত অপেক্ষা
                     await page.wait_for_timeout(1000)
 
-                    # 💡 ৫. সরাসরি "Total amount" বাটনে ক্লিক করা (কোনো এমাউন্ট টাইপিং নেই)
+                    # 💡 ৪. সরাসরি "Total amount" বাটনে ক্লিক করা (কোনো এমাউন্ট টাইপিং নেই)
                     js_confirm_bet = """
                     (() => {
                         for(let el of document.querySelectorAll('span, div, label')) {
@@ -436,7 +408,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 await confirm_btn.click(timeout=2000, force=True)
                         except: pass
 
-                    # 💡 ৬. সফলভাবে বিট হওয়ার পর ২ সেকেন্ড অপেক্ষা করে স্ক্রিনশট নেওয়া
+                    # 💡 ৫. সফলভাবে বিট হওয়ার পর স্ক্রিনশট
                     await page.wait_for_timeout(2000)
                     proof_path = f"proof_success_{uid}.png"
                     await page.screenshot(path=proof_path)
@@ -461,7 +433,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
-                    # 💡 ৭. রেজাল্টের জন্য অপেক্ষা (0 0 আসা পর্যন্ত)
+                    # 💡 ৬. রেজাল্টের জন্য অপেক্ষা (0 0 আসা পর্যন্ত)
                     for _ in range(350):
                         body_text = await page.evaluate("() => document.body.innerText")
                         if "0 0" in body_text:
@@ -470,7 +442,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     await page.wait_for_timeout(2000)
 
-                    # 💡 ৮. উপরে স্ক্রল করে Wallet balance চেক করা (পেজ রিলোড না করে)
+                    # 💡 ৭. উপরে স্ক্রল করে Wallet balance চেক করা
                     logger.info("Checking result...")
                     await page.evaluate("window.scrollTo(0, 0);")
                     await page.wait_for_timeout(1500) 
@@ -532,7 +504,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 f"{next_step_txt}"
                             ))
 
-                    # 💡 ৯. আবার নিচে স্ক্রল করে গেমে ফিরে আসা
+                    # 💡 ৮. আবার নিচে স্ক্রল করে গেমে ফিরে আসা
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(1500)
 
