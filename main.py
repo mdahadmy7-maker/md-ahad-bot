@@ -303,24 +303,27 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     bet_amount = float(state['step_amounts'][current_step_idx])
 
                     if current_bal < bet_amount:
-                        await ctx.bot.send_message(chat_id=uid, text=f"❌ **পর্যাপ্ত ব্যালেন্স নেই!**\nপ্রয়োজন: ৳{bet_amount}, আছে: ৳{current_bal:.2f}। বট বন্ধ হচ্ছে।")
+                        await ctx.bot.send_message(chat_id=uid, text=f"❌ **পর্যাপ্ত ব্যালেন্স নেই!**\nপ্রয়োজন: ৳{bet_amount}, আছে: ৳{current_bal:.2f}। বট বন্ধ হচ্ছে।")
                         state["trade_running"] = False
                         break
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. অপেক্ষা করা (শুধুমাত্র ২৯ বা ৩০ সেকেন্ড হলে ক্লিক করবে)
-                    logger.info("Waiting for new round (29/30)...")
+                    # 💡 ১. কঠোর টাইমার চেক (শুধুমাত্র 29 বা 30 হলে ক্লিক করবে)
+                    logger.info("Waiting for exact round start (29/30s)...")
                     timer_val = "0s"
-                    for _ in range(600): 
+                    for _ in range(800): # ৮০ সেকেন্ড পর্যন্ত অপেক্ষা করবে
                         try:
+                            # স্পেস রিমুভ করে টেক্সট নেওয়া (যেমন: 00:29)
                             compact_text = await page.evaluate("() => document.body.innerText.replace(/\\s+/g, '')")
                             match = re.search(r'00:(29|30)', compact_text)
+                            
+                            # যদি ২৯ বা ৩০ পাওয়া যায়, সাথে সাথে লুপ থেকে বের হবে
                             if match:
                                 timer_val = f"{match.group(1)}s"
                                 break
                         except: pass
-                        await asyncio.sleep(0.05)
+                        await asyncio.sleep(0.02) # ০.০২ সেকেন্ড পর পর চেক করবে (সুপারফাস্ট)
 
                     # 💡 ২. সাথে সাথে Big/Small এ ক্লিক
                     js_click_script = f"""
@@ -340,29 +343,31 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     """
                     await page.evaluate(js_click_script)
 
-                    # 💡 ৩. মাত্র ০.৫ সেকেন্ড অপেক্ষা করে "Total amount" এ ক্লিক করবে
-                    await page.wait_for_timeout(500)
-                    js_confirm_bet = """
-                    (() => {
-                        for(let el of document.querySelectorAll('span, div, label')) {
-                            if(el.innerText && el.innerText.includes('I agree')) {
-                                let cb = el.parentElement.querySelector('input[type="checkbox"]');
-                                if(cb && !cb.checked) cb.click();
-                                else el.click();
-                            }
-                        }
-                        let btns = document.querySelectorAll('div, button, span');
-                        for(let el of btns) {
-                            let txt = (el.innerText || '').toLowerCase();
-                            if(txt.includes('total amount')) {
-                                el.click();
-                                return true;
-                            }
-                        }
-                        return false;
-                    })()
-                    """
-                    await page.evaluate(js_confirm_bet)
+                    # 💡 ৩. "Total amount" বাটন আসার সাথে সাথে ক্লিক
+                    for _ in range(30):
+                        clicked = await page.evaluate("""
+                            (() => {
+                                for(let el of document.querySelectorAll('span, div, label')) {
+                                    if(el.innerText && el.innerText.includes('I agree')) {
+                                        let cb = el.parentElement.querySelector('input[type="checkbox"]');
+                                        if(cb && !cb.checked) cb.click();
+                                        else el.click();
+                                    }
+                                }
+                                let btns = document.querySelectorAll('div, button, span');
+                                for(let el of btns) {
+                                    let txt = (el.innerText || '').toLowerCase();
+                                    if(txt.includes('total amount')) {
+                                        el.click();
+                                        return true;
+                                    }
+                                }
+                                return false;
+                            })()
+                        """)
+                        if clicked:
+                            break
+                        await asyncio.sleep(0.1)
 
                     # 💡 ৪. স্ক্রিনশট নেওয়া
                     await page.wait_for_timeout(1500)
@@ -389,8 +394,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
-                    # 💡 ৫. রেজাল্টের জন্য অপেক্ষা (0 0 আসা পর্যন্ত, যাতে একই রাউন্ডে আবার ক্লিক না করে)
-                    logger.info("Waiting for round to finish (0 0)...")
+                    # 💡 ৫. রেজাল্টের জন্য অপেক্ষা (0 0 আসা পর্যন্ত)
+                    logger.info("Waiting for round to finish...")
                     for _ in range(350):
                         body_text = await page.evaluate("() => document.body.innerText")
                         if "0 0" in body_text:
@@ -458,7 +463,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 f"💰 Balance : ৳ {new_balance:.2f}\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 f"🏆 Wins : {state['wins']} 🔴 Losses : {state['losses']} 📈 Rate : {win_rate:.1f}%\n"
-                                f"{next_step_txt}"
+                                f"{next_step_text}"
                             ))
 
                     # 💡 ৭. আবার নিচে স্ক্রল করে গেমে ফিরে আসা
