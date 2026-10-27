@@ -303,17 +303,43 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     bet_amount = float(state['step_amounts'][current_step_idx])
 
                     if current_bal < bet_amount:
-                        await ctx.bot.send_message(chat_id=uid, text=f"❌ **পর্যাপ্ত ব্যালেন্স নেই!**\nপ্রয়োজন: ৳{bet_amount}, আছে: ৳{current_bal:.2f}। বট বন্ধ হচ্ছে।")
+                        await ctx.bot.send_message(chat_id=uid, text=f"❌ **পর্যাপ্ত ব্যালেন্স নেই!**\nপ্রয়োজন: ৳{bet_amount}, আছে: ৳{current_bal:.2f}। বট বন্ধ হচ্ছে।")
                         state["trade_running"] = False
                         break
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. কঠোর টাইমার চেক (শুধুমাত্র 29 বা 30 হলে)
+                    # 💡 ১. ওয়েটিং মেসেজ পাঠানো (আপনার স্ক্রিনশটের মতো)
+                    wait_msg = await ctx.bot.send_message(
+                        chat_id=uid, 
+                        text="⏳ **Waiting for 00 to clear...**\n_Bot will click instantly when timer shows 29/30._", 
+                        parse_mode="Markdown"
+                    )
+
+                    # 💡 ২. কঠোর টাইমার চেক (শুধুমাত্র 29 বা 30 হলে) এবং ওভারলে চেক
                     logger.info("Waiting for exact round start (29/30s)...")
                     timer_val = "0s"
                     for _ in range(600): 
                         try:
+                            # 0 0 চেক করা
+                            overlay_visible = await page.evaluate("""
+                                () => {
+                                    let els = document.querySelectorAll('div, span, p');
+                                    for (let el of els) {
+                                        let txt = (el.innerText || '').trim();
+                                        if (txt === '0' || txt === '00' || txt === '0 0') {
+                                            let rect = el.getBoundingClientRect();
+                                            if (rect.width > 30 && rect.height > 30) return true;
+                                        }
+                                    }
+                                    return false;
+                                }
+                            """)
+                            
+                            if overlay_visible:
+                                await asyncio.sleep(0.1)
+                                continue
+                                
                             # স্পেস রিমুভ করে টেক্সট নেওয়া (যেমন: 00:29)
                             compact_text = await page.evaluate("() => document.body.innerText.replace(/\\s+/g, '')")
                             match = re.search(r'00:(29|30)', compact_text)
@@ -324,58 +350,27 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except: pass
                         await asyncio.sleep(0.05)
 
-                    # 💡 ২. Playwright এর অরিজিনাল click() ব্যবহার করা (এটি 0 0 ওভারলে থাকলে ক্লিক করবে না)
+                    # 💡 ৩. Playwright এর অরিজিনাল click() ব্যবহার করা (এটি 0 0 ওভারলে থাকলে ক্লিক করবে না)
                     try:
                         if choice.upper() == "BIG":
                             await page.get_by_text("Big", exact=True).last.click(timeout=5000)
                         else:
                             await page.get_by_text("Small", exact=True).last.click(timeout=5000)
                     except:
-                        # যদি নেটিভ ক্লিক ফেইল করে, তবে ফলব্যাক হিসেবে JS ক্লিক (খুব কম ক্ষেত্রে লাগে)
-                        js_click_script = f"""
-                        (() => {{
-                            let els = document.querySelectorAll('div, span, button');
-                            for (let el of els) {{
-                                if (el.innerText && el.innerText.trim().toUpperCase() === '{choice.upper()}') {{
-                                    let rect = el.getBoundingClientRect();
-                                    if (rect.width > 0 && rect.height > 0 && rect.top > 500) {{
-                                        el.click();
-                                        return true;
-                                    }}
-                                }}
-                            }}
-                            return false;
-                        }})()
-                        """
-                        await page.evaluate(js_click_script)
+                        pass # ফলব্যাক বাদ দেওয়া হলো যাতে ভুল ক্লিক না হয়
 
-                    # 💡 ৩. "Total amount" বাটন আসার সাথে সাথে ক্লিক
+                    # 💡 ৪. "Total amount" বাটন আসার সাথে সাথে ক্লিক
                     try:
                         await page.get_by_text("Total amount", exact=False).last.click(timeout=3000)
                     except:
-                        js_confirm_bet = """
-                        (() => {
-                            for(let el of document.querySelectorAll('span, div, label')) {
-                                if(el.innerText && el.innerText.includes('I agree')) {
-                                    let cb = el.parentElement.querySelector('input[type="checkbox"]');
-                                    if(cb && !cb.checked) cb.click();
-                                    else el.click();
-                                }
-                            }
-                            let btns = document.querySelectorAll('div, button, span');
-                            for(let el of btns) {
-                                let txt = (el.innerText || '').toLowerCase();
-                                if(txt.includes('total amount')) {
-                                    el.click();
-                                    return true;
-                                }
-                            }
-                            return false;
-                        })()
-                        """
-                        await page.evaluate(js_confirm_bet)
+                        pass
 
-                    # 💡 ৪. স্ক্রিনশট নেওয়া
+                    # 💡 ৫. ওয়েটিং মেসেজটি ডিলিট করা (যাতে বোঝা যায় পপআপ শেষ)
+                    try:
+                        await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
+                    except: pass
+
+                    # 💡 ৬. স্ক্রিনশট নেওয়া
                     await page.wait_for_timeout(1500)
                     proof_path = f"proof_success_{uid}.png"
                     await page.screenshot(path=proof_path)
@@ -400,7 +395,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
-                    # 💡 ৫. রেজাল্টের জন্য অপেক্ষা (0 0 আসা পর্যন্ত)
+                    # 💡 ৭. রেজাল্টের জন্য অপেক্ষা (0 0 আসা পর্যন্ত)
                     logger.info("Waiting for round to finish...")
                     for _ in range(350):
                         body_text = await page.evaluate("() => document.body.innerText")
@@ -410,7 +405,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     await page.wait_for_timeout(2000)
 
-                    # 💡 ৬. উপরে স্ক্রল করে Wallet balance চেক করা
+                    # 💡 ৮. উপরে স্ক্রল করে Wallet balance চেক করা
                     logger.info("Checking result...")
                     await page.evaluate("window.scrollTo(0, 0);")
                     await page.wait_for_timeout(1500) 
@@ -472,7 +467,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 f"{next_step_txt}"
                             ))
 
-                    # 💡 ৭. আবার নিচে স্ক্রল করে গেমে ফিরে আসা
+                    # 💡 ৯. আবার নিচে স্ক্রল করে গেমে ফিরে আসা
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(1500)
 
