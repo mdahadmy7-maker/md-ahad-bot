@@ -81,7 +81,7 @@ def get_history_and_prediction():
         return random.choice(["BIG", "SMALL"]), fallback_period
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (সংশোধিত)
+# ৩. লগইন এবং অটো-বেট ফাংশন
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -337,7 +337,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 Big/Small সিলেক্ট ও ক্লিক
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(300)
                     
@@ -366,10 +365,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 await page.mouse.click(309, 890)
                         except: pass
 
-                    # পপ-আপ আসার জন্য অপেক্ষা
                     await page.wait_for_timeout(1500)
 
-                    # অ্যামাউন্ট বসানো
                     try:
                         inputs = await page.locator('input[type="text"], input[type="number"], .van-field__control').all()
                         for inp in inputs:
@@ -381,7 +378,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 break
                     except: pass
 
-                    # "I agree" চেকবক্স
                     try:
                         agree_box = page.locator('text="I agree"').last
                         if await agree_box.count() > 0 and await agree_box.is_visible():
@@ -389,7 +385,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             await page.wait_for_timeout(200)
                     except: pass
 
-                    # 💡 সরাসরি কমলা রঙের "Total amount" বাটন ক্লিক
                     confirm_success = False
                     try:
                         confirm_success = await page.evaluate("""
@@ -414,4 +409,30 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except: pass
 
                     if confirm_success:
-                        state['tota
+                        state['total_trades'] += 1
+                        await ctx.bot.send_message(
+                            chat_id=uid, 
+                            text=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice.upper()}**\n💰 Amount: ৳ {bet_amount:.2f}", 
+                         if confirm_success:
+                        state['total_trades'] += 1
+                        await ctx.bot.send_message(
+                            chat_id=uid, 
+                            text=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice.upper()}**\n💰 Amount: ৳ {bet_amount:.2f}", 
+                            parse_mode="Markdown"
+                        )
+                    else:
+                        await ctx.bot.send_message(
+                            chat_id=uid, 
+                            text=f"⚠️ **{choice.upper()} সিলেক্ট হয়েছে, কিন্তু Total amount বাটনে ক্লিক করা যায়নি!** পরবর্তী রাউন্ডের জন্য অপেক্ষা করা হচ্ছে...", 
+                            parse_mode="Markdown"
+                        )
+                        continue
+
+                except Exception as e:
+                    logger.error(f"Trading loop error: {e}")
+                    await asyncio.sleep(2)
+        except Exception as e:
+            logger.error(f"Playwright general error: {e}")
+        finally:
+            await browser.close()
+            
