@@ -312,67 +312,61 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # 💡 ১. ওয়েটিং মেসেজ পাঠানো
                     wait_msg = await ctx.bot.send_message(
                         chat_id=uid, 
-                        text="⏳ **Waiting for exact 00:30 or 00:29...**\n_Bot is waiting for the screen to be completely clear._", 
+                        text="⏳ **Waiting for 0 0 to clear...**\n_Bot will click Big/Small and then Total Amount immediately._", 
                         parse_mode="Markdown"
                     )
 
-                    # 💡 ২. Playwright wait_for_function দিয়ে কঠোরভাবে টাইমার চেক
-                    # এটি ৬০ সেকেন্ড পর্যন্ত অপেক্ষা করবে, যতক্ষণ না স্ক্রিনে 00:30 বা 00:29 আসে এবং 0 0 না থাকে
-                    logger.info("Waiting for safe window (Timer 30/29)...")
-                    try:
-                        await page.wait_for_function("""
-                            () => {
-                                // স্ক্রিনের সব স্পেস রিমুভ করে টেক্সট নেওয়া
-                                let bodyText = document.body.innerText.replace(/\\s+/g, '');
-                                
-                                // 0 0 অ্যানিমেশন চেক (যদি থাকে তবে ফেরত যাবে)
-                                let elements = document.querySelectorAll('div, span, p');
-                                for (let el of elements) {
-                                    let txt = (el.innerText || '').trim();
-                                    if (['0', '00', '0 0', '5', '4', '3', '2', '1'].includes(txt)) {
-                                        let rect = el.getBoundingClientRect();
-                                        if (rect.width > 30 && rect.height > 30) return false;
-                                    }
-                                }
-                                
-                                // টাইমার ৩০ বা ২৯ হলে ট্রু রিটার্ন করবে
-                                if (bodyText.includes('00:30') || bodyText.includes('00:29')) {
-                                    return true;
-                                }
-                                return false;
-                            }
-                        """, timeout=60000)
-                    except Exception as e:
-                        logger.error(f"Timeout waiting for timer: {e}")
-                        try: await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
-                        except: pass
-                        continue # পরের রাউন্ডে চেষ্টা করবে
-
-                    # 💡 ৩. ক্লিক করা (Playwright Native Click, যা টাইমআউট হবে না কারণ স্ক্রিন এখন ক্লিয়ার)
-                    logger.info(f"Screen is clear. Clicking {choice}...")
+                    # 💡 ২. Playwright Native Click (অটোমেটিক ওভারলে চেক করবে)
+                    # 30 সেকেন্ড পর্যন্ত অপেক্ষা করবে। 0 0 মুছে গেলে বাটন ক্লিক করবে।
+                    logger.info(f"Waiting for 0 0 to clear and clicking {choice}...")
+                    
                     try:
                         if choice.upper() == "BIG":
-                            await page.get_by_text("Big", exact=True).last.click(timeout=5000)
+                            await page.get_by_text("Big", exact=True).last.click(timeout=30000)
                         else:
-                            await page.get_by_text("Small", exact=True).last.click(timeout=5000)
+                            await page.get_by_text("Small", exact=True).last.click(timeout=30000)
                     except Exception as e:
-                        logger.error(f"Big/Small click failed: {e}")
+                        logger.error(f"Big/Small click failed (Timeout): {e}")
                         try: await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
                         except: pass
-                        continue 
+                        continue # ক্লিক ফেইল করলে এই রাউন্ড বাদ দিয়ে পরের রাউন্ডে যাবে
 
-                    # 💡 ৪. "Total amount" বাটনে ক্লিক
+                    # 💡 ৩. পপআপ ওপেন হওয়া পর্যন্ত অপেক্ষা করা এবং "Total amount" এ ক্লিক করা
+                    logger.info("Waiting for Total amount popup...")
                     try:
-                        await page.get_by_text("Total amount", exact=False).last.click(timeout=3000)
+                        total_amount_btn = page.get_by_text("Total amount", exact=False).last
+                        await total_amount_btn.wait_for(state="visible", timeout=5000)
+                        await total_amount_btn.click()
                     except Exception as e:
                         logger.error(f"Total amount click failed: {e}")
+                        # ফলব্যাক জাভাস্ক্রিপ্ট (যদি Playwright ফেইল করে)
+                        await page.evaluate("""
+                        (() => {
+                            for(let el of document.querySelectorAll('span, div, label')) {
+                                if(el.innerText && el.innerText.includes('I agree')) {
+                                    let cb = el.parentElement.querySelector('input[type="checkbox"]');
+                                    if(cb && !cb.checked) cb.click();
+                                    else el.click();
+                                }
+                            }
+                            let btns = document.querySelectorAll('div, button, span');
+                            for(let el of btns) {
+                                let txt = (el.innerText || '').toLowerCase();
+                                if(txt.includes('total amount')) {
+                                    el.click();
+                                    return true;
+                                }
+                            }
+                            return false;
+                        })()
+                        """)
 
-                    # 💡 ৫. ওয়েটিং মেসেজ ডিলিট
+                    # 💡 ৪. ওয়েটিং মেসেজ ডিলিট
                     try:
                         await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
                     except: pass
 
-                    # 💡 ৬. স্ক্রিনশট
+                    # 💡 ৫. স্ক্রিনশট
                     await page.wait_for_timeout(1500)
                     proof_path = f"proof_success_{uid}.png"
                     await page.screenshot(path=proof_path)
@@ -396,11 +390,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
-                    # 💡 ৭. রেজাল্টের জন্য অপেক্ষা (৩০ সেকেন্ড)
+                    # 💡 ৬. রেজাল্টের জন্য অপেক্ষা (৩০ সেকেন্ড)
                     logger.info("Waiting 30 seconds for round to finish...")
                     await asyncio.sleep(30)
 
-                    # 💡 ৮. উপরে স্ক্রল করে Wallet balance চেক করা
+                    # 💡 ৭. উপরে স্ক্রল করে Wallet balance চেক করা
                     logger.info("Checking result...")
                     await page.evaluate("window.scrollTo(0, 0);")
                     await page.wait_for_timeout(1500) 
@@ -462,7 +456,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 f"{next_step_txt}"
                             ))
 
-                    # 💡 ৯. আবার নিচে স্ক্রল করে গেমে ফিরে আসা
+                    # 💡 ৮. আবার নিচে স্ক্রল করে গেমে ফিরে আসা
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(1500)
 
