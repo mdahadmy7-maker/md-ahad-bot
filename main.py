@@ -316,7 +316,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         parse_mode="Markdown"
                     )
 
-                    # 💡 ২. DOM থেকে বর্তমান Period নাম্বার বের করা (যেমন: 20261028100050175)
+                    # 💡 ২. DOM থেকে বর্তমান Period নাম্বার বের করা
                     current_ui_period = None
                     try:
                         current_ui_period = await page.evaluate("""
@@ -324,8 +324,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 let els = document.querySelectorAll('div, span, p');
                                 for (let el of els) {
                                     let txt = (el.innerText || '').trim();
-                                    // ১৭ ডিজিটের সংখ্যা খোঁজা (20xxxxxxxxxxxxxxx)
-                                    if (/^20\\d{15}$/.test(txt)) {
+                                    if (/^20\\d{15}$/.test(txt)) { // ১৭ ডিজিটের সংখ্যা খোঁজা
                                         return txt;
                                     }
                                 }
@@ -339,7 +338,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     logger.info(f"Current UI Period: {current_ui_period}. Waiting for it to change...")
 
-                    # 💡 ৩. নতুন Period নাম্বার আসা পর্যন্ত অপেক্ষা করা (সর্বোচ্চ ৪০ সেকেন্ড)
+                    # 💡 ৩. নতুন Period নাম্বার আসা পর্যন্ত অপেক্ষা করা
                     new_ui_period = current_ui_period
                     for _ in range(400): 
                         try:
@@ -355,51 +354,64 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                     return null;
                                 }
                             """)
-                            # যখন নতুন নাম্বার আসবে (আগেরটার থেকে বড় হবে বা পরিবর্তন হবে)
                             if new_ui_period and new_ui_period != current_ui_period:
                                 logger.info(f"New Period Detected: {new_ui_period}")
                                 break
                         except: pass
-                        await asyncio.sleep(0.1) # প্রতি ০.১ সেকেন্ড পর পর চেক
+                        await asyncio.sleep(0.1)
 
-                    # 💡 ৪. নতুন রাউন্ড শুরু হয়েছে, অ্যানিমেশন শেষ হওয়ার জন্য ১.৫ সেকেন্ড অপেক্ষা
-                    await page.wait_for_timeout(1500)
+                    # 💡 ৪. নতুন Period দেখা গেছে! এখন ৪ সেকেন্ড অপেক্ষা করতে হবে যাতে 0 0 অ্যানিমেশন মুছে যায়
+                    logger.info("Waiting 4 seconds for 0 0 overlay to clear...")
+                    await page.wait_for_timeout(4000)
 
-                    # 💡 ৫. বিগ অথবা স্মলে ক্লিক
+                    # 💡 ৫. বিগ অথবা স্মলে ক্লিক (জাভাস্ক্রিপ্ট ব্যবহার করে যাতে টাইমআউট না হয়)
                     logger.info(f"Clicking {choice}...")
-                    if choice.upper() == "BIG":
-                        await page.get_by_text("Big", exact=True).last.click(timeout=3000)
-                    else:
-                        await page.get_by_text("Small", exact=True).last.click(timeout=3000)
-
-                    # 💡 ৬. "Total amount" বাটন আসার সাথে সাথেই ক্লিক
-                    try:
-                        total_amount_btn = page.get_by_text("Total amount", exact=False).last
-                        await total_amount_btn.wait_for(state="visible", timeout=5000)
-                        await total_amount_btn.click()
-                    except Exception as e:
-                        logger.error(f"Total amount click failed: {e}")
-                        # ফলব্যাক জাভাস্ক্রিপ্ট
-                        await page.evaluate("""
-                        (() => {
-                            for(let el of document.querySelectorAll('span, div, label')) {
-                                if(el.innerText && el.innerText.includes('I agree')) {
-                                    let cb = el.parentElement.querySelector('input[type="checkbox"]');
-                                    if(cb && !cb.checked) cb.click();
-                                    else el.click();
-                                }
-                            }
-                            let btns = document.querySelectorAll('div, button, span');
-                            for(let el of btns) {
-                                let txt = (el.innerText || '').toLowerCase();
-                                if(txt.includes('total amount')) {
-                                    el.click();
-                                    return true;
-                                }
-                            }
+                    clicked = await page.evaluate(f"""
+                        (() => {{
+                            let els = document.querySelectorAll('div, span, button');
+                            for (let el of els) {{
+                                let txt = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                if (txt === '{choice.upper()}') {{
+                                    let rect = el.getBoundingClientRect();
+                                    // rect.top > 500 মানে স্ক্রিনের নিচের বাটন (হিস্ট্রি সেকশন নয়)
+                                    if (rect.width > 40 && rect.height > 20 && rect.top > 500) {{
+                                        el.click();
+                                        return true;
+                                    }}
+                                }}
+                            }}
                             return false;
-                        })()
-                        """)
+                        }})()
+                    """)
+                    
+                    if not clicked:
+                        logger.warning("Big/Small button not found or click failed.")
+                        try: await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
+                        except: pass
+                        continue
+
+                    # 💡 ৬. "Total amount" বাটনে ক্লিক (জাভাস্ক্রিপ্ট)
+                    await page.wait_for_timeout(500) # পপআপ আসার জন্য অল্প অপেক্ষা
+                    await page.evaluate("""
+                    (() => {
+                        for(let el of document.querySelectorAll('span, div, label')) {
+                            if(el.innerText && el.innerText.includes('I agree')) {
+                                let cb = el.parentElement.querySelector('input[type="checkbox"]');
+                                if(cb && !cb.checked) cb.click();
+                                else el.click();
+                            }
+                        }
+                        let btns = document.querySelectorAll('div, button, span');
+                        for(let el of btns) {
+                            let txt = (el.innerText || '').toLowerCase();
+                            if(txt.includes('total amount')) {
+                                el.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    })()
+                    """)
 
                     # 💡 ৭. ওয়েটিং মেসেজ ডিলিট
                     try:
