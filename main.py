@@ -312,78 +312,93 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # 💡 ১. ওয়েটিং মেসেজ পাঠানো
                     wait_msg = await ctx.bot.send_message(
                         chat_id=uid, 
-                        text="⏳ **Waiting for exact 30s-26s window...**\n_Bot will not click on 00._", 
+                        text="⏳ **Waiting for 30-25s window...**\n_Bot is waiting for the exact moment to place the bet._", 
                         parse_mode="Markdown"
                     )
 
-                    # 💡 ২. কঠোর টাইমার চেক
-                    logger.info("Waiting for exact round start (30 to 26s)...")
-                    timer_found = False
-                    for _ in range(600): 
-                        try:
-                            # স্পেস রিমুভ করে টেক্সট নেওয়া (যেমন: 00:29)
-                            compact_text = await page.evaluate("() => document.body.innerText.replace(/\\s+/g, '')")
-                            
-                            # শুধুমাত্র 30, 29, 28, 27, 26 খুঁজবে
-                            match = re.search(r'00:(30|29|28|27|26)', compact_text)
-                            if match:
-                                timer_found = True
-                                break
-                        except: pass
-                        await asyncio.sleep(0.05)
-
-                    if not timer_found:
-                        # যদি ৬০ সেকেন্ডেও টাইমার না পায়, তবে স্কিপ করবে
+                    # 💡 ২. কঠোর টাইমার এবং ওভারলে চেক (Playwright wait_for_function)
+                    logger.info("Waiting for exact round start (30 to 25s)...")
+                    try:
+                        await page.wait_for_function("""
+                            () => {
+                                let bodyText = document.body.innerText.replace(/\\s+/g, '');
+                                // Check if 00:29, 00:28, 00:27, 00:26, 00:30 is present
+                                if (bodyText.includes('00:30') || bodyText.includes('00:29') || bodyText.includes('00:28') || bodyText.includes('00:27') || bodyText.includes('00:26')) {
+                                    // Also ensure the big 0 0 overlay is NOT visible
+                                    let hasOverlay = false;
+                                    for (let el of document.querySelectorAll('div, span, p')) {
+                                        let txt = (el.innerText || '').trim();
+                                        if (txt === '0' || txt === '00' || txt === '0 0') {
+                                            let rect = el.getBoundingClientRect();
+                                            if (rect.width > 30 && rect.height > 30) {
+                                                hasOverlay = true;
+                                                break;
+                                            }
+                                        }
+                                    }
+                                    return !hasOverlay;
+                                }
+                                return false;
+                            }
+                        """, timeout=65000) # ৬৫ সেকেন্ড পর্যন্ত অপেক্ষা করবে
+                    except Exception as e:
+                        logger.error("Timeout waiting for 30-25s window.")
                         try: await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
                         except: pass
-                        continue
+                        continue # পরের রাউন্ডে চেষ্টা করবে
 
-                    # 💡 ৩. জাভাস্ক্রিপ্ট দিয়ে ক্লিক
+                    # 💡 ৩. Playwright Native Click দিয়ে Big/Small এ ক্লিক
                     logger.info(f"Clicking {choice}...")
-                    clicked = await page.evaluate(f"""
-                        (() => {{
-                            let els = document.querySelectorAll('div, span, button');
-                            for (let el of els) {{
-                                let txt = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                if (txt === '{choice.upper()}') {{
-                                    let rect = el.getBoundingClientRect();
-                                    if (rect.width > 40 && rect.height > 20 && rect.top > 500) {{
-                                        el.click();
-                                        return true;
+                    try:
+                        if choice.upper() == "BIG":
+                            await page.get_by_text("Big", exact=True).last.click(timeout=3000)
+                        else:
+                            await page.get_by_text("Small", exact=True).last.click(timeout=3000)
+                    except Exception as e:
+                        logger.error(f"Big/Small click failed: {e}")
+                        # জাভাস্ক্রিপ্ট ফলব্যাক
+                        await page.evaluate(f"""
+                            (() => {{
+                                let els = document.querySelectorAll('div, span, button');
+                                for (let el of els) {{
+                                    let txt = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                    if (txt === '{choice.upper()}') {{
+                                        let rect = el.getBoundingClientRect();
+                                        if (rect.width > 40 && rect.height > 20 && rect.top > 500) {{
+                                            el.click();
+                                            return true;
+                                        }}
                                     }}
                                 }}
-                            }}
-                            return false;
-                        }})()
-                    """)
-
-                    if not clicked:
-                        try: await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
-                        except: pass
-                        continue 
+                                return false;
+                            }})()
+                        """)
 
                     # 💡 ৪. "Total amount" বাটনে ক্লিক
-                    await page.wait_for_timeout(500) 
-                    await page.evaluate("""
-                    (() => {
-                        for(let el of document.querySelectorAll('span, div, label')) {
-                            if(el.innerText && el.innerText.includes('I agree')) {
-                                let cb = el.parentElement.querySelector('input[type="checkbox"]');
-                                if(cb && !cb.checked) cb.click();
-                                else el.click();
+                    try:
+                        await page.get_by_text("Total amount", exact=False).last.click(timeout=3000)
+                    except Exception as e:
+                        logger.error(f"Total amount click failed: {e}")
+                        await page.evaluate("""
+                        (() => {
+                            for(let el of document.querySelectorAll('span, div, label')) {
+                                if(el.innerText && el.innerText.includes('I agree')) {
+                                    let cb = el.parentElement.querySelector('input[type="checkbox"]');
+                                    if(cb && !cb.checked) cb.click();
+                                    else el.click();
+                                }
                             }
-                        }
-                        let btns = document.querySelectorAll('div, button, span');
-                        for(let el of btns) {
-                            let txt = (el.innerText || '').toLowerCase();
-                            if(txt.includes('total amount')) {
-                                el.click();
-                                return true;
+                            let btns = document.querySelectorAll('div, button, span');
+                            for(let el of btns) {
+                                let txt = (el.innerText || '').toLowerCase();
+                                if(txt.includes('total amount')) {
+                                    el.click();
+                                    return true;
+                                }
                             }
-                        }
-                        return false;
-                    })()
-                    """)
+                            return false;
+                        })()
+                        """)
 
                     # 💡 ৫. ওয়েটিং মেসেজ ডিলিট
                     try:
