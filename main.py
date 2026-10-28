@@ -106,6 +106,27 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         )
         page = await context.new_page()
         
+        # ==========================================
+        # 💡 বেট এপিআই ক্যাপচার এবং টেলিগ্রামে পাঠানোর কোড
+        # ==========================================
+        async def log_bet_api(request):
+            if request.method == "POST" and "api" in request.url and "Login" not in request.url:
+                try:
+                    # HTML ফরম্যাট ব্যবহার করা হয়েছে যাতে JSON ডেটা সুন্দরভাবে দেখা যায়
+                    api_msg = (
+                        "🚨 <b>BET API CAPTURED!</b> 🚨\n\n"
+                        f"🔗 <b>URL:</b>\n<code>{request.url}</code>\n\n"
+                        f"📦 <b>Payload:</b>\n<pre>{request.post_data}</pre>\n\n"
+                        f"📋 <b>Headers:</b>\n<pre>{request.headers}</pre>"
+                    )
+                    await ctx.bot.send_message(chat_id=uid, text=api_msg, parse_mode="HTML")
+                    logger.info("API Captured and sent to Telegram!")
+                except Exception as e:
+                    logger.error(f"Telegram API capture message failed: {e}")
+
+        page.on("request", log_bet_api)
+        # ==========================================
+
         try:
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
