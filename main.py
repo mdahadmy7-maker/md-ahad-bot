@@ -219,7 +219,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # WinGo পেজে ঢোকা (শুধু একবার)
+            # WinGo পেজে ঢোকা
             logger.info("Navigating to WinGo page...")
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(3000) 
@@ -312,7 +312,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # 💡 ১. ওয়েটিং মেসেজ পাঠানো
                     wait_msg = await ctx.bot.send_message(
                         chat_id=uid, 
-                        text="⏳ **Waiting for Period change...**\n_Bot will click as soon as the new period number appears._", 
+                        text="⏳ **Waiting for 0 0 to clear...**\n_Bot will click exactly when timer shows 29/30._", 
                         parse_mode="Markdown"
                     )
 
@@ -360,9 +360,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except: pass
                         await asyncio.sleep(0.1)
 
-                    # 💡 ৪. নতুন Period দেখা গেছে! এখন ২.৫ সেকেন্ড অপেক্ষা করতে হবে যাতে 0 0 অ্যানিমেশন মুছে যায়
-                    logger.info("Waiting 2.5 seconds for 0 0 overlay to clear...")
-                    await page.wait_for_timeout(2500)
+                    # 💡 ৪. নতুন Period দেখা গেছে! এখন ৫ সেকেন্ড অপেক্ষা করতে হবে যাতে 5,4,3,2,1,0 0 অ্যানিমেশন মুছে যায়
+                    logger.info("Waiting 5 seconds for 0 0 overlay to clear...")
+                    await page.wait_for_timeout(5000)
 
                     # 💡 ৫. বিগ অথবা স্মলে ক্লিক (শুধুমাত্র জাভাস্ক্রিপ্ট ব্যবহার, কোনো Timeout নেই)
                     logger.info(f"Clicking {choice}...")
