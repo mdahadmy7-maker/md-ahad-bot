@@ -219,7 +219,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # WinGo পেজে ঢোকা
+            # WinGo পেজে ঢোকা (শুধু একবার)
             logger.info("Navigating to WinGo page...")
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(3000) 
@@ -360,29 +360,32 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except: pass
                         await asyncio.sleep(0.1)
 
-                    # 💡 ৪. নতুন Period দেখা গেছে! এখন ৪ সেকেন্ড অপেক্ষা করতে হবে যাতে 0 0 অ্যানিমেশন মুছে যায়
-                    logger.info("Waiting 4 seconds for 0 0 overlay to clear...")
-                    await page.wait_for_timeout(4000)
+                    # 💡 ৪. নতুন Period দেখা গেছে! এখন ২.৫ সেকেন্ড অপেক্ষা করতে হবে যাতে 0 0 অ্যানিমেশন মুছে যায়
+                    logger.info("Waiting 2.5 seconds for 0 0 overlay to clear...")
+                    await page.wait_for_timeout(2500)
 
-                    # 💡 ৫. বিগ অথবা স্মলে ক্লিক (জাভাস্ক্রিপ্ট ব্যবহার করে যাতে টাইমআউট না হয়)
+                    # 💡 ৫. বিগ অথবা স্মলে ক্লিক (শুধুমাত্র জাভাস্ক্রিপ্ট ব্যবহার, কোনো Timeout নেই)
                     logger.info(f"Clicking {choice}...")
-                    clicked = await page.evaluate(f"""
-                        (() => {{
-                            let els = document.querySelectorAll('div, span, button');
-                            for (let el of els) {{
-                                let txt = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                if (txt === '{choice.upper()}') {{
-                                    let rect = el.getBoundingClientRect();
-                                    // rect.top > 500 মানে স্ক্রিনের নিচের বাটন (হিস্ট্রি সেকশন নয়)
-                                    if (rect.width > 40 && rect.height > 20 && rect.top > 500) {{
-                                        el.click();
-                                        return true;
+                    clicked = False
+                    for _ in range(30): # ৩ সেকেন্ড পর্যন্ত ট্রাই করবে (প্রতি ১০০ মিলি সেকেন্ড পর)
+                        clicked = await page.evaluate(f"""
+                            (() => {{
+                                let els = document.querySelectorAll('div, span, button, p');
+                                for (let el of els) {{
+                                    let txt = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                    if (txt === '{choice.upper()}') {{
+                                        let rect = el.getBoundingClientRect();
+                                        if (rect.width > 0 && rect.height > 0 && rect.top > 400) {{
+                                            el.click();
+                                            return true;
+                                        }}
                                     }}
                                 }}
-                            }}
-                            return false;
-                        }})()
-                    """)
+                                return false;
+                            }})()
+                        """)
+                        if clicked: break
+                        await asyncio.sleep(0.1)
                     
                     if not clicked:
                         logger.warning("Big/Small button not found or click failed.")
@@ -390,28 +393,31 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except: pass
                         continue
 
-                    # 💡 ৬. "Total amount" বাটনে ক্লিক (জাভাস্ক্রিপ্ট)
-                    await page.wait_for_timeout(500) # পপআপ আসার জন্য অল্প অপেক্ষা
-                    await page.evaluate("""
-                    (() => {
-                        for(let el of document.querySelectorAll('span, div, label')) {
-                            if(el.innerText && el.innerText.includes('I agree')) {
-                                let cb = el.parentElement.querySelector('input[type="checkbox"]');
-                                if(cb && !cb.checked) cb.click();
-                                else el.click();
+                    # 💡 ৬. "Total amount" বাটনে ক্লিক (শুধুমাত্র জাভাস্ক্রিপ্ট)
+                    total_clicked = False
+                    for _ in range(30):
+                        total_clicked = await page.evaluate("""
+                        (() => {
+                            for(let el of document.querySelectorAll('span, div, label')) {
+                                if(el.innerText && el.innerText.includes('I agree')) {
+                                    let cb = el.parentElement.querySelector('input[type="checkbox"]');
+                                    if(cb && !cb.checked) cb.click();
+                                    else el.click();
+                                }
                             }
-                        }
-                        let btns = document.querySelectorAll('div, button, span');
-                        for(let el of btns) {
-                            let txt = (el.innerText || '').toLowerCase();
-                            if(txt.includes('total amount')) {
-                                el.click();
-                                return true;
+                            let btns = document.querySelectorAll('div, button, span');
+                            for(let el of btns) {
+                                let txt = (el.innerText || '').toLowerCase();
+                                if(txt.includes('total amount')) {
+                                    el.click();
+                                    return true;
+                                }
                             }
-                        }
-                        return false;
-                    })()
-                    """)
+                            return false;
+                        })()
+                        """)
+                        if total_clicked: break
+                        await asyncio.sleep(0.1)
 
                     # 💡 ৭. ওয়েটিং মেসেজ ডিলিট
                     try:
