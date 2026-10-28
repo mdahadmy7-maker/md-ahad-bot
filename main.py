@@ -312,27 +312,33 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # 💡 ১. ওয়েটিং মেসেজ পাঠানো
                     wait_msg = await ctx.bot.send_message(
                         chat_id=uid, 
-                        text="⏳ **Waiting for screen to be ready...**\n_Bot is waiting for 30-26s window._", 
+                        text="⏳ **Waiting for exact 30s-26s window...**\n_Bot will not click on 00._", 
                         parse_mode="Markdown"
                     )
 
-                    # 💡 ২. কঠোর টাইমার চেক (শুধুমাত্র 30 থেকে 26 এর মধ্যে)
+                    # 💡 ২. কঠোর টাইমার চেক
                     logger.info("Waiting for exact round start (30 to 26s)...")
-                    timer_val = "0s"
+                    timer_found = False
                     for _ in range(600): 
                         try:
                             # স্পেস রিমুভ করে টেক্সট নেওয়া (যেমন: 00:29)
                             compact_text = await page.evaluate("() => document.body.innerText.replace(/\\s+/g, '')")
-                            # ৩০ থেকে ২৬ সেকেন্ডের মধ্যে খুঁজবে (25 এ অ্যানিমেশন শুরু হয়)
-                            match = re.search(r'00:(30|29|28|27|26)', compact_text)
                             
+                            # শুধুমাত্র 30, 29, 28, 27, 26 খুঁজবে
+                            match = re.search(r'00:(30|29|28|27|26)', compact_text)
                             if match:
-                                timer_val = f"{match.group(1)}s"
+                                timer_found = True
                                 break
                         except: pass
-                        await asyncio.sleep(0.05) # সুপারফাস্ট চেক
+                        await asyncio.sleep(0.05)
 
-                    # 💡 ৩. জাভাস্ক্রিপ্ট দিয়ে একদম নিখুঁত ক্লিক (কোনো টাইমআউট হবে না)
+                    if not timer_found:
+                        # যদি ৬০ সেকেন্ডেও টাইমার না পায়, তবে স্কিপ করবে
+                        try: await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
+                        except: pass
+                        continue
+
+                    # 💡 ৩. জাভাস্ক্রিপ্ট দিয়ে ক্লিক
                     logger.info(f"Clicking {choice}...")
                     clicked = await page.evaluate(f"""
                         (() => {{
@@ -341,7 +347,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 let txt = (el.innerText || el.textContent || '').trim().toUpperCase();
                                 if (txt === '{choice.upper()}') {{
                                     let rect = el.getBoundingClientRect();
-                                    // rect.top > 500 মানে স্ক্রিনের নিচের বাটন (হিস্ট্রি সেকশন নয়)
                                     if (rect.width > 40 && rect.height > 20 && rect.top > 500) {{
                                         el.click();
                                         return true;
@@ -353,13 +358,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     """)
 
                     if not clicked:
-                        logger.warning("Button was not found, maybe UI is different.")
                         try: await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
                         except: pass
-                        continue # পরের রাউন্ডে চেষ্টা করবে
+                        continue 
 
-                    # 💡 ৪. "Total amount" বাটন আসার সাথে সাথে ক্লিক
-                    await page.wait_for_timeout(500) # পপআপ আসার জন্য ০.৫ সেকেন্ড অপেক্ষা
+                    # 💡 ৪. "Total amount" বাটনে ক্লিক
+                    await page.wait_for_timeout(500) 
                     await page.evaluate("""
                     (() => {
                         for(let el of document.querySelectorAll('span, div, label')) {
@@ -381,12 +385,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     })()
                     """)
 
-                    # 💡 ৫. ওয়েটিং মেসেজটি ডিলিট করা
+                    # 💡 ৫. ওয়েটিং মেসেজ ডিলিট
                     try:
                         await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
                     except: pass
 
-                    # 💡 ৬. স্ক্রিনশট নেওয়া
+                    # 💡 ৬. স্ক্রিনশট
                     await page.wait_for_timeout(1500)
                     proof_path = f"proof_success_{uid}.png"
                     await page.screenshot(path=proof_path)
