@@ -312,119 +312,67 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # 💡 ১. ওয়েটিং মেসেজ পাঠানো
                     wait_msg = await ctx.bot.send_message(
                         chat_id=uid, 
-                        text="⏳ **Waiting for 0 0 to clear...**\n_Bot will click exactly when timer shows 29/30._", 
+                        text="⏳ **Waiting for exact 00:30 or 00:29...**\n_Bot is waiting for the screen to be completely clear._", 
                         parse_mode="Markdown"
                     )
 
-                    # 💡 ২. DOM থেকে বর্তমান Period নাম্বার বের করা
-                    current_ui_period = None
+                    # 💡 ২. Playwright wait_for_function দিয়ে কঠোরভাবে টাইমার চেক
+                    # এটি ৬০ সেকেন্ড পর্যন্ত অপেক্ষা করবে, যতক্ষণ না স্ক্রিনে 00:30 বা 00:29 আসে এবং 0 0 না থাকে
+                    logger.info("Waiting for safe window (Timer 30/29)...")
                     try:
-                        current_ui_period = await page.evaluate("""
+                        await page.wait_for_function("""
                             () => {
-                                let els = document.querySelectorAll('div, span, p');
-                                for (let el of els) {
+                                // স্ক্রিনের সব স্পেস রিমুভ করে টেক্সট নেওয়া
+                                let bodyText = document.body.innerText.replace(/\\s+/g, '');
+                                
+                                // 0 0 অ্যানিমেশন চেক (যদি থাকে তবে ফেরত যাবে)
+                                let elements = document.querySelectorAll('div, span, p');
+                                for (let el of elements) {
                                     let txt = (el.innerText || '').trim();
-                                    if (/^20\\d{15}$/.test(txt)) { // ১৭ ডিজিটের সংখ্যা খোঁজা
-                                        return txt;
-                                    }
-                                }
-                                return null;
-                            }
-                        """)
-                    except: pass
-
-                    if not current_ui_period:
-                        current_ui_period = current_period
-
-                    logger.info(f"Current UI Period: {current_ui_period}. Waiting for it to change...")
-
-                    # 💡 ৩. নতুন Period নাম্বার আসা পর্যন্ত অপেক্ষা করা
-                    new_ui_period = current_ui_period
-                    for _ in range(400): 
-                        try:
-                            new_ui_period = await page.evaluate("""
-                                () => {
-                                    let els = document.querySelectorAll('div, span, p');
-                                    for (let el of els) {
-                                        let txt = (el.innerText || '').trim();
-                                        if (/^20\\d{15}$/.test(txt)) {
-                                            return txt;
-                                        }
-                                    }
-                                    return null;
-                                }
-                            """)
-                            if new_ui_period and new_ui_period != current_ui_period:
-                                logger.info(f"New Period Detected: {new_ui_period}")
-                                break
-                        except: pass
-                        await asyncio.sleep(0.1)
-
-                    # 💡 ৪. নতুন Period দেখা গেছে! এখন ৫ সেকেন্ড অপেক্ষা করতে হবে যাতে 5,4,3,2,1,0 0 অ্যানিমেশন মুছে যায়
-                    logger.info("Waiting 5 seconds for 0 0 overlay to clear...")
-                    await page.wait_for_timeout(5000)
-
-                    # 💡 ৫. বিগ অথবা স্মলে ক্লিক (শুধুমাত্র জাভাস্ক্রিপ্ট ব্যবহার, কোনো Timeout নেই)
-                    logger.info(f"Clicking {choice}...")
-                    clicked = False
-                    for _ in range(30): # ৩ সেকেন্ড পর্যন্ত ট্রাই করবে (প্রতি ১০০ মিলি সেকেন্ড পর)
-                        clicked = await page.evaluate(f"""
-                            (() => {{
-                                let els = document.querySelectorAll('div, span, button, p');
-                                for (let el of els) {{
-                                    let txt = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                    if (txt === '{choice.upper()}') {{
+                                    if (['0', '00', '0 0', '5', '4', '3', '2', '1'].includes(txt)) {
                                         let rect = el.getBoundingClientRect();
-                                        if (rect.width > 0 && rect.height > 0 && rect.top > 400) {{
-                                            el.click();
-                                            return true;
-                                        }}
-                                    }}
-                                }}
-                                return false;
-                            }})()
-                        """)
-                        if clicked: break
-                        await asyncio.sleep(0.1)
-                    
-                    if not clicked:
-                        logger.warning("Big/Small button not found or click failed.")
-                        try: await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
-                        except: pass
-                        continue
-
-                    # 💡 ৬. "Total amount" বাটনে ক্লিক (শুধুমাত্র জাভাস্ক্রিপ্ট)
-                    total_clicked = False
-                    for _ in range(30):
-                        total_clicked = await page.evaluate("""
-                        (() => {
-                            for(let el of document.querySelectorAll('span, div, label')) {
-                                if(el.innerText && el.innerText.includes('I agree')) {
-                                    let cb = el.parentElement.querySelector('input[type="checkbox"]');
-                                    if(cb && !cb.checked) cb.click();
-                                    else el.click();
+                                        if (rect.width > 30 && rect.height > 30) return false;
+                                    }
                                 }
-                            }
-                            let btns = document.querySelectorAll('div, button, span');
-                            for(let el of btns) {
-                                let txt = (el.innerText || '').toLowerCase();
-                                if(txt.includes('total amount')) {
-                                    el.click();
+                                
+                                // টাইমার ৩০ বা ২৯ হলে ট্রু রিটার্ন করবে
+                                if (bodyText.includes('00:30') || bodyText.includes('00:29')) {
                                     return true;
                                 }
+                                return false;
                             }
-                            return false;
-                        })()
-                        """)
-                        if total_clicked: break
-                        await asyncio.sleep(0.1)
+                        """, timeout=60000)
+                    except Exception as e:
+                        logger.error(f"Timeout waiting for timer: {e}")
+                        try: await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
+                        except: pass
+                        continue # পরের রাউন্ডে চেষ্টা করবে
 
-                    # 💡 ৭. ওয়েটিং মেসেজ ডিলিট
+                    # 💡 ৩. ক্লিক করা (Playwright Native Click, যা টাইমআউট হবে না কারণ স্ক্রিন এখন ক্লিয়ার)
+                    logger.info(f"Screen is clear. Clicking {choice}...")
+                    try:
+                        if choice.upper() == "BIG":
+                            await page.get_by_text("Big", exact=True).last.click(timeout=5000)
+                        else:
+                            await page.get_by_text("Small", exact=True).last.click(timeout=5000)
+                    except Exception as e:
+                        logger.error(f"Big/Small click failed: {e}")
+                        try: await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
+                        except: pass
+                        continue 
+
+                    # 💡 ৪. "Total amount" বাটনে ক্লিক
+                    try:
+                        await page.get_by_text("Total amount", exact=False).last.click(timeout=3000)
+                    except Exception as e:
+                        logger.error(f"Total amount click failed: {e}")
+
+                    # 💡 ৫. ওয়েটিং মেসেজ ডিলিট
                     try:
                         await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
                     except: pass
 
-                    # 💡 ৮. স্ক্রিনশট
+                    # 💡 ৬. স্ক্রিনশট
                     await page.wait_for_timeout(1500)
                     proof_path = f"proof_success_{uid}.png"
                     await page.screenshot(path=proof_path)
@@ -439,7 +387,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                        f"⏱️ Period    : {new_ui_period}\n"
+                        f"⏱️ Period    : {current_period}\n"
                         f"🔵 PREDICTION : **{choice}**\n"
                         f"🚀 Step       : 🟢 Normal — Step {current_step_idx+1}\n"
                         f"💵 Amount     : ৳ {bet_amount:.2f}\n"
@@ -448,17 +396,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
-                    # 💡 ৯. রেজাল্টের জন্য অপেক্ষা (০০ আসা পর্যন্ত)
-                    logger.info("Waiting for round to finish...")
-                    for _ in range(350):
-                        body_text = await page.evaluate("() => document.body.innerText")
-                        if "0 0" in body_text:
-                            break
-                        await asyncio.sleep(0.2)
+                    # 💡 ৭. রেজাল্টের জন্য অপেক্ষা (৩০ সেকেন্ড)
+                    logger.info("Waiting 30 seconds for round to finish...")
+                    await asyncio.sleep(30)
 
-                    await page.wait_for_timeout(2000)
-
-                    # 💡 ১০. উপরে স্ক্রল করে Wallet balance চেক করা
+                    # 💡 ৮. উপরে স্ক্রল করে Wallet balance চেক করা
                     logger.info("Checking result...")
                     await page.evaluate("window.scrollTo(0, 0);")
                     await page.wait_for_timeout(1500) 
@@ -483,7 +425,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "🟢 TRADE RESULT (WIN)\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                f"⏰ Period : {new_ui_period}\n"
+                                f"⏰ Period : {current_period}\n"
                                 f"🔵 Side : {choice} ❮❮❮\n"
                                 f"🚀 Step : {current_step_idx+1}\n"
                                 f"💵 Amount : ৳ {bet_amount:.2f}\n\n"
@@ -509,7 +451,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "🔴 TRADE RESULT (LOSS)\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                f"⏰ Period : {new_ui_period}\n"
+                                f"⏰ Period : {current_period}\n"
                                 f"🔵 Side : {choice} ❮❮❮\n"
                                 f"🚀 Step : {current_step_idx}\n"
                                 f"💵 Amount : ৳ {bet_amount:.2f}\n\n"
@@ -520,7 +462,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 f"{next_step_txt}"
                             ))
 
-                    # 💡 ১১. আবার নিচে স্ক্রল করে গেমে ফিরে আসা
+                    # 💡 ৯. আবার নিচে স্ক্রল করে গেমে ফিরে আসা
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(1500)
 
