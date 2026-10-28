@@ -312,19 +312,18 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # 💡 ১. ওয়েটিং মেসেজ পাঠানো
                     wait_msg = await ctx.bot.send_message(
                         chat_id=uid, 
-                        text="⏳ **Waiting for 30-25s window...**\n_Bot is waiting for the exact moment to place the bet._", 
+                        text="⏳ **Waiting for 30 to 26s window...**\n_Bot will click instantly when timer is in this range._", 
                         parse_mode="Markdown"
                     )
 
-                    # 💡 ২. কঠোর টাইমার এবং ওভারলে চেক (Playwright wait_for_function)
-                    logger.info("Waiting for exact round start (30 to 25s)...")
-                    try:
-                        await page.wait_for_function("""
-                            () => {
-                                let bodyText = document.body.innerText.replace(/\\s+/g, '');
-                                // Check if 00:29, 00:28, 00:27, 00:26, 00:30 is present
-                                if (bodyText.includes('00:30') || bodyText.includes('00:29') || bodyText.includes('00:28') || bodyText.includes('00:27') || bodyText.includes('00:26')) {
-                                    // Also ensure the big 0 0 overlay is NOT visible
+                    # 💡 ২. টাইমার চেক (ম্যানুয়াল লুপ, যা ২ মিনিট আটকে থাকবে না)
+                    logger.info("Waiting for exact round start (30 to 26s)...")
+                    timer_found = False
+                    for _ in range(600): # সর্বোচ্চ ৬০ সেকেন্ড অপেক্ষা করবে
+                        try:
+                            is_ready = await page.evaluate("""
+                                () => {
+                                    // চেক করা স্ক্রিনে 0 0 ওভারলে আছে কিনা
                                     let hasOverlay = false;
                                     for (let el of document.querySelectorAll('div, span, p')) {
                                         let txt = (el.innerText || '').trim();
@@ -336,49 +335,48 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                             }
                                         }
                                     }
-                                    return !hasOverlay;
+                                    if (hasOverlay) return false; // 0 0 থাকলে ক্লিক হবে না
+
+                                    // টাইমার চেক
+                                    let bodyText = document.body.innerText.replace(/\\s+/g, '');
+                                    let match = bodyText.match(/00:(\\d{2})/);
+                                    if (match) {
+                                        let sec = parseInt(match[1]);
+                                        // ৩০ থেকে ২৬ সেকেন্ডের মধ্যে হলেই ট্রু রিটার্ন করবে
+                                        if (sec >= 26 && sec <= 30) {
+                                            return true;
+                                        }
+                                    }
+                                    return false;
                                 }
-                                return false;
-                            }
-                        """, timeout=65000) # ৬৫ সেকেন্ড পর্যন্ত অপেক্ষা করবে
-                    except Exception as e:
-                        logger.error("Timeout waiting for 30-25s window.")
+                            """)
+                            if is_ready:
+                                timer_found = True
+                                break
+                        except: pass
+                        await asyncio.sleep(0.1) # প্রতি ০.১ সেকেন্ড পর পর চেক করবে
+
+                    if not timer_found:
+                        # যদি ৬০ সেকেন্ডেও টাইমার না পায়, তবে পরের রাউন্ডে যাবে
                         try: await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
                         except: pass
-                        continue # পরের রাউন্ডে চেষ্টা করবে
+                        continue
 
-                    # 💡 ৩. Playwright Native Click দিয়ে Big/Small এ ক্লিক
+                    # 💡 ৩. বিগ অথবা স্মলে ক্লিক
                     logger.info(f"Clicking {choice}...")
-                    try:
-                        if choice.upper() == "BIG":
-                            await page.get_by_text("Big", exact=True).last.click(timeout=3000)
-                        else:
-                            await page.get_by_text("Small", exact=True).last.click(timeout=3000)
-                    except Exception as e:
-                        logger.error(f"Big/Small click failed: {e}")
-                        # জাভাস্ক্রিপ্ট ফলব্যাক
-                        await page.evaluate(f"""
-                            (() => {{
-                                let els = document.querySelectorAll('div, span, button');
-                                for (let el of els) {{
-                                    let txt = (el.innerText || el.textContent || '').trim().toUpperCase();
-                                    if (txt === '{choice.upper()}') {{
-                                        let rect = el.getBoundingClientRect();
-                                        if (rect.width > 40 && rect.height > 20 && rect.top > 500) {{
-                                            el.click();
-                                            return true;
-                                        }}
-                                    }}
-                                }}
-                                return false;
-                            }})()
-                        """)
+                    if choice.upper() == "BIG":
+                        await page.get_by_text("Big", exact=True).last.click(timeout=3000)
+                    else:
+                        await page.get_by_text("Small", exact=True).last.click(timeout=3000)
 
-                    # 💡 ৪. "Total amount" বাটনে ক্লিক
+                    # 💡 ৪. "Total amount" বাটন আসার সাথে সাথেই ক্লিক
                     try:
-                        await page.get_by_text("Total amount", exact=False).last.click(timeout=3000)
+                        total_amount_btn = page.get_by_text("Total amount", exact=False).last
+                        await total_amount_btn.wait_for(state="visible", timeout=5000)
+                        await total_amount_btn.click()
                     except Exception as e:
                         logger.error(f"Total amount click failed: {e}")
+                        # ফলব্যাক জাভাস্ক্রিপ্ট
                         await page.evaluate("""
                         (() => {
                             for(let el of document.querySelectorAll('span, div, label')) {
