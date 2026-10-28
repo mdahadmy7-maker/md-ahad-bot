@@ -312,68 +312,63 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     # 💡 ১. ওয়েটিং মেসেজ পাঠানো
                     wait_msg = await ctx.bot.send_message(
                         chat_id=uid, 
-                        text="⏳ **Waiting for 30 to 26s window...**\n_Bot will click instantly when timer is in this range._", 
+                        text="⏳ **Waiting for safe window (30-26s)...**\n_Bot will click when 0 0 animation clears._", 
                         parse_mode="Markdown"
                     )
 
-                    # 💡 ২. টাইমার চেক (ম্যানুয়াল লুপ, যা ২ মিনিট আটকে থাকবে না)
+                    # 💡 ২. কঠোর ওভারলে এবং টাইমার চেক
                     logger.info("Waiting for exact round start (30 to 26s)...")
-                    timer_found = False
-                    for _ in range(600): # সর্বোচ্চ ৬০ সেকেন্ড অপেক্ষা করবে
+                    is_ready = False
+                    for _ in range(600): 
                         try:
-                            is_ready = await page.evaluate("""
+                            state_check = await page.evaluate("""
                                 () => {
-                                    // চেক করা স্ক্রিনে 0 0 ওভারলে আছে কিনা
-                                    let hasOverlay = false;
-                                    for (let el of document.querySelectorAll('div, span, p')) {
+                                    // ১. চেক করা স্ক্রিনে বড় করে 0 0, 5, 4, 3, 2, 1 অ্যানিমেশন আছে কিনা
+                                    let elements = document.querySelectorAll('div, span, p');
+                                    for (let el of elements) {
                                         let txt = (el.innerText || '').trim();
-                                        if (txt === '0' || txt === '00' || txt === '0 0') {
+                                        if (['0', '00', '0 0', '5', '4', '3', '2', '1'].includes(txt)) {
                                             let rect = el.getBoundingClientRect();
-                                            if (rect.width > 30 && rect.height > 30) {
-                                                hasOverlay = true;
-                                                break;
-                                            }
+                                            // যদি স্ক্রিনের মাঝখানে বড় ফন্টে এই লেখাগুলো থাকে
+                                            if (rect.width > 30 && rect.height > 30) return "blocked";
                                         }
                                     }
-                                    if (hasOverlay) return false; // 0 0 থাকলে ক্লিক হবে না
-
-                                    // টাইমার চেক
-                                    let bodyText = document.body.innerText.replace(/\\s+/g, '');
-                                    let match = bodyText.match(/00:(\\d{2})/);
-                                    if (match) {
-                                        let sec = parseInt(match[1]);
-                                        // ৩০ থেকে ২৬ সেকেন্ডের মধ্যে হলেই ট্রু রিটার্ন করবে
-                                        if (sec >= 26 && sec <= 30) {
-                                            return true;
-                                        }
-                                    }
-                                    return false;
+                                    
+                                    // ২. অ্যানিমেশন না থাকলে টাইমার চেক করা (৩০ থেকে ২৬)
+                                    let text = document.body.innerText.replace(/\\s/g, '');
+                                    if (/00:(2[6-9]|30)/.test(text)) return "ready";
+                                    
+                                    return "waiting";
                                 }
                             """)
-                            if is_ready:
-                                timer_found = True
+                            
+                            if state_check == "ready":
+                                is_ready = True
                                 break
                         except: pass
-                        await asyncio.sleep(0.1) # প্রতি ০.১ সেকেন্ড পর পর চেক করবে
+                        await asyncio.sleep(0.1)
 
-                    if not timer_found:
-                        # যদি ৬০ সেকেন্ডেও টাইমার না পায়, তবে পরের রাউন্ডে যাবে
+                    if not is_ready:
                         try: await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
                         except: pass
-                        continue
+                        continue # যদি ৬০ সেকেন্ডেও সঠিক সময় না পায়, তবে পরের রাউন্ডে যাবে
 
-                    # 💡 ৩. বিগ অথবা স্মলে ক্লিক
+                    # 💡 ৩. বিগ অথবা স্মলে ক্লিক (Playwright Native)
                     logger.info(f"Clicking {choice}...")
-                    if choice.upper() == "BIG":
-                        await page.get_by_text("Big", exact=True).last.click(timeout=3000)
-                    else:
-                        await page.get_by_text("Small", exact=True).last.click(timeout=3000)
-
-                    # 💡 ৪. "Total amount" বাটন আসার সাথে সাথেই ক্লিক
                     try:
-                        total_amount_btn = page.get_by_text("Total amount", exact=False).last
-                        await total_amount_btn.wait_for(state="visible", timeout=5000)
-                        await total_amount_btn.click()
+                        if choice.upper() == "BIG":
+                            await page.get_by_text("Big", exact=True).last.click(timeout=3000)
+                        else:
+                            await page.get_by_text("Small", exact=True).last.click(timeout=3000)
+                    except Exception as e:
+                        logger.error(f"Big/Small click failed: {e}")
+                        try: await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
+                        except: pass
+                        continue # ক্লিক ফেইল করলে পরের রাউন্ডে যাবে
+
+                    # 💡 ৪. "Total amount" বাটনে ক্লিক
+                    try:
+                        await page.get_by_text("Total amount", exact=False).last.click(timeout=3000)
                     except Exception as e:
                         logger.error(f"Total amount click failed: {e}")
                         # ফলব্যাক জাভাস্ক্রিপ্ট
@@ -427,15 +422,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
-                    # 💡 ৭. রেজাল্টের জন্য অপেক্ষা (0 0 আসা পর্যন্ত)
-                    logger.info("Waiting for round to finish...")
-                    for _ in range(350):
-                        body_text = await page.evaluate("() => document.body.innerText")
-                        if "0 0" in body_text:
-                            break
-                        await asyncio.sleep(0.2)
-
-                    await page.wait_for_timeout(2000)
+                    # 💡 ৭. ডাবল ক্লিক বন্ধ করতে ৩২ সেকেন্ড অপেক্ষা করা (পুরো রাউন্ড শেষ হওয়ার জন্য)
+                    logger.info("Sleeping for 32 seconds to prevent double clicking...")
+                    await asyncio.sleep(32)
 
                     # 💡 ৮. উপরে স্ক্রল করে Wallet balance চেক করা
                     logger.info("Checking result...")
