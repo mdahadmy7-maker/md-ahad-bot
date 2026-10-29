@@ -3,6 +3,7 @@ import logging
 import re
 import os
 import requests
+import random
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -25,37 +26,107 @@ def get_state(uid):
             "balance": "0.00", "target": 0, 
             "steps": 0, "step_amounts": [], "current_step": 0,
             "trade_running": False, "task": None,
-            "wins": 0, "losses": 0, "total_trades": 0
+            "wins": 0, "losses": 0, "total_trades": 0,
+            # 💡 HTML ফাইলের প্রেডিকশন স্টেট
+            "last3": [], "reverseMode": False, "reverseCount": 0, "reverseTarget": 1,
+            "streakCount": 0, "streakType": None, "streakReversePending": False,
+            "displayedResult": "--", "last_period": ""
         }
     return user_state[uid]
 
-def get_history_and_prediction():
+# ───────────────────────────────────────────
+# 💡 ২. HTML থেকে নেওয়া নিখুঁত প্রেডিকশন লজিক
+# ───────────────────────────────────────────
+def get_prediction(state):
     try:
         res = requests.get(HISTORY_API, timeout=10)
-        list_data = res.json().get("data", {}).get("list", [])
-        if not list_data: raise Exception("No data")
-        latest_period = str(list_data[0].get("issueNumber", "Unknown"))
-        history = ["SMALL" if int(item.get("number", 0)) <= 4 else "BIG" for item in reversed(list_data)]
-        if len(history) < 3: 
-            return ("SMALL" if history[-1] == 'BIG' else "BIG"), latest_period
-        l1, l2, l3 = history[-1], history[-2], history[-3]
-        if l1 == l2 == l3: 
-            return ("SMALL" if l1 == 'BIG' else "BIG"), latest_period
-        return ("SMALL" if l1 == 'BIG' else "BIG"), latest_period
-    except:
-        import random
-        return random.choice(["BIG", "SMALL"]), datetime.now().strftime("%Y%m%d%H%M%S")
+        data = res.json()
+        list_data = data.get("data", {}).get("list", [])
+        if not list_data: return state["displayedResult"]
+        
+        latest = list_data[0]
+        latest_period = str(latest.get("issueNumber", ""))
+        latest_num = int(latest.get("number", 0))
+        
+        if not latest_period or latest_period == state["last_period"]:
+            return state["displayedResult"] 
+            
+        state["last_period"] = latest_period
+        currentResultSize = 'SMALL' if latest_num <= 4 else 'BIG'
 
+        if currentResultSize == state["streakType"]:
+            state["streakCount"] += 1
+        else:
+            state["streakType"] = currentResultSize
+            state["streakCount"] = 1
+
+        if not state["reverseMode"]:
+            state["last3"].append(currentResultSize)
+            if len(state["last3"]) > 3: state["last3"].pop(0)
+
+        if state["streakReversePending"]:
+            state["streakReversePending"] = False
+            patternDetected = False
+            if len(state["last3"]) == 3:
+                a, b, c = state["last3"]
+                if a != b and b != c and a == c:
+                    patternDetected = True
+
+            if patternDetected:
+                state["reverseMode"] = True
+                state["reverseCount"] = 1
+                state["reverseTarget"] = 1 if random.random() < 0.5 else 2
+                state["displayedResult"] = 'SMALL' if currentResultSize == 'BIG' else 'BIG'
+            else:
+                state["displayedResult"] = currentResultSize
+
+        elif state["streakCount"] >= 6 and not state["reverseMode"]:
+            state["streakReversePending"] = True
+            state["displayedResult"] = 'SMALL' if currentResultSize == 'BIG' else 'BIG'
+
+        elif state["reverseMode"]:
+            state["displayedResult"] = 'SMALL' if currentResultSize == 'BIG' else 'BIG'
+            state["reverseCount"] += 1
+            if state["reverseCount"] >= state["reverseTarget"]:
+                state["reverseMode"] = False
+                state["reverseCount"] = 0
+                state["last3"] = []
+
+        else:
+            patternDetected = False
+            if len(state["last3"]) == 3:
+                a, b, c = state["last3"]
+                if a != b and b != c and a == c:
+                    patternDetected = True
+
+            if patternDetected:
+                state["reverseMode"] = True
+                state["reverseCount"] = 1
+                state["reverseTarget"] = 1 if random.random() < 0.5 else 2
+                state["displayedResult"] = 'SMALL' if currentResultSize == 'BIG' else 'BIG'
+            else:
+                state["displayedResult"] = currentResultSize
+
+        return state["displayedResult"]
+    except Exception as e:
+        logger.error(f"Prediction Error: {e}")
+        return random.choice(["BIG", "SMALL"])
+
+# ───────────────────────────────────────────
+# ৩. লগইন এবং অটো-বেট ফাংশন
+# ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
     login_phone = phone[3:] if phone.startswith("880") else phone
     
     async def update_loading(percent):
         if not loading_msg_id: return
+        filled = "█" * (percent // 10)
+        empty = "░" * (10 - (percent // 10))
         try:
             await ctx.bot.edit_message_text(
                 chat_id=uid, message_id=loading_msg_id, 
-                text=f"🔄 **CONNECTING...** {percent}%", parse_mode="Markdown"
+                text=f"🔄 **CONNECTING TO HGNICE**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
             )
         except: pass
 
@@ -71,7 +142,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000) 
+            await page.wait_for_timeout(3000)
 
             await update_loading(30)
             try:
@@ -105,7 +176,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             state["balance"] = float(balance_match.group(1)) if balance_match else 0.0
             await update_loading(100)
-            if loading_msg_id: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
+            if loading_msg_id: 
+                try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
+                except: pass
 
             reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE")]]
             await ctx.bot.send_message(
@@ -123,11 +196,21 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ২. WinGo পেজে যাওয়া ----------------
             await page.goto(HOME_URL, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000) 
+            
             try:
+                # Home ক্লিক
+                await page.locator('text="Home"').first.click(timeout=5000, force=True)
+                await page.wait_for_timeout(1000)
+                
+                # Lottery ক্লিক
                 await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
                 await page.wait_for_timeout(1000)
-                await page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last.click(timeout=5000, force=True)
+                
+                # Win Go (Guess Number) ক্লিক
+                win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
+                await win_go_card.click(timeout=5000, force=True)
             except: pass
+            
             await page.wait_for_timeout(3000) 
 
             initial_balance = state["balance"]
@@ -139,35 +222,40 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 try:
                     current_bal = state["balance"]
                     
-                    # টার্গেট বা স্টেপ শেষ হলে স্টপ
                     if current_bal >= target_balance or current_step_idx >= len(state['step_amounts']) or current_bal < float(state['step_amounts'][current_step_idx]):
                         await ctx.bot.send_message(chat_id=uid, text="🛑 **TARGET REACHED OR NO BALANCE!**")
                         state["trade_running"] = False
                         break
 
                     bet_amount = float(state['step_amounts'][current_step_idx])
-                    choice, current_period = get_history_and_prediction()
+                    choice = get_prediction(state)
+                    
+                    if choice == "--":
+                        await asyncio.sleep(1)
+                        continue
 
-                    # 💡 ১. কঠোর ভিজ্যুয়াল চেক (5,4,3,2,1,0,00 মুছে যাওয়া পর্যন্ত অপেক্ষা)
-                    logger.info("Waiting for 0 0 animation to completely clear...")
+                    # 💡 ১. আপনার স্ক্রিনশটের ২৪৮ নম্বর লাইনের নিখুঁত ফিক্স
+                    logger.info(f"Prediction: {choice}. Waiting for 0 0 overlay to clear...")
                     is_cleared = False
+                    
                     for _ in range(600): 
                         try:
                             blocked = await page.evaluate("""
                                 () => {
                                     let elements = document.querySelectorAll('div, span, p');
                                     for (let el of elements) {
-                                        let txt = (el.innerText || '').trim();
-                                        // যদি 5, 4, 3, 2, 1, 0, 00 বা 0 0 থাকে
-                                        if (['5', '4', '3', '2', '1', '0', '00', '0 0'].includes(txt)) {
+                                        let txt = (el.innerText || el.textContent || '').trim();
+                                        // 💡 সব স্পেস মুছে ফেলা হচ্ছে (যেমন: "0 0" থেকে "00" হবে)
+                                        let cleanTxt = txt.replace(/\\s+/g, '');
+                                        
+                                        // শুধুমাত্র 5, 4, 3, 2, 1, 0, 00 চেক করবে
+                                        if (['5', '4', '3', '2', '1', '0', '00'].includes(cleanTxt)) {
                                             let rect = el.getBoundingClientRect();
-                                            // এবং সেটি যদি স্ক্রিনে বড় করে দেখা যায় (width/height > 30)
-                                            if (rect.width > 30 && rect.height > 30) {
-                                                return true; // এখনো ব্লকড
-                                            }
+                                            // স্ক্রিনে বড় করে দেখা যাচ্ছে কিনা (width/height > 40)
+                                            if (rect.width > 40 && rect.height > 40) return true;
                                         }
                                     }
-                                    return false; // স্ক্রিন ক্লিয়ার
+                                    return false;
                                 }
                             """)
                             
@@ -180,7 +268,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     if not is_cleared:
                         continue
 
-                    # 💡 ২. বিগ অথবা স্মলে ক্লিক (শুধুমাত্র একটি বাটনে ক্লিক হবে)
+                    # 💡 ২. বিগ অথবা স্মলে ক্লিক 
                     logger.info(f"Screen clear. Clicking {choice}...")
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     
@@ -202,7 +290,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     """)
                     
                     if not clicked:
-                        logger.warning("Big/Small not found.")
                         continue
 
                     # 💡 ৩. Total amount এ ক্লিক
@@ -231,15 +318,15 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     await page.wait_for_timeout(1500)
                     
-                    # 💡 ৪. স্ক্রিনশট নেওয়া
+                    # 💡 ৪. স্ক্রিনশট 
                     proof_path = f"proof_success_{uid}.png"
                     await page.screenshot(path=proof_path)
                     await ctx.bot.send_photo(chat_id=uid, photo=open(proof_path, 'rb'), caption=f"✅ **BET PLACED!**\nPrediction: **{choice}**\nAmount: ৳ {bet_amount:.2f}")
 
-                    # 💡 ৫. রেজাল্টের জন্য অপেক্ষা (৩২ সেকেন্ড)
+                    # 💡 ৫. রেজাল্টের জন্য অপেক্ষা
                     await asyncio.sleep(32)
 
-                    # 💡 ৬. উপরে স্ক্রল করে Wallet balance চেক করা (পেজ পরিবর্তন হবে না)
+                    # 💡 ৬. উপরে স্ক্রল করে Wallet balance চেক করা
                     await page.evaluate("window.scrollTo(0, 0);")
                     await page.wait_for_timeout(1500) 
                     
