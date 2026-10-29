@@ -219,39 +219,27 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # WinGo পেজে ঢোকা (এখানেই থাকবে)
+            # 💡 WinGo গেমে ঢোকা (আপনার প্রথম ফাইলের মতো নিখুঁত লজিক)
             logger.info("Navigating to WinGo page...")
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000) 
+            await page.wait_for_timeout(2000) 
             
-            nav_success = False
-            for attempt in range(15):
-                body_text = await page.evaluate("() => document.body.innerText")
-                if "Time remaining" in body_text:
-                    nav_success = True
-                    break
-                
-                await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span, a')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
+            for _ in range(3):
+                await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span, a, input')) { let t = (el.innerText||el.value||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
                 await page.wait_for_timeout(500)
                 
-                try:
-                    await page.get_by_text("Lottery", exact=True).first.click(timeout=2000, force=True)
-                except: pass
-                await page.wait_for_timeout(1000)
-                
-                try:
-                    await page.get_by_text("WinGo 30sec", exact=True).first.click(timeout=2000, force=True)
-                except:
-                    try:
-                        await page.get_by_text("Win Go", exact=False).first.click(timeout=2000, force=True)
-                    except: pass
-                await page.wait_for_timeout(2000)
-
-            if not nav_success:
-                await ctx.bot.send_message(chat_id=uid, text="❌ **গেম পেজে ঢুকতে সমস্যা হচ্ছে!** বট বন্ধ করা হচ্ছে।")
-                state["trade_running"] = False
-                await browser.close()
-                return
+            try:
+                await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
+            except:
+                await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if((el.innerText||'').toLowerCase().includes('lottery')) { el.click(); return true; } } return false; }""")
+            await page.wait_for_timeout(2000)
+            
+            try:
+                win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
+                await win_go_card.click(timeout=5000, force=True)
+            except:
+                await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } return false; }""")
+            await page.wait_for_timeout(3000) 
 
             # 💡 ৩ নাম্বার মেসেজ (AUTO TRADE ACTIVE)
             step_plan_str = "┌────────────────────────────────┐\n"
@@ -370,23 +358,51 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     logger.info(f"Screen clear. Clicking {choice}...")
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     
-                    try:
-                        if choice.upper() == "BIG":
-                            await page.get_by_text("Big", exact=True).last.click(timeout=5000)
-                        else:
-                            await page.get_by_text("Small", exact=True).last.click(timeout=5000)
-                    except Exception as e:
-                        logger.error(f"Big/Small click failed: {e}")
-                        continue 
+                    clicked = await page.evaluate(f"""
+                        (() => {{
+                            let els = document.querySelectorAll('div, span, button');
+                            for (let el of els) {{
+                                let txt = (el.innerText || el.textContent || '').trim().toUpperCase();
+                                if (txt === '{choice.upper()}') {{
+                                    let rect = el.getBoundingClientRect();
+                                    // rect.top > 500 মানে স্ক্রিনের নিচের বাটন (হিস্ট্রি সেকশন নয়)
+                                    if (rect.width > 0 && rect.height > 0 && rect.top > 500) {{
+                                        el.click();
+                                        return true;
+                                    }}
+                                }}
+                            }}
+                            return false;
+                        }})()
+                    """)
+                    
+                    if not clicked:
+                        logger.warning("Big/Small not found.")
+                        continue
 
                     # 💡 ৩. Total amount এ ক্লিক
                     logger.info("Clicking Total amount...")
-                    try:
-                        total_btn = page.locator("text=Total amount").last
-                        await total_btn.wait_for(state="visible", timeout=5000)
-                        await total_btn.click()
-                    except Exception as e:
-                        logger.error(f"Total amount click failed: {e}")
+                    await page.wait_for_timeout(800) # পপআপ আসার জন্য ০.৮ সেকেন্ড অপেক্ষা
+                    await page.evaluate("""
+                    (() => {
+                        for(let el of document.querySelectorAll('span, div, label')) {
+                            if(el.innerText && el.innerText.includes('I agree')) {
+                                let cb = el.parentElement.querySelector('input[type="checkbox"]');
+                                if(cb && !cb.checked) cb.click();
+                                else el.click();
+                            }
+                        }
+                        let btns = document.querySelectorAll('div, button, span');
+                        for(let el of btns) {
+                            let txt = (el.innerText || '').toLowerCase();
+                            if(txt.includes('total amount')) {
+                                el.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    })()
+                    """)
 
                     # 💡 ৪. স্ক্রিনশট নেওয়া
                     await page.wait_for_timeout(1500)
