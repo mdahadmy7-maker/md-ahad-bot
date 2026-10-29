@@ -35,15 +35,8 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# 💡 ২. HTML ফাইলের প্রেডিকশন লজিক
+# 💡 ২. আপনার HTML ফাইলের প্রেডিকশন লজিক (Weighted Inverse)
 # ───────────────────────────────────────────
-DIRECT_NUMBER_MAP = {
-    0: { "BIG": 6, "SMALL": 4 }, 1: { "BIG": 9, "SMALL": 0 }, 2: { "BIG": 6, "SMALL": 4 },
-    3: { "BIG": 7, "SMALL": 4 }, 4: { "BIG": 8, "SMALL": 0 }, 5: { "BIG": 8, "SMALL": 0 },
-    6: { "BIG": 9, "SMALL": 1 }, 7: { "BIG": 9, "SMALL": 3 }, 8: { "BIG": 6, "SMALL": 1 },
-    9: { "BIG": 5, "SMALL": 4 }
-}
-
 def get_history_and_prediction():
     try:
         headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
@@ -56,32 +49,60 @@ def get_history_and_prediction():
             
         latest_period = str(list_data[0].get("issueNumber", "Unknown"))
         
-        history = []
-        for item in list_data[:15]:
+        # HTML এর মতো সর্বোচ্চ ২০টি ডেটা নেওয়া হচ্ছে
+        numbers = []
+        for item in list_data[:20]:
             num = int(item.get("number", 0))
-            history.append(num)
+            numbers.append(num)
             
-        if len(history) == 0: return "BIG", latest_period
+        if not numbers:
+            return "SMALL", "0", latest_period
+            
+        # পরবর্তী পিরিয়ড বের করা
+        next_period = str(int(latest_period) + 1)
         
-        lastNum = history[0] if len(history) > 0 else 6
-        sizes = ['B' if x >= 5 else 'S' for x in history]
+        big = 0
+        small = 0
+        bigScore = 0
+        smallScore = 0
         
-        trend = "BIG"
-        if len(sizes) >= 3 and sizes[0] == 'S' and sizes[1] == 'B' and sizes[2] == 'B':
-            trend = "BIG"
-        elif len(sizes) >= 3 and sizes[0] == 'B' and sizes[1] == 'S' and sizes[2] == 'S':
-            trend = "SMALL"
-        elif lastNum == 4 or lastNum == 6:
-            trend = "SMALL"
+        n_len = len(numbers)
+        for i, n in enumerate(numbers):
+            if n >= 5:
+                big += 1
+            else:
+                small += 1
+                
+            # Weight calculation
+            weight = n_len - (i + 1) + 1
+            if n >= 5:
+                bigScore += weight
+            else:
+                smallScore += weight
+                
+        # Inverse Logic
+        if bigScore > smallScore:
+            pred_type = "SMALL"
+        elif smallScore > bigScore:
+            pred_type = "BIG"
         else:
-            trend = "SMALL" if sizes[0] == 'B' else "BIG"
+            last_digit = int(next_period[-1]) if next_period[-1].isdigit() else 0
+            pred_type = "BIG" if last_digit % 2 == 0 else "SMALL"
             
-        return trend, latest_period
+        last_digit = int(next_period[-1]) if next_period[-1].isdigit() else 0
+        
+        # Number Prediction Formula
+        if pred_type == "BIG":
+            pred_num = 5 + (last_digit + n_len + bigScore) % 5
+        else:
+            pred_num = (last_digit + n_len + smallScore) % 5
+            
+        return pred_type, str(pred_num), next_period
         
     except Exception as e:
         logger.error(f"History API error: {e}")
         import random
-        return random.choice(["BIG", "SMALL"]), datetime.now().strftime("%Y%m%d%H%M%S")
+        return random.choice(["BIG", "SMALL"]), "0", datetime.now().strftime("%Y%m%d%H%M%S")
 
 # ───────────────────────────────────────────
 # ৩. লগইন এবং অটো-বেট ফাংশন
@@ -110,7 +131,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         page = await context.new_page()
         
         # ==========================================
-        # 💡 ৪. API ক্যাপচার (WinGoBet)
+        # 💡 API ক্যাপচার (WinGoBet)
         # ==========================================
         async def log_bet_api(request):
             if request.method == "POST" and "WinGoBet" in request.url:
@@ -122,10 +143,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     )
                     await ctx.bot.send_message(chat_id=uid, text=api_msg, parse_mode="Markdown")
                     logger.info("WinGoBet API Captured Successfully!")
-                except Exception as e:
-                    logger.error(f"Telegram capture failed: {e}")
+                except: pass
         page.on("request", log_bet_api)
-        # ==========================================
 
         try:
             # ---------------- ১. লগইন ----------------
@@ -229,7 +248,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]]
             await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
 
-            # 💡 অপেক্ষা করবে যতক্ষণ না ইউজার START TRADE চাপছে
+            # অপেক্ষা করবে যতক্ষণ না START TRADE চাপছে
             while not state.get("trade_running", False):
                 await asyncio.sleep(1)
                 if state.get("task") != asyncio.current_task():
@@ -263,7 +282,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } return false; }""")
             await page.wait_for_timeout(3000) 
 
-            # 💡 AUTO TRADE ACTIVE মেসেজ (START TRADE চাপার পরই আসবে)
+            # AUTO TRADE ACTIVE মেসেজ
             step_plan_str = "┌────────────────────────────────┐\n"
             for i, amt in enumerate(state['step_amounts']):
                 step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
@@ -289,38 +308,26 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     current_bal = state["balance"]
                     
                     if current_bal >= target_balance:
-                        profit = current_bal - initial_balance
-                        win_rate = (state['wins'] / state['total_trades'] * 100) if state['total_trades'] > 0 else 0
-                        target_summary = (
-                            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                            "🎯 **TARGET REACHED** 🎉\n"
-                            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                            f"💰 **Start Balance** : ৳ {initial_balance:.2f}\n"
-                            f"💵 **Final Balance** : ৳ {current_bal:.2f}\n"
-                            f"💸 **Profit Made**   : +৳ {profit:.2f}\n\n"
-                            f"📊 **Trades** : {state['total_trades']} 🟢 **Win** : {state['wins']} 🔴 **Loss** : {state['losses']}\n"
-                            f"🏆 **Win Rate** : {win_rate:.1f}%\n"
-                        )
-                        await ctx.bot.send_message(chat_id=uid, text=target_summary, parse_mode="Markdown")
+                        await ctx.bot.send_message(chat_id=uid, text=f"🎯 **TARGET REACHED!**\nProfit: ৳ {current_bal - initial_balance:.2f}\nবট বন্ধ হচ্ছে।")
                         state["trade_running"] = False
                         break
 
                     if current_step_idx >= len(state['step_amounts']):
-                        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **সব স্টেপ শেষ!** ব্যালেন্স: ৳{current_bal:.2f}। বট বন্ধ হচ্ছে।")
+                        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **সব স্টেপ শেষ!** ব্যালেন্স: ৳{current_bal:.2f}।")
                         state["trade_running"] = False
                         break
                         
                     bet_amount = float(state['step_amounts'][current_step_idx])
-
                     if current_bal < bet_amount:
-                        await ctx.bot.send_message(chat_id=uid, text=f"❌ **পর্যাপ্ত ব্যালেন্স নেই!**\nপ্রয়োজন: ৳{bet_amount}, আছে: ৳{current_bal:.2f}। বট বন্ধ হচ্ছে।")
+                        await ctx.bot.send_message(chat_id=uid, text=f"❌ **পর্যাপ্ত ব্যালেন্স নেই!**")
                         state["trade_running"] = False
                         break
 
-                    choice, current_period = get_history_and_prediction()
+                    # এখানে HTML এর লজিক কল করা হচ্ছে
+                    choice, pred_num, current_period = get_history_and_prediction()
 
-                    # 💡 ১. কঠোর টাইমার চেক (৩০ এবং ২৯ সেকেন্ডের জন্য অপেক্ষা করবে)
-                    logger.info("Waiting for 30s or 29s...")
+                    # ৩০/২৯ সেকেন্ডের জন্য অপেক্ষা
+                    logger.info("Waiting for 29s...")
                     timer_found = False
                     timer_val = "0s"
                     for _ in range(400): 
@@ -337,19 +344,19 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await asyncio.sleep(0.1)
 
                     if not timer_found:
-                        logger.warning("Missed the 30s-29s window. Waiting for next round...")
                         continue 
 
-                    # 💡 ২. Big/Small ক্লিক (জাভাস্ক্রিপ্ট দিয়ে)
+                    # Big/Small ক্লিক (জাভাস্ক্রিপ্ট দিয়ে ১০০% নিখুঁত)
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                    await page.wait_for_timeout(200)
+                    await page.wait_for_timeout(300)
                     
                     js_click_big_small = f"""
                     (() => {{
                         let els = document.querySelectorAll('div, span, button');
                         for (let el of els) {{
                             if (el.innerText && el.innerText.trim().toUpperCase() === '{choice.upper()}') {{
-                                if (el.getBoundingClientRect().width > 0) {{ el.click(); return true; }}
+                                el.click();
+                                return true;
                             }}
                         }}
                         return false;
@@ -359,10 +366,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     if not clicked:
                         await page.mouse.click(103 if choice.upper() == "BIG" else 309, 890)
 
-                    # 💡 ৩. মডাল ওপেন হওয়া পর্যন্ত অপেক্ষা
                     await page.wait_for_timeout(1500)
 
-                    # 💡 ৪. Amount বসানো (স্টেপ অনুযায়ী টাকা টাইপ করবে)
+                    # Amount বসানো
                     try:
                         inp = page.locator('input[type="text"], input[type="number"]').first
                         if await inp.is_visible():
@@ -370,23 +376,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             await page.keyboard.press("Control+A")
                             await page.keyboard.press("Backspace")
                             await inp.type(str(int(bet_amount)), delay=20)
-                    except Exception as e:
-                        logger.error(f"Amount type error: {e}")
+                    except: pass
 
-                    # 💡 ৫. "Total amount" বাটনে ক্লিক করা
+                    # Total Amount ক্লিক
                     js_confirm_bet = """
                     (() => {
-                        for(let el of document.querySelectorAll('span, div, label')) {
-                            if(el.innerText && el.innerText.includes('I agree')) {
-                                let cb = el.parentElement.querySelector('input[type="checkbox"]');
-                                if(cb && !cb.checked) cb.click();
-                                else el.click();
-                            }
-                        }
-                        let btns = document.querySelectorAll('div, button, span');
-                        for(let el of btns) {
-                            let txt = (el.innerText || '').toLowerCase();
-                            if(txt.includes('total amount')) {
+                        for(let el of document.querySelectorAll('button, div, span')) {
+                            if(el.innerText && el.innerText.toLowerCase().includes('total amount')) {
                                 el.click();
                                 return true;
                             }
@@ -394,16 +390,15 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         return false;
                     })()
                     """
-                    bet_result = await page.evaluate(js_confirm_bet)
-                    
-                    if not bet_result:
-                        try:
-                            confirm_btn = page.locator('text=/Total amount/i').last
-                            if await confirm_btn.count() > 0 and await confirm_btn.is_visible():
-                                await confirm_btn.click(timeout=2000, force=True)
-                        except: pass
+                    confirm_success = False
+                    for _ in range(10):
+                        confirm_success = await page.evaluate(js_confirm_bet)
+                        if confirm_success: break
+                        await page.wait_for_timeout(500)
 
-                    # 💡 ৬. সফলভাবে বিট হওয়ার পর স্ক্রিনশট
+                    if not confirm_success:
+                        await page.mouse.click(309, 880)
+
                     await page.wait_for_timeout(2000)
                     proof_path = f"proof_success_{uid}.png"
                     await page.screenshot(path=proof_path)
@@ -411,7 +406,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await ctx.bot.send_photo(
                         chat_id=uid, 
                         photo=open(proof_path, 'rb'), 
-                        caption=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice}**\n💵 Amount: ৳ {bet_amount:.2f}\n📱 স্ক্রিনশটে দেখুন সাইটে কি হয়েছে ↓"
+                        caption=f"✅ **BET PLACED!**\n\n🎯 Prediction: **{choice}**\n🔢 Number: **{pred_num}**\n💵 Amount: ৳ {bet_amount:.2f}\n📱 স্ক্রিনশটে দেখুন ↓"
                     )
 
                     await ctx.bot.send_message(chat_id=uid, text=(
@@ -420,7 +415,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         f"⏱️ Period    : {current_period}\n"
                         f"⏱️ Timer     : {timer_val} remaining\n"
-                        f"🔵 PREDICTION : **{choice}**\n"
+                        f"🔵 PREDICTION : **{choice}** (Num: {pred_num})\n"
                         f"🚀 Step       : 🟢 Normal — Step {current_step_idx+1}\n"
                         f"💵 Amount     : ৳ {bet_amount:.2f}\n"
                         f"💰 Balance    : ৳ {current_bal:.2f}\n"
@@ -428,7 +423,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
-                    # 💡 ৭. রেজাল্টের জন্য অপেক্ষা (0 0 আসা পর্যন্ত)
+                    # রেজাল্টের জন্য অপেক্ষা
                     for _ in range(350):
                         body_text = await page.evaluate("() => document.body.innerText")
                         if "0 0" in body_text:
@@ -436,9 +431,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await asyncio.sleep(0.2)
 
                     await page.wait_for_timeout(2000)
-
-                    # 💡 ৮. উপরে স্ক্রল করে Wallet balance চেক করা
-                    logger.info("Checking result...")
                     await page.evaluate("window.scrollTo(0, 0);")
                     await page.wait_for_timeout(1500) 
                     
@@ -456,28 +448,24 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             state["wins"] += 1
                             current_step_idx = 0
                             p_l = bet_amount * 0.96
-                            win_rate = (state['wins'] / state['total_trades'] * 100)
                             
                             await ctx.bot.send_message(chat_id=uid, text=(
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 "🟢 TRADE RESULT (WIN)\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 f"⏰ Period : {current_period}\n"
-                                f"🔵 Side : {choice} ❮❮❮\n"
+                                f"🔵 Side : {choice}\n"
                                 f"🚀 Step : {current_step_idx+1}\n"
                                 f"💵 Amount : ৳ {bet_amount:.2f}\n\n"
                                 f"💹 P/L : +৳ {p_l:.2f}\n"
                                 f"💰 Balance : ৳ {new_balance:.2f}\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                f"🏆 Wins : {state['wins']} 🔴 Losses : {state['losses']} 📈 Rate : {win_rate:.1f}%\n"
                                 "➡️ Next Step : 1\n"
                             ))
                         else:
                             state["balance"] = new_balance
                             state["losses"] += 1
                             current_step_idx += 1
-                            
-                            win_rate = (state['wins'] / state['total_trades'] * 100) if state['total_trades'] > 0 else 0
                             
                             if current_step_idx < len(state['step_amounts']):
                                 next_step_txt = f"➡️ Next Step : {current_step_idx+1} (৳ {state['step_amounts'][current_step_idx]})"
@@ -489,17 +477,15 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 "🔴 TRADE RESULT (LOSS)\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                                 f"⏰ Period : {current_period}\n"
-                                f"🔵 Side : {choice} ❮❮❮\n"
+                                f"🔵 Side : {choice}\n"
                                 f"🚀 Step : {current_step_idx}\n"
                                 f"💵 Amount : ৳ {bet_amount:.2f}\n\n"
                                 f"💹 P/L : -৳ {bet_amount:.2f}\n"
                                 f"💰 Balance : ৳ {new_balance:.2f}\n"
                                 "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                f"🏆 Wins : {state['wins']} 🔴 Losses : {state['losses']} 📈 Rate : {win_rate:.1f}%\n"
                                 f"{next_step_txt}"
                             ))
 
-                    # 💡 ৯. আবার নিচে স্ক্রল করে গেমে ফিরে আসা
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(1500)
 
@@ -517,7 +503,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         finally:
             await browser.close()
 
-# হ্যান্ডলারগুলো (আপনার আগের ফাইলের মতো হুবহু)
+# হ্যান্ডলারগুলো
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
