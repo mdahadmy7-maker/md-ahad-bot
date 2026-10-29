@@ -219,26 +219,36 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # 💡 WinGo গেমে ঢোকা (আপনার প্রথম ফাইলের মতো নিখুঁত লজিক)
+            # 💡 WinGo গেমে ঢোকা (শুধুমাত্র জাভাস্ক্রিপ্ট ব্যবহার করে, ১০০% নিশ্চিত)
             logger.info("Navigating to WinGo page...")
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000) 
             
             for _ in range(3):
-                await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span, a, input')) { let t = (el.innerText||el.value||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
+                await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span, a')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
                 await page.wait_for_timeout(500)
-                
-            try:
-                await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
-            except:
-                await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if((el.innerText||'').toLowerCase().includes('lottery')) { el.click(); return true; } } return false; }""")
+            
+            # ১. Lottery তে ক্লিক
+            await page.evaluate("""() => { 
+                for(let el of document.querySelectorAll('div, span, a, p')) { 
+                    if((el.innerText||'').trim() === 'Lottery') { 
+                        el.click(); return true; 
+                    } 
+                } 
+                return false; 
+            }""")
             await page.wait_for_timeout(2000)
             
-            try:
-                win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
-                await win_go_card.click(timeout=5000, force=True)
-            except:
-                await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } return false; }""")
+            # ২. Win Go কার্ডে ক্লিক
+            await page.evaluate("""() => { 
+                for(let el of document.querySelectorAll('div, span, p')) { 
+                    let t = (el.innerText||''); 
+                    if(t.includes('Win Go') && t.includes('Guess Number')) { 
+                        el.click(); return true; 
+                    } 
+                } 
+                return false; 
+            }""")
             await page.wait_for_timeout(3000) 
 
             # 💡 ৩ নাম্বার মেসেজ (AUTO TRADE ACTIVE)
@@ -354,7 +364,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         logger.warning("Could not find a clear screen within the time limit.")
                         continue
 
-                    # 💡 ২. বিগ অথবা স্মলে ক্লিক (Playwright Native Click)
+                    # 💡 ২. বিগ অথবা স্মলে ক্লিক (শুধুমাত্র জাভাস্ক্রিপ্ট)
                     logger.info(f"Screen clear. Clicking {choice}...")
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     
@@ -365,7 +375,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 let txt = (el.innerText || el.textContent || '').trim().toUpperCase();
                                 if (txt === '{choice.upper()}') {{
                                     let rect = el.getBoundingClientRect();
-                                    // rect.top > 500 মানে স্ক্রিনের নিচের বাটন (হিস্ট্রি সেকশন নয়)
                                     if (rect.width > 0 && rect.height > 0 && rect.top > 500) {{
                                         el.click();
                                         return true;
