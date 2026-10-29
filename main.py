@@ -15,8 +15,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 # ১. কনফিগারেশন
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-API_BASE = "https://api.ar-lottery01.com/api"  # আপনার দেওয়া cURL থেকে নেওয়া
-API_RESULT = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
+API_BASE = "https://api.hgnicepayapi.com/api/webapi" # লগইন এবং ব্যালেন্সের জন্য
+API_BET_BASE = "https://api.ar-lottery01.com/api"     # বেট করার জন্য
 GAME_CODE = "WinGo_30S"
 LANG_VAL = 0
 
@@ -38,7 +38,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ═══════════════════════════════════════════
-# ২. এপিআই হেল্পার ফাংশন
+# ২. এপিআই হেল্পার ফাংশন (সিগনেচার ও হেডারসহ)
 # ═══════════════════════════════════════════
 def md5(s):
     return hashlib.md5(s.encode("utf-8")).hexdigest()
@@ -55,12 +55,20 @@ def build_sig(data):
     t["timestamp"] = int(time.time())
     return t
 
-def api_call(endpoint, data, token=None, token_hdr="Bearer "):
+def api_call(url_base, endpoint, data, token=None, token_hdr="Bearer "):
     body = build_sig(data)
-    headers = {"Content-Type": "application/json;charset=UTF-8"}
+    
+    # 💡 লগইন এবং বেট এপিআই-এর জন্য সঠিক হেডার
+    headers = {
+        "Content-Type": "application/json;charset=UTF-8",
+        "Origin": "https://www.hgnice.site",
+        "Referer": "https://www.hgnice.site/",
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+    }
     if token:
         headers["Authorization"] = token_hdr + token
-    url = API_BASE + endpoint
+        
+    url = url_base + endpoint
     try:
         r = requests.post(url, headers=headers, data=json.dumps(body), timeout=15)
         j = r.json()
@@ -76,15 +84,18 @@ def api_login(phone, pwd):
         "deviceId": str(uuid.uuid4()).replace("-", ""), "pixelId": "", "fbcId": "",
         "fbc": "", "fbp": "", "adId": "", "language": LANG_VAL,
     }
-    j = api_call("/Login", data)
-    if j and j.get("code") == 0:
-        d = j.get("data") or {}
-        return d.get("token", ""), d.get("tokenHeader", "Bearer ")
+    j = api_call(API_BASE, "/Login", data)
+    
+    if j:
+        logger.info(f"LOGIN RESPONSE: {j}")
+        if j.get("code") == 0:
+            d = j.get("data") or {}
+            return d.get("token", ""), d.get("tokenHeader", "Bearer ")
     return None, None
 
 def api_balance(token, token_hdr):
     try:
-        j = api_call("/GetAllwallets", {}, token, token_hdr)
+        j = api_call(API_BASE, "/GetAllwallets", {}, token, token_hdr)
         if j and j.get("code") == 0:
             d = j.get("data") or {}
             lst = d.get("thidGameBalanceList", [])
@@ -96,7 +107,7 @@ def api_balance(token, token_hdr):
 
 def get_latest_result():
     try:
-        res = requests.get(API_RESULT, timeout=10)
+        res = requests.get("https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json", timeout=10)
         data = res.json()
         list_data = data.get("data", {}).get("list", [])
         if list_data:
@@ -120,21 +131,25 @@ def place_bet(token, token_hdr, issue, amount, pred):
         "betMultiple": 1,
         "betContent": bet_content
     }
-    j = api_call("/Lottery/WinGoBet", data, token, token_hdr)
+    
+    # 💡 বেট এপিআই এর জন্য আলাদা ডোমেইন
+    j = api_call(API_BET_BASE, "/Lottery/WinGoBet", data, token, token_hdr)
     if j and j.get("code") == 0:
         return True
     return False
 
 # ═══════════════════════════════════════════
-# ৩. মেইন এপিআই বেটিং লুপ (ব্যাকগ্রাউন্ডে চলবে)
+# ৩. মেইন এপিআই বেটিং লুপ
 # ═══════════════════════════════════════════
 async def run_api_bot(uid, ctx):
     state = get_state(uid)
     
-    # লগইন করা
+    # লগইন
+    await ctx.bot.send_message(chat_id=uid, text="🔄 **API-তে লগইন করা হচ্ছে...**")
     token, token_hdr = api_login(state["temp_phone"], state["temp_password"])
+    
     if not token:
-        await ctx.bot.send_message(chat_id=uid, text="❌ **LOGIN FAILED!**\nভুল ফোন নাম্বার বা পাসওয়ার্ড।")
+        await ctx.bot.send_message(chat_id=uid, text="❌ **LOGIN FAILED!**\nদয়া করে সঠিক নাম্বার এবং পাসওয়ার্ড দিন।")
         state["trade_running"] = False
         return
         
@@ -144,7 +159,6 @@ async def run_api_bot(uid, ctx):
     balance = api_balance(token, token_hdr)
     state["balance"] = balance
     
-    # ড্যাশবোর্ড
     dashboard_msg = (
         "╔════════════════════════╗\n"
         "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -319,8 +333,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["awaiting"] = "phone"
         await ctx.bot.send_message(chat_id=uid, text="📱 Enter your phone number:")
     elif query.data == "start_trade_btn":
-        # ট্রেড শুরু করার জন্য টার্গেট এবং স্টেপ নেওয়া লাগবে
-        # (এখানে সরাসরি ট্রেড শুরু হবে যদি আগে থেকে ডেটা থাকে)
         if not state.get("step_amounts") or not state.get("target"):
             await ctx.bot.send_message(chat_id=uid, text="⚠️ আগে টার্গেট এবং স্টেপ সেট করুন।")
             state["awaiting"] = "target"
