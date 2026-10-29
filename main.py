@@ -85,8 +85,8 @@ def get_history_and_prediction():
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
-    # 💡 ৮৮০ সহ পুরো নম্বরটিই ব্যবহার করা হচ্ছে
-    login_phone = phone 
+    # আপনার আগের ফাইলের মতো ৮৮০ কেটে ফেলা হচ্ছে
+    login_phone = phone[3:] if phone.startswith("880") else phone
     
     async def update_loading(percent):
         if not loading_msg_id: return
@@ -227,6 +227,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]]
             await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
 
+            # 💡 আপনার সেটআপ শেষ হওয়া এবং START TRADE চাপার জন্য অপেক্ষা করবে
             while not state.get("trade_running", False):
                 await asyncio.sleep(1)
                 if state.get("task") != asyncio.current_task():
@@ -238,40 +239,27 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # 💡 WinGo পেজে ঢোকার কঠোর (Strict) সিস্টেম
+            # 💡 WinGo পেজে ঢোকার সিস্টেম (আপনার আগের ফাইলের মতো, যা কাজ করেছিল)
             logger.info("Navigating to WinGo page...")
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000) 
+            await page.wait_for_timeout(2000) 
             
-            nav_success = False
-            for attempt in range(15):
-                body_text = await page.evaluate("() => document.body.innerText")
-                if "Time remaining" in body_text:
-                    nav_success = True
-                    logger.info("Successfully entered WinGo game!")
-                    break
-                
+            for _ in range(3):
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span, a')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
                 await page.wait_for_timeout(500)
                 
-                try:
-                    await page.get_by_text("Lottery", exact=True).first.click(timeout=2000, force=True)
-                except: pass
-                await page.wait_for_timeout(1000)
-                
-                try:
-                    await page.get_by_text("WinGo 30sec", exact=True).first.click(timeout=2000, force=True)
-                except:
-                    try:
-                        await page.get_by_text("Win Go", exact=False).first.click(timeout=2000, force=True)
-                    except: pass
-                await page.wait_for_timeout(2000)
-
-            if not nav_success:
-                await ctx.bot.send_message(chat_id=uid, text="❌ **গেম পেজে ঢুকতে সমস্যা হচ্ছে!** বট বন্ধ করা হচ্ছে।")
-                state["trade_running"] = False
-                await browser.close()
-                return
+            try:
+                await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
+            except:
+                await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if((el.innerText||'').toLowerCase().includes('lottery')) { el.click(); return true; } } return false; }""")
+            await page.wait_for_timeout(2000)
+            
+            try:
+                win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
+                await win_go_card.click(timeout=5000, force=True)
+            except:
+                await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } return false; }""")
+            await page.wait_for_timeout(3000) 
 
             # 💡 AUTO TRADE ACTIVE মেসেজ
             step_plan_str = "┌────────────────────────────────┐\n"
