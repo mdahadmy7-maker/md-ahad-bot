@@ -334,7 +334,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                         // যদি 5, 4, 3, 2, 1, 0, 00 বা 0 0 থাকে
                                         if (['5', '4', '3', '2', '1', '0', '00', '0 0'].includes(txt)) {
                                             let rect = el.getBoundingClientRect();
-                                            // এবং সেটি যদি স্ক্রিনে বড় করে দেখা যায়
+                                            // এবং সেটি যদি স্ক্রিনে বড় করে দেখা যায় (width/height > 30)
                                             if (rect.width > 30 && rect.height > 30) {
                                                 return true; // এখনো ব্লকড
                                             }
@@ -713,7 +713,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
     elif data == "start_trade_btn":
         state["trade_running"] = True
-        await query.edit_message_text("🚀 **STARTING AUTO TRADE...**\n\n_Bot is navigating to WinGo page. Please wait..._", parse_mode="Markdown")
+        # 💡 এখানে কোনো edit_message_text নেই, তাই আপনার মেসেজটি আগের মতোই থাকবে
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
         await query.edit_message_text("❌ **TRADE CANCELLED**")
