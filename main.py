@@ -85,7 +85,6 @@ def get_history_and_prediction():
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
-    # আপনার আগের ফাইলের মতো ৮৮০ কেটে ফেলা হচ্ছে
     login_phone = phone[3:] if phone.startswith("880") else phone
     
     async def update_loading(percent):
@@ -227,7 +226,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]]
             await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
 
-            # 💡 আপনার সেটআপ শেষ হওয়া এবং START TRADE চাপার জন্য অপেক্ষা করবে
             while not state.get("trade_running", False):
                 await asyncio.sleep(1)
                 if state.get("task") != asyncio.current_task():
@@ -239,7 +237,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # 💡 WinGo পেজে ঢোকার সিস্টেম (আপনার আগের ফাইলের মতো, যা কাজ করেছিল)
+            # 💡 WinGo পেজে ঢোকার সিস্টেম
             logger.info("Navigating to WinGo page...")
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000) 
@@ -261,7 +259,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } return false; }""")
             await page.wait_for_timeout(3000) 
 
-            # 💡 AUTO TRADE ACTIVE মেসেজ
+            # AUTO TRADE ACTIVE মেসেজ
             step_plan_str = "┌────────────────────────────────┐\n"
             for i, amt in enumerate(state['step_amounts']):
                 step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
@@ -318,24 +316,26 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     choice, current_period = get_history_and_prediction()
 
                     # 💡 ১. কঠোর টাইমার চেক (শুধুমাত্র ২৫ থেকে ২৯ সেকেন্ডের মধ্যে ক্লিক করবে)
-                    logger.info("Waiting for new round (29s)...")
+                    logger.info("Waiting for new round (28s-29s)...")
+                    timer_found = False
                     timer_val = "0s"
-                    for _ in range(600): 
+                    for _ in range(400): # ৪০ সেকেন্ড অপেক্ষা করবে
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
                             
-                            if "0 0" in body_text:
-                                await asyncio.sleep(0.1)
-                                continue
-                                
-                            match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
+                            # টাইমার ফরম্যাট খোঁজা (যেমন: 0 0 : 2 9 অথবা 00:29)
+                            match = re.search(r'(?:0\s*0|00)\s*[:.]\s*(2[5-9])', body_text)
                             if match:
                                 sec = int(match.group(1))
-                                if 25 <= sec <= 29: 
-                                    timer_val = f"{sec}s"
-                                    break
+                                timer_val = f"{sec}s"
+                                timer_found = True
+                                break
                         except: pass
                         await asyncio.sleep(0.1)
+
+                    if not timer_found:
+                        logger.warning("Missed the 25s-29s window. Waiting for next round...")
+                        continue # ভুল সময়ে ক্লিক না করে পরের রাউন্ডে অপেক্ষা করবে
 
                     # 💡 ২. সুপার ফাস্ট Big/Small ক্লিক
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
