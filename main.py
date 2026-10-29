@@ -15,8 +15,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 # ১. কনফিগারেশন
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-API_BASE = "https://api.hgnicepayapi.com/api/webapi" # লগইন এবং ব্যালেন্সের জন্য
-API_BET_BASE = "https://api.ar-lottery01.com/api"     # বেট করার জন্য
+API_BASE = "https://api.hgnicepayapi.com/api/webapi" 
+API_BET_BASE = "https://api.ar-lottery01.com/api"     
 GAME_CODE = "WinGo_30S"
 LANG_VAL = 0
 
@@ -38,7 +38,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ═══════════════════════════════════════════
-# ২. এপিআই হেল্পার ফাংশন (সিগনেচার ও হেডারসহ)
+# ২. এপিআই হেল্পার ফাংশন
 # ═══════════════════════════════════════════
 def md5(s):
     return hashlib.md5(s.encode("utf-8")).hexdigest()
@@ -58,7 +58,6 @@ def build_sig(data):
 def api_call(url_base, endpoint, data, token=None, token_hdr="Bearer "):
     body = build_sig(data)
     
-    # 💡 লগইন এবং বেট এপিআই-এর জন্য সঠিক হেডার
     headers = {
         "Content-Type": "application/json;charset=UTF-8",
         "Origin": "https://www.hgnice.site",
@@ -70,12 +69,13 @@ def api_call(url_base, endpoint, data, token=None, token_hdr="Bearer "):
         
     url = url_base + endpoint
     try:
-        r = requests.post(url, headers=headers, data=json.dumps(body), timeout=15)
-        j = r.json()
-        return j
+        r = requests.post(url, headers=headers, data=json.dumps(body), timeout=10)
+        try:
+            return r.json()
+        except:
+            return {"code": 999, "msg": f"HTML Response: {r.text[:100]}"}
     except Exception as e:
-        logger.error(f"API Call Error: {e}")
-        return None
+        return {"code": 999, "msg": f"Network Error: {str(e)}"}
 
 def api_login(phone, pwd):
     data = {
@@ -85,13 +85,7 @@ def api_login(phone, pwd):
         "fbc": "", "fbp": "", "adId": "", "language": LANG_VAL,
     }
     j = api_call(API_BASE, "/Login", data)
-    
-    if j:
-        logger.info(f"LOGIN RESPONSE: {j}")
-        if j.get("code") == 0:
-            d = j.get("data") or {}
-            return d.get("token", ""), d.get("tokenHeader", "Bearer ")
-    return None, None
+    return j
 
 def api_balance(token, token_hdr):
     try:
@@ -112,8 +106,7 @@ def get_latest_result():
         list_data = data.get("data", {}).get("list", [])
         if list_data:
             return str(list_data[0].get("issueNumber", "")), int(list_data[0].get("number", 0))
-    except Exception as e:
-        logger.error(f"History Error: {e}")
+    except: pass
     return None, None
 
 def get_prediction():
@@ -131,12 +124,8 @@ def place_bet(token, token_hdr, issue, amount, pred):
         "betMultiple": 1,
         "betContent": bet_content
     }
-    
-    # 💡 বেট এপিআই এর জন্য আলাদা ডোমেইন
     j = api_call(API_BET_BASE, "/Lottery/WinGoBet", data, token, token_hdr)
-    if j and j.get("code") == 0:
-        return True
-    return False
+    return j and j.get("code") == 0
 
 # ═══════════════════════════════════════════
 # ৩. মেইন এপিআই বেটিং লুপ
@@ -144,19 +133,22 @@ def place_bet(token, token_hdr, issue, amount, pred):
 async def run_api_bot(uid, ctx):
     state = get_state(uid)
     
-    # লগইন
     await ctx.bot.send_message(chat_id=uid, text="🔄 **API-তে লগইন করা হচ্ছে...**")
-    token, token_hdr = api_login(state["temp_phone"], state["temp_password"])
     
-    if not token:
-        await ctx.bot.send_message(chat_id=uid, text="❌ **LOGIN FAILED!**\nদয়া করে সঠিক নাম্বার এবং পাসওয়ার্ড দিন।")
+    # 💡 এখানে লগইন রেসপন্স চেক করা হচ্ছে
+    login_resp = api_login(state["temp_phone"], state["temp_password"])
+    
+    if not login_resp or login_resp.get("code") != 0:
+        err_msg = login_resp.get("msg") if login_resp else "No response"
+        await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED!**\n\n**Error from Server:** `{err_msg}`\n\n_(সঠিক নাম্বার/পাসওয়ার্ড দিন অথবা আমাকে গেমের লগইন cURL দিন)_", parse_mode="Markdown")
         state["trade_running"] = False
         return
         
-    state["token"] = token
-    state["token_hdr"] = token_hdr
+    d = login_resp.get("data") or {}
+    state["token"] = d.get("token", "")
+    state["token_hdr"] = d.get("tokenHeader", "Bearer ")
     
-    balance = api_balance(token, token_hdr)
+    balance = api_balance(state["token"], state["token_hdr"])
     state["balance"] = balance
     
     dashboard_msg = (
@@ -175,7 +167,7 @@ async def run_api_bot(uid, ctx):
     current_step_idx = 0
     last_seen_issue = ""
     
-    await ctx.bot.send_message(chat_id=uid, text="🚀 **AUTO TRADE ACTIVE (API MODE)**\n_No browser, pure API speed._", parse_mode="Markdown")
+    await ctx.bot.send_message(chat_id=uid, text="🚀 **AUTO TRADE ACTIVE (API MODE)**", parse_mode="Markdown")
     
     while state["trade_running"]:
         try:
@@ -184,11 +176,9 @@ async def run_api_bot(uid, ctx):
                 await asyncio.sleep(1)
                 continue
                 
-            # নতুন রাউন্ড
             pred = get_prediction()
             bet_amount = state['step_amounts'][current_step_idx]
             
-            # ব্যালেন্স চেক
             current_bal = api_balance(state["token"], state["token_hdr"])
             state["balance"] = current_bal
             
@@ -203,11 +193,10 @@ async def run_api_bot(uid, ctx):
                 break
                 
             if current_step_idx >= len(state['step_amounts']):
-                await ctx.bot.send_message(chat_id=uid, text="⚠️ **সব স্টেপ শেষ!** বট বন্ধ হচ্ছে।")
+                await ctx.bot.send_message(chat_id=uid, text="⚠️ **সব স্টেপ শেষ!**")
                 state["trade_running"] = False
                 break
                 
-            # এপিআই বেট
             success = place_bet(state["token"], state["token_hdr"], current_issue, bet_amount, pred)
             
             if success:
@@ -220,7 +209,7 @@ async def run_api_bot(uid, ctx):
                     f"🚀 Step: {current_step_idx+1}"
                 ), parse_mode="Markdown")
                 
-                await asyncio.sleep(32) # রেজাল্টের জন্য অপেক্ষা
+                await asyncio.sleep(32)
                 
                 new_bal = api_balance(state["token"], state["token_hdr"])
                 p_l = new_bal - current_bal
