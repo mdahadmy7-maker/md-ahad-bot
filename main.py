@@ -280,27 +280,65 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await browser.close()
                     return
 
-            # ---------------- ৪. WinGo পেজে যাওয়া ----------------
+            # ---------------- ৪. WinGo পেজে যাওয়া (সুপার পপআপ কিলার) ----------------
             logger.info("Navigating to WinGo page...")
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(2000) 
+            await page.wait_for_timeout(3000) 
             
+            nav_success = False
+            # ২০ বার চেষ্টা করবে গেম পেজে ঢোকার জন্য
+            for attempt in range(20):
+                body_text = await page.evaluate("() => document.body.innerText")
+                
+                # চেক করা হচ্ছে পেজে গেম লোড হয়েছে কি না (Time remaining বা Big/Small আছে কি না)
+                if "Time remaining" in body_text or ("Big" in body_text and "Small" in body_text):
+                    nav_success = True
+                    logger.info("Successfully entered WinGo game!")
+                    break
+                
+                # 💡 সুপার পপআপ কিলার: যেকোনো পপআপ বা বড় বাটন থাকলে তা বন্ধ করবে
+                await page.evaluate("""
+                    (function() {
+                        let elements = document.querySelectorAll('button, div, span, a, img, .van-popup__close-icon');
+                        for (let el of elements) {
+                            let text = (el.innerText || el.className || '').toLowerCase();
+                            // পপআপ ক্লোজ করার সব সম্ভাব্য টেক্সট বা ক্লাস
+                            if (text.includes('confirm') || text.includes('receive') || text.includes('close') || 
+                                text.includes('ok') || text.includes('cancel') || text.includes('0 0') || 
+                                text.includes('got it') || text.includes('van-popup__close')) {
+                                try { el.click(); } catch(e) {}
+                            }
+                        }
+                    })();
+                """)
+                await page.wait_for_timeout(1000)
+                
+                # Lottery এবং WinGo বাটনে ক্লিক করার চেষ্টা
+                try:
+                    await page.evaluate("""
+                        (function() {
+                            let elements = document.querySelectorAll('div, span, a, p');
+                            for (let el of elements) {
+                                let text = (el.innerText || '').toLowerCase();
+                                if (text.includes('lottery') || (text.includes('win go') && text.includes('guess number'))) {
+                                    try { el.click(); } catch(e) {}
+                                }
+                            }
+                        })();
+                    """)
+                except: pass
+                await page.wait_for_timeout(1500) 
+
+            if not nav_success:
+                await ctx.bot.send_message(chat_id=uid, text="❌ **WinGo পেজে ঢুকতে সমস্যা হচ্ছে!** (সম্ভবত সাইটে অনেক পপআপ আছে)। বট বন্ধ করা হচ্ছে।")
+                state["trade_running"] = False
+                await browser.close()
+                return
+
+            # গেম পেজে ঢোকার পর আবার একবার সব পপআপ ক্লোজ করবে
             for _ in range(3):
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span, a')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
                 await page.wait_for_timeout(500)
-                
-            try:
-                await page.locator('text="Lottery"').first.click(timeout=3000, force=True)
-            except:
-                await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if((el.innerText||'').toLowerCase().includes('lottery')) { el.click(); return true; } } return false; }""")
-            await page.wait_for_timeout(1500)
-            
-            try:
-                win_go_card = page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last
-                await win_go_card.click(timeout=3000, force=True)
-            except:
-                await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } return false; }""")
-            await page.wait_for_timeout(2000) 
 
             initial_balance = float(balance)
             target_balance = initial_balance + float(state['target'])
