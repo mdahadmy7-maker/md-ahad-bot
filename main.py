@@ -156,7 +156,7 @@ async def send_debug_screenshot(page, uid, ctx, caption_text):
         pass
 
 # ───────────────────────────────────────────
-# ৪. লগইন এবং অটো-বেট ফাংশন 
+# ৪. লগইন এবং অটো-বেট ফাংশন (১ সেকেন্ড লগইন)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -174,44 +174,64 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"]) 
+        # ✅ ব্রাউজারকে মানুষের মতো আচরণ করানোর জন্য আর্গুমেন্ট
+        browser = await p.chromium.launch(
+            headless=True, 
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-infobars",
+                "--window-position=0,0",
+                "--ignore-certificate-errors",
+                "--ignore-certificate-errors-spki-list",
+            ]
+        ) 
+        
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
-            viewport={"width": 412, "height": 915}
+            viewport={"width": 412, "height": 915},
+            locale="en-US",
+            timezone_id="Asia/Dhaka"
         )
+        
         page = await context.new_page()
+        
+        # ✅ WAF বাইপাস করার জন্য স্ক্রিপ্ট (webdriver লুকানো)
+        await page.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            window.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+        """)
 
         try:
-            # ---------------- ১. লগইন ----------------
+            # ---------------- ১. লগইন (সুপার ফাস্ট) ----------------
             await update_loading(10, "OPENING SITE")
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(2000) # ২ সেকেন্ড অপেক্ষা
-
-            try: await page.locator('text="Confirm"').last.click(timeout=2000, force=True)
-            except: pass
-
-            await update_loading(30, "ENTERING CREDENTIALS")
-            # নাম্বার ও পাসওয়ার্ড বসানো
+            
+            # কোনো ডিলে ছাড়াই সরাসরি ইনপুট ফিল্ডে নাম্বার ও পাসওয়ার্ড বসানো
             await page.locator('input[type="tel"], input[type="text"]').first.fill(login_phone, timeout=5000)
             await page.locator('input[type="password"]').first.fill(password, timeout=5000)
 
             await update_loading(50, "LOGGING IN")
-            # সরাসরি লগইন ক্লিক
+            # সাথে সাথে লগইন বাটনে ক্লিক
             try:
-                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000, force=True)
-            except:
                 await page.locator('button:has-text("Log in")').last.click(timeout=5000, force=True)
+            except:
+                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=5000, force=True)
             
-            await page.wait_for_timeout(2500)
-
             # ---------------- ২. অ্যাকাউন্টে চাপ দেওয়া ----------------
+            # পেজ চেঞ্জ হওয়ার জন্য ২ সেকেন্ড অপেক্ষা (লগইন সাকসেস হওয়ার জন্য)
+            await page.wait_for_timeout(2000)
+            
             await update_loading(70, "CHECKING ACCOUNT")
             try:
                 await page.locator('text="Account"').last.click(timeout=5000, force=True)
             except:
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if((el.innerText||'').toLowerCase() === 'account') { el.click(); return true; } } return false; }""")
             
-            await page.wait_for_timeout(2000) 
+            await page.wait_for_timeout(1500) 
 
             await send_debug_screenshot(page, uid, ctx, "📸 **Account Page (UID & Balance)**")
 
@@ -473,7 +493,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
             
-            # ✅ স্ক্রিনশট নিয়ে এরর মেসেজ দেওয়া (যাতে বুঝতে পারি কোথায় আটকেছে)
             try:
                 await send_debug_screenshot(page, uid, ctx, f"❌ **Browser Error:**\n`{str(e)[:150]}`")
             except: pass
@@ -483,7 +502,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৫. টেলিগ্রাম হ্যান্ডলারস
+# ৫. টেলিগ্রাম হ্যান্ডলারস (আগের মতোই)
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
