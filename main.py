@@ -177,8 +177,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu"
+                "--disable-dev-shm-usage"
             ]
         ) 
         
@@ -198,10 +197,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ১. লগইন ----------------
             await update_loading(10, "OPENING SITE")
             await page.goto(SITE_URL, timeout=60000, wait_until="networkidle")
-            await page.wait_for_timeout(2000) # Cloudflare চেক পাস হওয়ার জন্য
+            await page.wait_for_timeout(2500) 
 
             await update_loading(30, "TYPING CREDENTIALS")
-            # ✅ জাভাস্ক্রিপ্ট দিয়ে ফিল্ডে ডেটা বসানো (কোনো Timeout হবে না)
+            
+            # ✅ সরাসরি জাভাস্ক্রিপ্ট দিয়ে ফিল্ডে ডেটা বসানো (যেমনটা আপনি ব্রাউজারে টাইপ করেন)
             await page.evaluate(f"""
                 () => {{
                     let inputs = document.querySelectorAll('input');
@@ -221,7 +221,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             """)
 
             await update_loading(50, "LOGGING IN")
-            # ✅ জাভাস্ক্রিপ্ট দিয়ে লগইন বাটনে ক্লিক
+            # ✅ জাভাস্ক্রিপ্ট দিয়ে "Log in" বাটনে ক্লিক
             login_clicked = await page.evaluate("""
                 () => {
                     let els = document.querySelectorAll('button, div, span, a, input[type="button"]');
@@ -244,12 +244,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
             
             await update_loading(70, "CHECKING ACCOUNT")
-            await page.wait_for_timeout(4000) # লগইন হওয়ার জন্য অপেক্ষা
-            
-            # ✅ স্ক্রিনশট নেওয়া (লগইন ক্লিকের পর)
-            await send_debug_screenshot(page, uid, ctx, "📸 **Page after Login Click**")
+            await page.wait_for_timeout(3000) 
 
-            # ✅ জাভাস্ক্রিপ্ট দিয়ে অ্যাকাউন্ট বাটনে ক্লিক
+            # ✅ জাভাস্ক্রিপ্ট দিয়ে অ্যাকাউন্ট মেনুতে ক্লিক
             await page.evaluate("""
                 () => {
                     let els = document.querySelectorAll('div, span, a, p');
@@ -262,8 +259,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             """)
             
             await page.wait_for_timeout(2000) 
-
-            # ✅ স্ক্রিনশট নেওয়া (অ্যাকাউন্ট পেজ)
             await send_debug_screenshot(page, uid, ctx, "📸 **Account Page**")
 
             await update_loading(85, "GETTING UID & BALANCE")
@@ -275,7 +270,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             for _ in range(8): 
                 page_text = await page.evaluate("() => document.body.innerText")
                 
-                # ব্লক বা ভুল পাসওয়ার্ড চেক
                 if "Why have I been blocked" in page_text or "Access denied" in page_text:
                     login_status = "failed"
                     error_msg = "CLOUDFLARE_BLOCKED"
@@ -304,7 +298,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             if login_status != "success":
                 if error_msg == "CLOUDFLARE_BLOCKED":
-                    msg = "❌ **BLOCKED BY CLOUDFLARE!**\nRender-এর IP ব্লকড। স্ক্রিনশট চেক করুন।"
+                    msg = "❌ **BLOCKED BY CLOUDFLARE!**\nRender-এর IP ব্লকড। দয়া করে স্ক্রিনশট দেখুন।"
                 elif error_msg == "WRONG_PASSWORD":
                     msg = "❌ **WRONG PASSWORD!**\nপাসওয়ার্ড ভুল দিয়েছেন।"
                 else:
