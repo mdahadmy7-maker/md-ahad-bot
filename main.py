@@ -156,7 +156,7 @@ async def send_debug_screenshot(page, uid, ctx, caption_text):
         logger.error(f"Screenshot error: {e}")
 
 # ───────────────────────────────────────────
-# ৪. লগইন এবং অটো-বেট ফাংশন (ফাস্ট লগইন আপডেট)
+# ৪. লগইন এবং অটো-বেট ফাংশন 
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -185,9 +185,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ১. লগইন ----------------
             await update_loading(10, "OPENING SITE")
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            
-            # অপেক্ষা কমানো হয়েছে (৩ সেকেন্ডের বদলে ১.৫ সেকেন্ড)
-            await page.wait_for_timeout(1500) 
+            await page.wait_for_timeout(2500) 
 
             # পপ-আপ থাকলে বন্ধ করা
             try: await page.locator('text="Confirm"').last.click(timeout=2000, force=True)
@@ -195,54 +193,44 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(30, "ENTERING CREDENTIALS")
             try:
-                # সরাসরি ইনপুট ফিল্ডে ফোকাস করে লেখা
-                await page.locator('input[type="tel"], input[type="text"]').first.fill(login_phone, timeout=3000)
-                await page.locator('input[type="password"]').first.fill(password, timeout=3000)
+                await page.locator('input[type="tel"], input[type="text"]').first.fill(login_phone, timeout=5000)
+                await page.locator('input[type="password"]').first.fill(password, timeout=5000)
             except: pass
 
             await update_loading(50, "LOGGING IN")
             
-            # ✅ ফাস্ট লগইন: timeout বাড়ানো হয়েছে, force=True দেওয়া হয়েছে এবং ব্যাকআপ হিসেবে JS click রাখা হয়েছে
+            # ✅ লগইন বাটনে ক্লিক করার সবচেয়ে শক্তিশালী পদ্ধতি 
             login_clicked = False
             try:
-                # প্রথম চেষ্টা: ১৫ সেকেন্ড সময় নিয়ে force ক্লিক
-                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=15000, force=True)
+                # Playwright-এর text লোকেটর দিয়ে একদম শেষের "Log in" বাটনে ক্লিক
+                await page.locator('text="Log in"').last.click(timeout=10000, force=True)
                 login_clicked = True
             except:
                 try:
-                    # দ্বিতীয় চেষ্টা: লেখা দিয়ে খোঁজা
-                    await page.locator('button:has-text("Log in")').last.click(timeout=5000, force=True)
+                    # ব্যাকআপ: get_by_text
+                    await page.get_by_text("Log in", exact=False).last.click(timeout=5000, force=True)
                     login_clicked = True
                 except:
-                    # তৃতীয় চেষ্টা: সরাসরি জাভাস্ক্রিপ্ট দিয়ে ক্লিক (সবচেয়ে নির্ভরযোগ্য)
-                    login_clicked = await page.evaluate("""
-                        () => {
-                            let btns = document.querySelectorAll('button, div[role="button"], .btn');
-                            for(let b of btns) {
-                                if(b.innerText && b.innerText.toLowerCase().includes('log in')) {
-                                    b.click(); return true;
-                                }
-                            }
-                            return false;
-                        }
-                    """)
+                    pass
 
             if not login_clicked:
-                await ctx.bot.send_message(chat_id=uid, text="❌ লগইন বাটন খুঁজে পাওয়া যায়নি!")
+                await ctx.bot.send_message(chat_id=uid, text="❌ লগইন বাটন খুঁজে পাওয়া যায়নি! স্ক্রিনশট চেক করুন।")
+                await send_debug_screenshot(page, uid, ctx, "❌ **Failed to click Login**")
                 await browser.close()
                 return
 
             # লগইন সফল হওয়ার জন্য অপেক্ষা
-            await page.wait_for_timeout(4000)
+            await page.wait_for_timeout(5000)
 
             # ---------------- ২. অ্যাকাউন্টে চাপ দেওয়া ----------------
             await update_loading(70, "CHECKING ACCOUNT")
-            try:
-                await page.locator('text="Account"').last.click(timeout=5000, force=True)
-            except:
-                await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if((el.innerText||'').toLowerCase().includes('account')) { el.click(); return true; } } return false; }""")
             
-            await page.wait_for_timeout(2500) 
+            try:
+                # নিচের মেনু থেকে Account-এ ক্লিক
+                await page.locator('text="Account"').last.click(timeout=5000, force=True)
+            except: pass
+            
+            await page.wait_for_timeout(3000) 
 
             # ডিবাগিং স্ক্রিনশট (অ্যাকাউন্ট পেজ)
             await send_debug_screenshot(page, uid, ctx, "📸 **Account Page (Checking UID & Balance)**")
@@ -309,12 +297,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             logger.info("Navigating to Home...")
             try: await page.locator('text="Home"').last.click(timeout=5000, force=True)
             except: pass
-            await page.wait_for_timeout(1500)
+            await page.wait_for_timeout(2000)
             
             logger.info("Navigating to Lottery...")
             try: await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
             except: pass
-            await page.wait_for_timeout(1500)
+            await page.wait_for_timeout(2000)
             
             logger.info("Entering WINGO...")
             try:
@@ -411,15 +399,18 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     """
                     clicked = await page.evaluate(js_click_choice)
                     
-                    await send_debug_screenshot(page, uid, ctx, f"📸 **Clicked {choice.upper()}**\n(Checking if Modal opened)")
-
+                    # যদি JS ক্লিক কাজ না করে, তবে মাউস কো-অর্ডিনেট দিয়ে ক্লিক করবে (স্ক্রিনশট ৫ অনুযায়ী)
                     if not clicked:
-                        await ctx.bot.send_message(chat_id=uid, text="⚠️ **Could not find Big/Small button on screen!**")
-                        state["trade_running"] = False
-                        break
+                        if choice.upper() == "BIG":
+                            await page.mouse.click(103, 890) 
+                        else:
+                            await page.mouse.click(309, 890)
+
+                    await send_debug_screenshot(page, uid, ctx, f"📸 **Clicked {choice.upper()}**\n(Checking if Modal opened)")
 
                     await page.wait_for_timeout(1500) 
 
+                    # মোডালে এমাউন্ট বসানো
                     try:
                         inputs = await page.locator('input[type="text"], input[type="number"]').all()
                         for inp in inputs:
@@ -431,6 +422,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 break
                     except: pass
 
+                    # I agree চেকবক্স
                     try:
                         await page.locator('text="I agree"').last.click(force=True, timeout=2000)
                     except:
@@ -439,6 +431,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         
                     await page.wait_for_timeout(500)
 
+                    # Total amount বাটন
                     js_confirm_bet = """
                     (() => {
                         for(let el of document.querySelectorAll('button, div, span')) {
