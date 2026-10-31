@@ -17,6 +17,7 @@ class DummyServer(BaseHTTPRequestHandler):
         self.wfile.write(b"Bot is alive!")
 
 def run_dummy_server():
+    # Railway-এর দেওয়া পোর্ট নিবে, না পেলে 8080
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), DummyServer)
     server.serve_forever()
@@ -25,7 +26,6 @@ def run_dummy_server():
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 SITE_URL = "https://dkwin8.com/#/login"      
 HOME_URL = "https://dkwin8.com/#/"           
-HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"  
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -56,7 +56,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]) 
+        # মেমোরি বাঁচানোর জন্য এবং ক্র্যাশ এড়ানোর জন্য args আপডেট করা হয়েছে
+        browser = await p.chromium.launch(
+            headless=True, 
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage", # এটি Docker-এ মেমোরি ক্র্যাশ ঠেকায়
+                "--single-process" # RAM বাঁচানোর জন্য
+            ]
+        ) 
         context = await browser.new_context(user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36", viewport={"width": 412, "height": 915})
         page = await context.new_page()
         
@@ -301,10 +311,13 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🚀 **TRADE STARTED...**")
 
 def main():
-    # ডামি সার্ভার চালু (Railway-র জন্য)
+    # 🌟 ডামি সার্ভার চালু করা হচ্ছে (Railway-কে বোকা বানানোর জন্য)
     threading.Thread(target=run_dummy_server, daemon=True).start()
     
-    if not BOT_TOKEN: return
+    if not BOT_TOKEN: 
+        print("BOT_TOKEN missing!")
+        return
+        
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CallbackQueryHandler(callback_handler))
