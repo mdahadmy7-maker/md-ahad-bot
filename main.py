@@ -9,15 +9,15 @@ from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from playwright.async_api import async_playwright
-from playwright_stealth import Stealth  # ✅ Stealth যুক্ত করা হলো
+from playwright_stealth import Stealth
 
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-SITE_URL = "https://dkwin8.com/#/login"      # ✅ dkwin8.com করা হলো
-HOME_URL = "https://dkwin8.com/#/"           # ✅ dkwin8.com করা হলো
-HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
+SITE_URL = "https://dkwin8.com/#/login"      
+HOME_URL = "https://dkwin8.com/#/"           
+HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"  
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -37,7 +37,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# 💡 ২. প্রেডিকশন লজিক (অপরিবর্তিত)
+# 💡 ২. প্রেডিকশন এবং API লজিক 
 # ───────────────────────────────────────────
 def markov_predict(sizes, order=2):
     if len(sizes) < order + 1: return {"Big": 0.5, "Small": 0.5}
@@ -98,7 +98,6 @@ def get_history_and_prediction_sync():
         if len(sizes) < 5: return "Big", latest_period
             
         scores = {"Big": 0, "Small": 0}
-        
         mk2 = markov_predict(sizes, 2)
         scores["Big"] += mk2["Big"] * 24
         scores["Small"] += mk2["Small"] * 24
@@ -137,20 +136,37 @@ async def get_history_and_prediction_async():
     return await asyncio.to_thread(get_history_and_prediction_sync)
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (নতুন লজিক)
+# ৩. হেল্পার: স্ক্রিনশট
+# ───────────────────────────────────────────
+async def send_debug_screenshot(page, uid, ctx, caption_text):
+    try:
+        path = f"debug_{uid}.png"
+        await page.screenshot(path=path)
+        await ctx.bot.send_photo(
+            chat_id=uid, 
+            photo=open(path, 'rb'), 
+            caption=caption_text,
+            parse_mode="Markdown"
+        )
+        os.remove(path)
+    except Exception as e:
+        pass
+
+# ───────────────────────────────────────────
+# ৪. লগইন এবং অটো-বেট ফাংশন 
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
     login_phone = phone[3:] if phone.startswith("880") else phone
     
-    async def update_loading(percent):
+    async def update_loading(percent, text="CONNECTING"):
         if not loading_msg_id: return
         filled = "█" * (percent // 10)
         empty = "░" * (10 - (percent // 10))
         try:
             await ctx.bot.edit_message_text(
                 chat_id=uid, message_id=loading_msg_id, 
-                text=f"🔄 **CONNECTING TO DKWIN8**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
+                text=f"🔄 **{text}**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
             )
         except: pass
 
@@ -161,41 +177,62 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage"
+                "--disable-dev-shm-usage",
+                "--disable-gpu"
             ]
         ) 
+        
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 412, "height": 915}
+            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36",
+            viewport={"width": 412, "height": 915},
+            locale="en-US",
+            timezone_id="Asia/Dhaka"
         )
+        
         page = await context.new_page()
         
-        # ✅ Stealth মোড (WAF বাইপাসের জন্য)
+        # ✅ Stealth মোড (বট ডিটেকশন বাইপাস)
         await Stealth().apply_stealth_async(page)
 
         try:
             # ---------------- ১. লগইন ----------------
-            await update_loading(10)
-            await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(2000) # WAF চেক পাস হওয়ার জন্য অপেক্ষা
+            await update_loading(10, "OPENING SITE")
+            await page.goto(SITE_URL, timeout=60000, wait_until="networkidle")
+            await page.wait_for_timeout(2000) # Cloudflare চেক পাস হওয়ার জন্য
 
-            await update_loading(30)
-            # ✅ জেনেরিক ইনপুট ফিল্ড সিলেক্টর (যা কিনা dkwin8 এ কাজ করে)
-            try:
-                await page.locator('input[type="tel"], input[type="text"]').first.fill(login_phone, timeout=5000)
-                await page.locator('input[type="password"]').first.fill(password, timeout=5000)
-            except Exception as e:
-                logger.error(f"Input error: {e}")
+            await update_loading(30, "TYPING CREDENTIALS")
+            # ✅ জাভাস্ক্রিপ্ট দিয়ে ফিল্ডে ডেটা বসানো (কোনো Timeout হবে না)
+            await page.evaluate(f"""
+                () => {{
+                    let inputs = document.querySelectorAll('input');
+                    for(let i of inputs) {{
+                        if(i.type === 'text' || i.type === 'tel') {{
+                            i.value = '{login_phone}';
+                            i.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            i.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        }}
+                        if(i.type === 'password') {{
+                            i.value = '{password}';
+                            i.dispatchEvent(new Event('input', {{ bubbles: true }}));
+                            i.dispatchEvent(new Event('change', {{ bubbles: true }}));
+                        }}
+                    }}
+                }}
+            """)
 
-            await update_loading(50)
-            # ✅ শক্তিশালী জাভাস্ক্রিপ্ট লগইন ক্লিক (বাটন, div বা span যা-ই হোক)
+            await update_loading(50, "LOGGING IN")
+            # ✅ জাভাস্ক্রিপ্ট দিয়ে লগইন বাটনে ক্লিক
             login_clicked = await page.evaluate("""
                 () => {
                     let els = document.querySelectorAll('button, div, span, a, input[type="button"]');
                     for(let el of els) {
                         let text = (el.innerText || el.value || '').trim().toLowerCase();
                         if (text === 'log in' || text === 'login') {
-                            el.click(); return true;
+                            let rect = el.getBoundingClientRect();
+                            if(rect.width > 0 && rect.height > 0) {
+                                el.click();
+                                return true;
+                            }
                         }
                     }
                     return false;
@@ -203,51 +240,49 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             """)
             
             if not login_clicked:
-                try: await page.locator('button:has-text("Log in")').last.click(timeout=5000, force=True)
+                try: await page.locator('button:has-text("Log in")').last.click(timeout=3000, force=True)
                 except: pass
             
-            await update_loading(70)
-            # কনফার্ম বা পপ-আপ বন্ধ করা
-            for _ in range(5):
-                await page.evaluate("""
-                    (function() {
-                        let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
-                        for (let el of elements) {
-                            let text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
-                            if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok') {
-                                let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
-                                el.dispatchEvent(event);
-                            }
-                        }
-                    })();
-                """)
-                await page.wait_for_timeout(500)
+            await update_loading(70, "CHECKING ACCOUNT")
+            await page.wait_for_timeout(4000) # লগইন হওয়ার জন্য অপেক্ষা
+            
+            # ✅ স্ক্রিনশট নেওয়া (লগইন ক্লিকের পর)
+            await send_debug_screenshot(page, uid, ctx, "📸 **Page after Login Click**")
 
-            await update_loading(85)
-            # ✅ Account ট্যাবে ক্লিক করা
-            try:
-                await page.evaluate("""
-                    (function() {
-                        let elements = document.querySelectorAll('div, span, a');
-                        for (let el of elements) {
-                            if (el.innerText && el.innerText.trim().toLowerCase() === 'account') {
-                                el.click(); return true;
-                            }
+            # ✅ জাভাস্ক্রিপ্ট দিয়ে অ্যাকাউন্ট বাটনে ক্লিক
+            await page.evaluate("""
+                () => {
+                    let els = document.querySelectorAll('div, span, a, p');
+                    for(let el of els) {
+                        if ((el.innerText||'').trim().toLowerCase() === 'account') {
+                            el.click(); return true;
                         }
-                    })();
-                """)
-                await page.wait_for_timeout(2000) 
-            except: pass
+                    }
+                }
+            """)
+            
+            await page.wait_for_timeout(2000) 
 
-            await update_loading(95)
+            # ✅ স্ক্রিনশট নেওয়া (অ্যাকাউন্ট পেজ)
+            await send_debug_screenshot(page, uid, ctx, "📸 **Account Page**")
+
+            await update_loading(85, "GETTING UID & BALANCE")
             login_status = "unknown"
             uid_val = "Unknown"
             balance = "0.00"
+            error_msg = ""
 
-            for _ in range(10): 
+            for _ in range(8): 
                 page_text = await page.evaluate("() => document.body.innerText")
-                if "Wrong account or password" in page_text or "Why have I been blocked" in page_text:
+                
+                # ব্লক বা ভুল পাসওয়ার্ড চেক
+                if "Why have I been blocked" in page_text or "Access denied" in page_text:
                     login_status = "failed"
+                    error_msg = "CLOUDFLARE_BLOCKED"
+                    break
+                if "Wrong account or password" in page_text or "wrong password" in page_text.lower():
+                    login_status = "failed"
+                    error_msg = "WRONG_PASSWORD"
                     break
                 
                 uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
@@ -260,15 +295,22 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     break
                 await page.wait_for_timeout(500)
 
-            await update_loading(100)
+            await update_loading(100, "DONE")
             await asyncio.sleep(0.2)
 
             if loading_msg_id:
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
 
-            if login_status == "failed" or uid_val == "Unknown":
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED or BLOCKED BY CLOUDFLARE** ({phone})")
+            if login_status != "success":
+                if error_msg == "CLOUDFLARE_BLOCKED":
+                    msg = "❌ **BLOCKED BY CLOUDFLARE!**\nRender-এর IP ব্লকড। স্ক্রিনশট চেক করুন।"
+                elif error_msg == "WRONG_PASSWORD":
+                    msg = "❌ **WRONG PASSWORD!**\nপাসওয়ার্ড ভুল দিয়েছেন।"
+                else:
+                    msg = "❌ **LOGIN FAILED!**\nUID পাওয়া যায়নি। স্ক্রিনশট চেক করুন।"
+                
+                await ctx.bot.send_message(chat_id=uid, text=msg)
                 await browser.close()
                 return
 
@@ -297,24 +339,28 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await browser.close()
                     return
 
-            # ---------------- ৪. WinGo পেজে যাওয়া (Home -> Lottery -> WINGO) ----------------
-            logger.info("Navigating to Home...")
+            # ---------------- ৪. Home -> Lottery -> WinGo ----------------
+            await update_loading(0, "GOING TO WINGO PAGE")
+            loading_msg = await ctx.bot.send_message(chat_id=uid, text="🚀 Jumping to WinGo...")
+            
             try: await page.locator('text="Home"').last.click(timeout=5000, force=True)
             except: pass
             await page.wait_for_timeout(1500)
             
-            logger.info("Navigating to Lottery...")
             try: await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
             except: pass
             await page.wait_for_timeout(1500)
             
-            logger.info("Entering WINGO...")
             try:
                 await page.locator('text="WINGO"').first.click(timeout=5000, force=True)
             except:
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('WINGO')) { el.click(); return true; } } return false; }""")
                 
             await page.wait_for_timeout(3000) 
+            try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg.message_id)
+            except: pass
+
+            await send_debug_screenshot(page, uid, ctx, "📸 **WinGo Page Loaded**")
 
             initial_balance = float(balance)
             target_balance = initial_balance + float(state['target'])
@@ -494,7 +540,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৪. টেলিগ্রাম হ্যান্ডলারস (অপরিবর্তিত)
+# ৫. টেলিগ্রাম হ্যান্ডলারস
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
