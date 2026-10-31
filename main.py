@@ -3,13 +3,23 @@ import logging
 import re
 import os
 import requests
+import json
+import math
 import threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from playwright.async_api import async_playwright
 
-# 🌟 ১. Railway-এর পোর্ট সমস্যা সমাধানের জন্য ডামি সার্ভার
+BOT_TOKEN = os.environ.get("BOT_TOKEN") 
+SITE_URL = "https://dkwin8.com/#/login"      
+HOME_URL = "https://dkwin8.com/#/"           
+HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"  
+
+logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
+logger = logging.getLogger(__name__)
+
 class DummyServer(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -17,18 +27,9 @@ class DummyServer(BaseHTTPRequestHandler):
         self.wfile.write(b"Bot is alive!")
 
 def run_dummy_server():
-    # Railway-এর দেওয়া পোর্ট নিবে, না পেলে 8080
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(('0.0.0.0', port), DummyServer)
     server.serve_forever()
-
-# 🌟 ২. কনফিগারেশন
-BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-SITE_URL = "https://dkwin8.com/#/login"      
-HOME_URL = "https://dkwin8.com/#/"           
-
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 user_state = {}
 
@@ -36,13 +37,55 @@ def get_state(uid):
     if uid not in user_state:
         user_state[uid] = {
             "awaiting": None, "temp_phone": "", "temp_password": "",
-            "balance": "0.00", "target": 0, "steps": 0, 
-            "step_amounts": [], "current_step": 0,
-            "trade_running": False, "task": None
+            "accounts": [], "balance": "0.00", "target": 0, 
+            "steps": 0, "step_amounts": [], "current_step": 0,
+            "trade_running": False, "task": None,
+            "wins": 0, "losses": 0, "total_trades": 0,
+            "first_bet": True
         }
     return user_state[uid]
 
-# 🌟 ৩. Playwright লগইন এবং বেটিং
+def markov_predict(sizes, order=2):
+    if len(sizes) < order + 1: return {"Big": 0.5, "Small": 0.5}
+    key = "|".join(sizes[:order])
+    t = {"Big": 0, "Small": 0}
+    for i in range(len(sizes) - order):
+        if "|".join(sizes[i:i+order]) == key:
+            nxt = sizes[i+order]
+            t[nxt] = t.get(nxt, 0) + 1
+    tot = t["Big"] + t["Small"]
+    if not tot: return {"Big": 0.5, "Small": 0.5}
+    return {"Big": t["Big"]/tot, "Small": t["Small"]/tot}
+
+def get_history_and_prediction_sync():
+    try:
+        res = requests.get(HISTORY_API, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
+        data = res.json()
+        list_data = data.get("data", {}).get("list", [])
+        if not list_data: raise Exception("No data")
+            
+        latest_period = str(list_data[0].get("issueNumber", "Unknown"))
+        numbers = [int(item.get("number", 0)) for item in list_data[:100]]
+        sizes = ["Big" if n >= 5 else "Small" for n in numbers]
+        
+        if len(sizes) < 5: return "Big", latest_period
+            
+        scores = {"Big": 0, "Small": 0}
+        mk2 = markov_predict(sizes, 2)
+        scores["Big"] += mk2["Big"] * 24
+        scores["Small"] += mk2["Small"] * 24
+        
+        prediction = "Big" if scores["Big"] >= scores["Small"] else "Small"
+        return prediction.upper(), latest_period
+        
+    except Exception as e:
+        logger.error(f"Prediction Error: {e}")
+        import random
+        return random.choice(["BIG", "SMALL"]), datetime.now().strftime("%Y%m%d%H%M%S")
+
+async def get_history_and_prediction_async():
+    return await asyncio.to_thread(get_history_and_prediction_sync)
+
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
     login_phone = phone[3:] if phone.startswith("880") else phone
@@ -52,22 +95,21 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         filled = "█" * (percent // 10)
         empty = "░" * (10 - (percent // 10))
         try:
-            await ctx.bot.edit_message_text(chat_id=uid, message_id=loading_msg_id, text=f"🔄 **CONNECTING**\n[{filled}{empty}] {percent}%", parse_mode="Markdown")
+            await ctx.bot.edit_message_text(
+                chat_id=uid, message_id=loading_msg_id, 
+                text=f"🔄 **CONNECTING TO DKWIN8**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
+            )
         except: pass
 
     async with async_playwright() as p:
-        # মেমোরি বাঁচানোর জন্য এবং ক্র্যাশ এড়ানোর জন্য args আপডেট করা হয়েছে
         browser = await p.chromium.launch(
             headless=True, 
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage", # এটি Docker-এ মেমোরি ক্র্যাশ ঠেকায়
-                "--single-process" # RAM বাঁচানোর জন্য
-            ]
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"]
         ) 
-        context = await browser.new_context(user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36", viewport={"width": 412, "height": 915})
+        context = await browser.new_context(
+            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
+            viewport={"width": 412, "height": 915}
+        )
         page = await context.new_page()
         
         try:
@@ -123,13 +165,27 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
 
             if login_status == "failed" or uid_val == "Unknown":
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED or BLOCKED**")
+                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED or BLOCKED** ({phone})")
                 await browser.close()
                 return
 
             state["balance"] = float(balance)
-            dashboard_msg = f"🎉 **LOGIN SUCCESSFUL**\n\n👤 UID: {uid_val}\n💰 Balance: ৳{balance}\n\n👇 Press START YOUR TARGET"
-            reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE")]]
+            masked_phone = f"***{phone[-4:]}"
+            
+            dashboard_msg = (
+                "╔════════════════════════╗\n"
+                "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
+                "╚════════════════════════╝\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"☎️ Phone Number\n{masked_phone}\n\n"
+                f"👤 Account UID\n{uid_val}\n\n"
+                f"💰 Account Balance\n৳ {balance}\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "🧠 Analysis Engine:  READY\n"
+                "🚀 AutoTrade System: READY\n\n"
+                "👇 Press START YOUR TARGET to begin"
+            )
+            reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]]
             await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
 
             while not state.get("trade_running", False):
@@ -163,7 +219,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         break
 
                     bet_amount = float(state['step_amounts'][current_step_idx])
-                    choice = "BIG" if current_bal % 2 == 0 else "SMALL" # ডেমো প্রেডিকশন
+                    choice, current_period = await get_history_and_prediction_async()
 
                     timer_found = False
                     for _ in range(400): 
@@ -227,9 +283,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             current_step_idx += 1
                             await ctx.bot.send_message(chat_id=uid, text=f"🔴 **LOSS!**\nব্যালেন্স: ৳{new_balance}")
 
-                    await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                    await page.wait_for_timeout(1000)
-
                 except Exception as e:
                     state["trade_running"] = False
                     break
@@ -238,10 +291,22 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         finally:
             await browser.close()
 
-# 🌟 ৪. হ্যান্ডলারস
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    state = get_state(uid)
+    state["first_bet"] = True 
+    welcome_text = (
+        "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 Mode    : Auto Analyse & bet\n"
+        "🔐 Access  : Private · Authorized Members\n"
+        "🔴 Status  : Not Logged In\n"
+        f"👥 Accounts: {len(state['accounts'])}/6\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "👇 Press the button below to LOGIN"
+    )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
-    await update.message.reply_text("🧠 **BD=WIN~GO=AUTO~BET 💥**\n\n👇 Press the button below to LOGIN", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -311,13 +376,8 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("🚀 **TRADE STARTED...**")
 
 def main():
-    # 🌟 ডামি সার্ভার চালু করা হচ্ছে (Railway-কে বোকা বানানোর জন্য)
     threading.Thread(target=run_dummy_server, daemon=True).start()
-    
-    if not BOT_TOKEN: 
-        print("BOT_TOKEN missing!")
-        return
-        
+    if not BOT_TOKEN: return
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CallbackQueryHandler(callback_handler))
