@@ -12,9 +12,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKe
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from playwright.async_api import async_playwright
 
-# ═══════════════════════════════════════════
-# ১. কনফিগারেশন
-# ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 SITE_URL = "https://dkwin8.com/#/login"      
 HOME_URL = "https://dkwin8.com/#/"           
@@ -23,7 +20,6 @@ HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 🌟 Railway/Render-এর জন্য ডামি ওয়েব সার্ভার (যাতে সার্ভার বটকে বন্ধ না করে)
 class DummyServer(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -49,9 +45,6 @@ def get_state(uid):
         }
     return user_state[uid]
 
-# ───────────────────────────────────────────
-# 💡 ২. প্রেডিকশন লজিক 
-# ───────────────────────────────────────────
 def markov_predict(sizes, order=2):
     if len(sizes) < order + 1: return {"Big": 0.5, "Small": 0.5}
     key = "|".join(sizes[:order])
@@ -141,16 +134,12 @@ def get_history_and_prediction_sync():
         return prediction.upper(), latest_period
         
     except Exception as e:
-        logger.error(f"Prediction Error: {e}")
         import random
         return random.choice(["BIG", "SMALL"]), datetime.now().strftime("%Y%m%d%H%M%S")
 
 async def get_history_and_prediction_async():
     return await asyncio.to_thread(get_history_and_prediction_sync)
 
-# ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট 
-# ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
     login_phone = phone[3:] if phone.startswith("880") else phone
@@ -160,25 +149,15 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         filled = "█" * (percent // 10)
         empty = "░" * (10 - (percent // 10))
         try:
-            await ctx.bot.edit_message_text(
-                chat_id=uid, message_id=loading_msg_id, 
-                text=f"🔄 **CONNECTING TO DKWIN8**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
-            )
+            await ctx.bot.edit_message_text(chat_id=uid, message_id=loading_msg_id, text=f"🔄 **CONNECTING TO DKWIN8**\n[{filled}{empty}] {percent}%", parse_mode="Markdown")
         except: pass
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True, 
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
-        ) 
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
-            viewport={"width": 412, "height": 915}
-        )
+        browser = await p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]) 
+        context = await browser.new_context(user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36", viewport={"width": 412, "height": 915})
         page = await context.new_page()
         
         try:
-            # ১. লগইন
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(3000)
@@ -238,7 +217,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             state["balance"] = float(balance)
             masked_phone = f"***{phone[-4:]}"
             
-            # ড্যাশবোর্ড মেসেজ
             dashboard_msg = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -261,7 +239,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await browser.close()
                     return
 
-            # ২. WinGo পেজে যাওয়া
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(3000) 
             
@@ -310,7 +287,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "🧠 _AI Engine: NovaBrainV7_"
             ), parse_mode="Markdown")
 
-            # ৩. মেইন বেটিং লুপ
             while state["trade_running"]:
                 try:
                     current_bal = state["balance"]
@@ -398,7 +374,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await page.wait_for_timeout(1000)
 
                 except Exception as e:
-                    logger.error(f"Betting error: {e}")
                     await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **TRADE STOPPED**\nError: {str(e)[:50]}")
                     state["trade_running"] = False
                     break
@@ -411,14 +386,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         finally:
             await browser.close()
 
-# ───────────────────────────────────────────
-# ৪. টেলিগ্রাম হ্যান্ডলারস
-# ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
     state["first_bet"] = True 
-    
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -451,142 +422,50 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if state.get("awaiting") == "phone":
         state["temp_phone"] = text
         state["awaiting"] = "password"
-        await update.message.reply_text(
-            "╔════════════════════════╗\n"
-            "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
-            "╚════════════════════════╝\n"
-            f"☎️ Number : {text}\n\n"
-            "🔑 Now enter your password:\n"
-            "Your message will be deleted immediately for security."
-        )
+        await update.message.reply_text(f"╔════════════════════════╗\n║  🔐 ACCOUNT LOGIN 🔐  ║\n╚════════════════════════╝\n☎️ Number : {text}\n\n🔑 Now enter your password:")
         return
-
     if state.get("awaiting") == "password":
         state["temp_password"] = text
         state["awaiting"] = None 
         try: await update.message.delete()
         except: pass
-        
         if state.get("task"): state["task"].cancel()
-        state["first_bet"] = True 
-        loading_msg = await update.message.reply_text("🔄 **CONNECTING TO DKWIN8**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
+        loading_msg = await update.message.reply_text("🔄 **CONNECTING**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
         state["task"] = asyncio.create_task(playwright_login_and_bet(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"]))
         return
-        
     if text == "🚀 START YOUR TARGET":
         state["awaiting"] = "target"
-        target_msg = (
-            "╔════════════════════════╗\n"
-            "║   🚀 START YOUR TARGET 🚀   ║\n"
-            "╚════════════════════════╝\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "💰 YOUR BALANCE\n"
-            f"৳ {state.get('balance', '0.00')}\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🎯 Enter your TARGET profit amount:\n"
-            "How much do you want to earn? (in ৳)"
-        )
-        await update.message.reply_text(target_msg)
+        await update.message.reply_text(f"💰 YOUR BALANCE\n৳ {state.get('balance', '0.00')}\n\n🎯 Enter your TARGET profit amount (in ৳):")
         return
-        
     if state.get("awaiting") == "target":
-        try:
-            target_amount = float(text)
-            state["target"] = target_amount
-            balance = float(state.get('balance', '0.00'))
-            stop_at = balance + target_amount
-            target_set_msg = (
-                "╔════════════════════════╗\n"
-                "║   🎯 TARGET SET 🎯   ║\n"
-                "╚════════════════════════╝\n\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"💰 Balance  : ৳ {balance:.2f}\n"
-                f"🎯 Target   : ৳ {target_amount:.2f} profit\n"
-                f"🏦 Stop At  : ৳ {stop_at:.2f}\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                "🚀 Enter your STEP COUNT:\n"
-                "How many steps? (e.g. 5, max 50)"
-            )
-            state["awaiting"] = "steps"
-            await update.message.reply_text(target_set_msg)
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 50)।")
+        state["target"] = float(text)
+        state["awaiting"] = "steps"
+        await update.message.reply_text("🚀 Enter your STEP COUNT:")
         return
-        
     if state.get("awaiting") == "steps":
-        try:
-            steps = int(text)
-            if steps > 50 or steps < 1: raise ValueError("Steps must be between 1 and 50")
-            state["steps"] = steps
-            state["step_amounts"] = [] 
-            state["current_step"] = 1
-            state["awaiting"] = "step_amount"
-            step_msg = (
-                "╔════════════════════════╗\n"
-                "║   💵 STEP AMOUNTS 💵   ║\n"
-                "╚════════════════════════╝\n\n"
-                f"You chose {steps} steps.\n\n"
-                f"💵 Step {state['current_step']} — bet amount? (in ৳)"
-            )
-            await update.message.reply_text(step_msg)
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! ১ থেকে ৫০ এর মধ্যে একটি সংখ্যা দিন (যেমন: 5)।")
+        state["steps"] = int(text)
+        state["step_amounts"] = [] 
+        state["current_step"] = 1
+        state["awaiting"] = "step_amount"
+        await update.message.reply_text(f"💵 Step 1 — bet amount? (in ৳)")
         return
-
     if state.get("awaiting") == "step_amount":
-        try:
-            amount = float(text)
-            if amount <= 0: raise ValueError("Amount must be greater than 0")
-            state["step_amounts"].append(amount)
-            state["current_step"] += 1
-            if state["current_step"] <= state["steps"]:
-                step_msg = f"💵 Step {state['current_step']} — bet amount? (in ৳)"
-                await update.message.reply_text(step_msg)
-            else:
-                state["awaiting"] = None
-                total_risk = sum(state["step_amounts"])
-                balance = float(state.get('balance', '0.00'))
-                target = float(state.get('target', 0))
-                stop_at = balance + target
-                step_plan_text = ""
-                for i, amt in enumerate(state["step_amounts"]):
-                    step_plan_text += f"Step {i+1:02d} : ৳ {amt:.2f}\n"
-                
-                combined_msg = (
-                    "⚙️ TRADE CONFIGURATION ⚙️\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"💰 Balance  : ৳ {balance:.2f}\n"
-                    f"🎯 Target   : ৳ {target:.2f} profit\n"
-                    f"🏦 Stop At  : ৳ {stop_at:.2f}\n"
-                    f"📋 Steps    : {state['steps']}\n"
-                    f"⚠️ Total Risk : ৳ {total_risk:.2f}\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    "📊 STEP PLAN\n"
-                    f"{step_plan_text}"
-                    "\n"
-                    "👇 Press START TRADE to begin."
-                )
-                inline_kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🚀 START TRADE", callback_data="start_trade_btn"), 
-                     InlineKeyboardButton("❌ CANCEL", callback_data="cancel_trade_btn")]
-                ])
-                await update.message.reply_text(combined_msg, reply_markup=inline_kb)
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 1)।")
+        state["step_amounts"].append(float(text))
+        state["current_step"] += 1
+        if state["current_step"] <= state["steps"]:
+            await update.message.reply_text(f"💵 Step {state['current_step']} — bet amount? (in ৳)")
+        else:
+            state["awaiting"] = None
+            step_plan_text = "".join([f"Step {i+1:02d} : ৳ {amt:.2f}\n" for i, amt in enumerate(state["step_amounts"])])
+            inline_kb = InlineKeyboardMarkup([[InlineKeyboardButton("🚀 START TRADE", callback_data="start_trade_btn"), InlineKeyboardButton("❌ CANCEL", callback_data="cancel_trade_btn")]])
+            await update.message.reply_text(f"⚙️ **TRADE CONFIGURATION**\n\n📊 **STEP PLAN:**\n{step_plan_text}\n👇 Press START TRADE to begin.", reply_markup=inline_kb)
         return
-
     if text == "🛑 STOP TRADE":
         state["trade_running"] = False
         await update.message.reply_text("🛑 TRADE STOPPED")
         return
     if text == "🚪 LOGOUT":
         state["trade_running"] = False
-        state["temp_phone"] = ""
-        state["temp_password"] = ""
         await update.message.reply_text("🚪 LOGGED OUT")
         return
 
@@ -598,16 +477,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     data = query.data
     if data == "start_login":
         state["awaiting"] = "phone"
-        login_msg = (
-            "╔════════════════════════╗\n"
-            "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
-            "╚════════════════════════╝\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "📱 Enter your DKWIN8 phone number:\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Everyone uses their own account — your session is private."
-        )
-        await ctx.bot.send_message(chat_id=uid, text=login_msg)
+        await ctx.bot.send_message(chat_id=uid, text="📱 Enter your DKWIN8 phone number:")
     elif data == "start_trade_btn":
         state["trade_running"] = True
     elif data == "cancel_trade_btn":
@@ -615,26 +485,17 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ **TRADE CANCELLED**")
 
 async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    state = get_state(uid)
-    state["trade_running"] = False
-    if state.get("task"): state["task"].cancel()
-    user_state[uid] = get_state(999999)
-    await update.message.reply_text("🔄 সব ডেটা রিসেট হয়েছে। /start দিন।")
+    user_state[update.effective_user.id] = get_state(999999)
+    await update.message.reply_text("🔄 রিসেট হয়েছে। /start দিন।")
 
 def main():
-    # 🌟 Railway/Render-এর জন্য ডামি সার্ভার চালু
     threading.Thread(target=run_dummy_server, daemon=True).start()
-    
-    if not BOT_TOKEN:
-        print("❌ Error: BOT_TOKEN সেট করা নেই!")
-        return
+    if not BOT_TOKEN: return
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    print("🤖 Bot started...")
     app.run_polling()
 
 if __name__ == "__main__":
