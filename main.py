@@ -5,6 +5,7 @@ import os
 import requests
 import json
 import math
+import random
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -37,7 +38,23 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# 💡 ২. প্রেডিকশন এবং API লজিক 
+# 🌐 ফ্রি প্রক্সি বের করার ফাংশন
+# ───────────────────────────────────────────
+def get_free_proxy():
+    try:
+        # ফ্রি প্রক্সি এপিআই থেকে প্রক্সি লিস্ট আনা
+        res = requests.get("https://raw.githubusercontent.com/TheSpeedX/PROXY-List/master/http.txt", timeout=5)
+        proxies = res.text.strip().split('\n')
+        if proxies:
+            proxy = random.choice(proxies).strip()
+            logger.info(f"Using Proxy: {proxy}")
+            return f"http://{proxy}"
+    except Exception as e:
+        logger.error(f"Proxy fetch error: {e}")
+    return None
+
+# ───────────────────────────────────────────
+# 💡 ২. প্রেডিকশন এবং API লজিক (অপরিবর্তিত)
 # ───────────────────────────────────────────
 def markov_predict(sizes, order=2):
     if len(sizes) < order + 1: return {"Big": 0.5, "Small": 0.5}
@@ -129,7 +146,6 @@ def get_history_and_prediction_sync():
         
     except Exception as e:
         logger.error(f"Prediction Error: {e}")
-        import random
         return random.choice(["BIG", "SMALL"]), datetime.now().strftime("%Y%m%d%H%M%S")
 
 async def get_history_and_prediction_async():
@@ -153,7 +169,7 @@ async def send_debug_screenshot(page, uid, ctx, caption_text):
         pass
 
 # ───────────────────────────────────────────
-# ৪. লগইন এবং অটো-বেট ফাংশন 
+# ৪. লগইন এবং অটো-বেট ফাংশন (প্রক্সি সহ)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -170,6 +186,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             )
         except: pass
 
+    # 🌐 ফ্রি প্রক্সি নেওয়া
+    proxy_url = get_free_proxy()
+
     async with async_playwright() as p:
         browser = await p.chromium.launch(
             headless=True, 
@@ -177,31 +196,39 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage"
+                "--disable-dev-shm-usage",
+                "--start-maximized"
             ]
         ) 
         
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36",
-            viewport={"width": 412, "height": 915},
-            locale="en-US",
-            timezone_id="Asia/Dhaka"
-        )
+        # ✅ প্রক্সি সেটআপ
+        context_args = {
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            "viewport": {"width": 1366, "height": 768},
+            "locale": "en-US",
+            "timezone_id": "Asia/Dhaka"
+        }
         
+        if proxy_url:
+            context_args["proxy"] = {"server": proxy_url}
+            await update_loading(15, "USING PROXY...")
+
+        context = await browser.new_context(**context_args)
         page = await context.new_page()
         
-        # ✅ Stealth মোড (বট ডিটেকশন বাইপাস)
+        # ✅ Stealth মোড
         await Stealth().apply_stealth_async(page)
 
         try:
             # ---------------- ১. লগইন ----------------
-            await update_loading(10, "OPENING SITE")
-            await page.goto(SITE_URL, timeout=60000, wait_until="networkidle")
-            await page.wait_for_timeout(2500) 
-
-            await update_loading(30, "TYPING CREDENTIALS")
+            await update_loading(20, "OPENING SITE")
+            await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             
-            # ✅ সরাসরি জাভাস্ক্রিপ্ট দিয়ে ফিল্ডে ডেটা বসানো (যেমনটা আপনি ব্রাউজারে টাইপ করেন)
+            # Cloudflare চেক পাস হওয়ার জন্য অপেক্ষা
+            await page.wait_for_timeout(4000)
+            await send_debug_screenshot(page, uid, ctx, "📸 **Page Before Login**")
+
+            await update_loading(40, "ENTERING CREDENTIALS")
             await page.evaluate(f"""
                 () => {{
                     let inputs = document.querySelectorAll('input');
@@ -220,8 +247,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 }}
             """)
 
-            await update_loading(50, "LOGGING IN")
-            # ✅ জাভাস্ক্রিপ্ট দিয়ে "Log in" বাটনে ক্লিক
+            await update_loading(60, "LOGGING IN")
             login_clicked = await page.evaluate("""
                 () => {
                     let els = document.querySelectorAll('button, div, span, a, input[type="button"]');
@@ -243,10 +269,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 try: await page.locator('button:has-text("Log in")').last.click(timeout=3000, force=True)
                 except: pass
             
-            await update_loading(70, "CHECKING ACCOUNT")
-            await page.wait_for_timeout(3000) 
+            await update_loading(75, "CHECKING ACCOUNT")
+            await page.wait_for_timeout(4000) 
+            await send_debug_screenshot(page, uid, ctx, "📸 **After Login Click**")
 
-            # ✅ জাভাস্ক্রিপ্ট দিয়ে অ্যাকাউন্ট মেনুতে ক্লিক
             await page.evaluate("""
                 () => {
                     let els = document.querySelectorAll('div, span, a, p');
@@ -258,7 +284,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 }
             """)
             
-            await page.wait_for_timeout(2000) 
+            await page.wait_for_timeout(3000) 
             await send_debug_screenshot(page, uid, ctx, "📸 **Account Page**")
 
             await update_loading(85, "GETTING UID & BALANCE")
@@ -270,7 +296,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             for _ in range(8): 
                 page_text = await page.evaluate("() => document.body.innerText")
                 
-                if "Why have I been blocked" in page_text or "Access denied" in page_text:
+                if "Why have I been blocked" in page_text or "Sorry, you have been blocked" in page_text:
                     login_status = "failed"
                     error_msg = "CLOUDFLARE_BLOCKED"
                     break
@@ -298,7 +324,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             if login_status != "success":
                 if error_msg == "CLOUDFLARE_BLOCKED":
-                    msg = "❌ **BLOCKED BY CLOUDFLARE!**\nRender-এর IP ব্লকড। দয়া করে স্ক্রিনশট দেখুন।"
+                    msg = "❌ **BLOCKED BY CLOUDFLARE!**\nফ্রি প্রক্সিটি কাজ করছে না। আবার চেষ্টা করুন।"
                 elif error_msg == "WRONG_PASSWORD":
                     msg = "❌ **WRONG PASSWORD!**\nপাসওয়ার্ড ভুল দিয়েছেন।"
                 else:
@@ -308,6 +334,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await browser.close()
                 return
 
+            # ... [লগইন সফল হলে বাকি বেটিং লজিক একদম আগের মতোই চলবে]
             state["balance"] = float(balance)
             masked_phone = f"***{phone[-4:]}"
             
@@ -533,9 +560,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         finally:
             await browser.close()
 
-# ───────────────────────────────────────────
-# ৫. টেলিগ্রাম হ্যান্ডলারস
-# ───────────────────────────────────────────
+# ... (বাকি হ্যান্ডলারগুলো আগের মতোই থাকবে, কোনো পরিবর্তন নেই)
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
