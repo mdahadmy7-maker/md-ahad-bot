@@ -9,6 +9,7 @@ from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from playwright.async_api import async_playwright
+from playwright_stealth import Stealth
 
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন
@@ -156,7 +157,7 @@ async def send_debug_screenshot(page, uid, ctx, caption_text):
         pass
 
 # ───────────────────────────────────────────
-# ৪. লগইন এবং অটো-বেট ফাংশন (১ সেকেন্ড লগইন)
+# ৪. লগইন এবং অটো-বেট ফাংশন (Anti-Bot & Fast Login)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -174,7 +175,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        # ✅ ব্রাউজারকে মানুষের মতো আচরণ করানোর জন্য আর্গুমেন্ট
+        # ✅ ১. ব্রাউজার আর্গুমেন্ট
         browser = await p.chromium.launch(
             headless=True, 
             args=[
@@ -182,6 +183,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-infobars",
+                "--disable-dev-shm-usage",
                 "--window-position=0,0",
                 "--ignore-certificate-errors",
                 "--ignore-certificate-errors-spki-list",
@@ -189,7 +191,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         ) 
         
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
             viewport={"width": 412, "height": 915},
             locale="en-US",
             timezone_id="Asia/Dhaka"
@@ -197,22 +199,26 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         
         page = await context.new_page()
         
-        # ✅ WAF বাইপাস করার জন্য স্ক্রিপ্ট (webdriver লুকানো)
+        # ✅ ২. WAF বাইপাস স্ক্রিপ্ট
         await page.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            window.chrome = { runtime: {} };
-            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3, 4, 5]});
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            window.chrome = { runtime: {}, app: { isInstalled: false } };
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
         """)
 
         try:
-            # ---------------- ১. লগইন (সুপার ফাস্ট) ----------------
+            # ---------------- ১. লগইন ----------------
             await update_loading(10, "OPENING SITE")
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             
-            # কোনো ডিলে ছাড়াই সরাসরি ইনপুট ফিল্ডে নাম্বার ও পাসওয়ার্ড বসানো
-            await page.locator('input[type="tel"], input[type="text"]').first.fill(login_phone, timeout=5000)
-            await page.locator('input[type="password"]').first.fill(password, timeout=5000)
+            # ওয়েবসাইট লোড হওয়া এবং WAF চ্যালেঞ্জ পাস হওয়ার জন্য অপেক্ষা
+            await page.wait_for_timeout(2000) 
+
+            await update_loading(30, "ENTERING CREDENTIALS")
+            # নাম্বার ও পাসওয়ার্ড বসানো
+            await page.locator('input[type="tel"], input[type="text"]').first.fill(login_phone)
+            await page.locator('input[type="password"]').first.fill(password)
 
             await update_loading(50, "LOGGING IN")
             # সাথে সাথে লগইন বাটনে ক্লিক
@@ -222,18 +228,18 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=5000, force=True)
             
             # ---------------- ২. অ্যাকাউন্টে চাপ দেওয়া ----------------
-            # পেজ চেঞ্জ হওয়ার জন্য ২ সেকেন্ড অপেক্ষা (লগইন সাকসেস হওয়ার জন্য)
-            await page.wait_for_timeout(2000)
-            
             await update_loading(70, "CHECKING ACCOUNT")
+            await page.wait_for_timeout(2500) # লগইন সফল হওয়ার জন্য অপেক্ষা
+            
             try:
                 await page.locator('text="Account"').last.click(timeout=5000, force=True)
             except:
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if((el.innerText||'').toLowerCase() === 'account') { el.click(); return true; } } return false; }""")
             
-            await page.wait_for_timeout(1500) 
+            await page.wait_for_timeout(2000) 
 
-            await send_debug_screenshot(page, uid, ctx, "📸 **Account Page (UID & Balance)**")
+            # ✅ স্ক্রিনশট নেওয়া
+            await send_debug_screenshot(page, uid, ctx, "📸 **Account Page (Checking UID)**")
 
             await update_loading(85, "GETTING UID & BALANCE")
             login_status = "unknown"
@@ -242,6 +248,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             for _ in range(8): 
                 page_text = await page.evaluate("() => document.body.innerText")
+                
+                # Cloudflare ব্লক চেক
+                if "Why have I been blocked" in page_text or "Access denied" in page_text:
+                    await ctx.bot.send_message(chat_id=uid, text="❌ **BLOCKED BY CLOUDFLARE!**\nRender-এর IP ব্লকড। দয়া করে Residential Proxy ব্যবহার করুন।")
+                    await browser.close()
+                    return
+
                 uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
                 balance_match = re.search(r'Total balance\s*[৳]?\s*([\d.]+)', page_text, re.IGNORECASE)
                 if not balance_match: balance_match = re.search(r'[৳]\s*([\d.]+)', page_text)
