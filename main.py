@@ -23,7 +23,7 @@ HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 🌟 Railway-এর জন্য ডামি সার্ভার (যাতে বট বন্ধ না হয়ে যায়)
+# 🌟 Railway/Render-এর জন্য ডামি ওয়েব সার্ভার (যাতে সার্ভার বটকে বন্ধ না করে)
 class DummyServer(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -64,6 +64,39 @@ def markov_predict(sizes, order=2):
     if not tot: return {"Big": 0.5, "Small": 0.5}
     return {"Big": t["Big"]/tot, "Small": t["Small"]/tot}
 
+def rsi(sizes, period=14):
+    if len(sizes) < period + 1: return 50
+    gains = losses = 0
+    for i in range(period):
+        diff = (1 if sizes[i] == "Big" else 0) - (1 if sizes[i+1] == "Big" else 0)
+        if diff > 0: gains += diff
+        else: losses -= diff
+    if losses == 0: return 100
+    return 100 - (100 / (1 + gains/losses))
+
+def entropy(sizes, n=20):
+    sl = sizes[:n]
+    if not sl: return 0
+    bc = sl.count("Big")
+    sc = len(sl) - bc
+    if not bc or not sc: return 0
+    pb = bc / len(sl)
+    ps = sc / len(sl)
+    return -(pb * math.log2(pb) + ps * math.log2(ps))
+
+def arima_lite(sizes):
+    binary = [1 if s == "Big" else 0 for s in sizes[:30]]
+    if len(binary) < 6: return {"Big": 0.5, "Small": 0.5}
+    sxy1 = sxy2 = sx2 = 0
+    for i in range(2, len(binary)):
+        sxy1 += binary[i] * binary[i-1]
+        sxy2 += binary[i] * binary[i-2]
+        sx2 += binary[i-1] * binary[i-1]
+    a1 = sxy1 / (sx2 + 1e-9)
+    a2 = sxy2 / (sx2 + 1e-9)
+    pred = max(0.1, min(0.9, 0.5 + 0.3 * a1 * (binary[0] - 0.5) + 0.2 * a2 * (binary[1] - 0.5)))
+    return {"Big": pred, "Small": 1 - pred}
+
 def get_history_and_prediction_sync():
     try:
         res = requests.get(HISTORY_API, headers={'User-Agent': 'Mozilla/5.0'}, timeout=10)
@@ -82,10 +115,33 @@ def get_history_and_prediction_sync():
         scores["Big"] += mk2["Big"] * 24
         scores["Small"] += mk2["Small"] * 24
         
+        rv = rsi(sizes, 14)
+        if rv > 68: scores["Small"] += 20
+        elif rv < 32: scores["Big"] += 20
+            
+        ev = entropy(sizes, 20)
+        if ev > 0.94:
+            l20b = sizes[:20].count("Big")
+            scores["Small" if l20b > 10 else "Big"] += 16
+            
+        streak = 0
+        s_type = sizes[0]
+        for s in sizes:
+            if s == s_type: streak += 1
+            else: break
+            
+        if streak >= 4: scores["Small" if s_type == "Big" else "Big"] += streak * 9
+        elif streak >= 2: scores[s_type] += 12
+            
+        ar = arima_lite(sizes)
+        scores["Big"] += ar["Big"] * 18
+        scores["Small"] += ar["Small"] * 18
+        
         prediction = "Big" if scores["Big"] >= scores["Small"] else "Small"
         return prediction.upper(), latest_period
         
     except Exception as e:
+        logger.error(f"Prediction Error: {e}")
         import random
         return random.choice(["BIG", "SMALL"]), datetime.now().strftime("%Y%m%d%H%M%S")
 
@@ -111,7 +167,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled", "--no-sandbox"]) 
+        browser = await p.chromium.launch(
+            headless=True, 
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+        ) 
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
             viewport={"width": 412, "height": 915}
@@ -119,6 +178,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         page = await context.new_page()
         
         try:
+            # ১. লগইন
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(3000)
@@ -178,7 +238,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             state["balance"] = float(balance)
             masked_phone = f"***{phone[-4:]}"
             
-            # 🌟 আসল ড্যাশবোর্ড মেসেজ
+            # ড্যাশবোর্ড মেসেজ
             dashboard_msg = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -201,6 +261,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await browser.close()
                     return
 
+            # ২. WinGo পেজে যাওয়া
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(3000) 
             
@@ -236,7 +297,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
             step_plan_str += "└────────────────────────────────┘"
 
-            # 🌟 আসল ট্রেড অ্যাক্টিভ মেসেজ
             await ctx.bot.send_message(chat_id=uid, text=(
                 "╔════════════════════════════════╗\n"
                 "   🚀 **AUTO TRADE ACTIVE** 🚀\n"
@@ -250,6 +310,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "🧠 _AI Engine: NovaBrainV7_"
             ), parse_mode="Markdown")
 
+            # ৩. মেইন বেটিং লুপ
             while state["trade_running"]:
                 try:
                     current_bal = state["balance"]
@@ -351,14 +412,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await browser.close()
 
 # ───────────────────────────────────────────
-# ৪. টেলিগ্রাম হ্যান্ডলারস (আসল ডিজাইন)
+# ৪. টেলিগ্রাম হ্যান্ডলারস
 # ───────────────────────────────────────────
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
     state["first_bet"] = True 
     
-    # 🌟 আপনার সুন্দর ওয়েলকাম মেসেজ
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -563,7 +623,7 @@ async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 সব ডেটা রিসেট হয়েছে। /start দিন।")
 
 def main():
-    # 🌟 Railway-এর জন্য ব্যাকগ্রাউন্ড ডামি সার্ভার চালু
+    # 🌟 Railway/Render-এর জন্য ডামি সার্ভার চালু
     threading.Thread(target=run_dummy_server, daemon=True).start()
     
     if not BOT_TOKEN:
