@@ -286,6 +286,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except Exception as e:
                     state["trade_running"] = False
                     break
+                    
         except Exception as e:
             await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **Error:** {str(e)[:50]}")
         finally:
