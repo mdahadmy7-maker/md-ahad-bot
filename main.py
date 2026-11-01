@@ -9,15 +9,15 @@ from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from playwright.async_api import async_playwright
-# 💡 Render এর পোর্ট এরর ঠিক করার জন্য
 from flask import Flask
 import threading
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন (টোকেন Render Env Var থেকে নিবে)
+# ১. কনফিগারেশন
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-SITE_URL = "https://dkwin1.com/#/login"
+# 💡 আপনি যে সাইটে লগইন করছেন, সেটার সঠিক লিংক এখানে দিন
+SITE_URL = "https://dkwin1.com/#/login" 
 HOME_URL = "https://dkwin1.com/#/"
 WIN_GO_URL = "https://dkwin1.com/#/WinGo_30S"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
@@ -25,9 +25,8 @@ HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 💡 Render এর জন্য ডামি ওয়েব সার্ভার
+# 💡 Render পোর্ট এরর ফিক্স
 web_app = Flask(__name__)
-
 @web_app.route('/')
 def health_check():
     return "Bot is running!", 200
@@ -150,7 +149,7 @@ async def get_history_and_prediction_async():
     return await asyncio.to_thread(get_history_and_prediction_sync)
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (সুপার ফাস্ট)
+# ৩. লগইন এবং অটো-বেট ফাংশন (Debug Screenshot সহ)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -195,32 +194,44 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         page = await context.new_page()
 
         try:
-            # ---------------- ১. লগইন (সুপার ফাস্ট) ----------------
+            # ---------------- ১. লগইন ----------------
             await update_loading(10)
+            # সরাসরি সাইটে যাবে, অপেক্ষা করবে না
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             
-            # ইনপুট বক্স খোঁজা এবং সাথে সাথে বসানো
-            phone_input = page.locator('input[type="text"], input[type="tel"]').first
-            await phone_input.wait_for(state="visible", timeout=20000)
-            await phone_input.fill(login_phone)
-            
-            pass_input = page.locator('input[type="password"]').first
-            await pass_input.fill(password)
-            
-            await update_loading(40)
+            await update_loading(30)
+            try:
+                # ইনপুট বক্স খোঁজা (২০ সেকেন্ড পর্যন্ত অপেক্ষা করবে)
+                phone_input = page.locator('input[type="text"], input[type="tel"]').first
+                await phone_input.wait_for(state="visible", timeout=20000)
+                await phone_input.fill(login_phone)
+                
+                pass_input = page.locator('input[type="password"]').first
+                await pass_input.fill(password)
+                
+            except Exception as e:
+                # 💡 যদি ২০ সেকেন্ডেও ইনপুট বক্স না পায়, তবে স্ক্রিনশট তুলে পাঠাবে
+                await ctx.bot.send_message(chat_id=uid, text="⚠️ **লগইন পেজে সমস্যা!**\nসম্ভবত সাইট লোড হয়নি বা Cloudflare ব্লক করেছে। নিচে স্ক্রিনশট দেখুন...")
+                error_img = f"error_{uid}.png"
+                await page.screenshot(path=error_img)
+                await ctx.bot.send_photo(chat_id=uid, photo=open(error_img, 'rb'))
+                await browser.close()
+                return
+
+            await update_loading(50)
             # লগইন বাটনে ক্লিক
             await page.locator('button, .van-button').filter(has_text=re.compile(r"^Log in$", re.IGNORECASE)).last.click(force=True)
             
-            await update_loading(60)
-            await page.wait_for_timeout(3000) 
+            await update_loading(70)
+            await page.wait_for_timeout(4000) 
             
             # পপআপ ক্লোজ
             await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
 
-            await update_loading(80)
+            await update_loading(85)
             # ব্যালেন্স চেক
             await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if(el.innerText && el.innerText.trim().toLowerCase() === 'account') { el.click(); return true; } } }""")
-            await page.wait_for_timeout(2000) 
+            await page.wait_for_timeout(3000) 
 
             await update_loading(95)
             login_status = "failed"
@@ -244,7 +255,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
 
             if login_status == "failed":
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\nসাইটে ঢুকতে পারেনি অথবা পাসওয়ার্ড ভুল।")
+                fail_img = f"fail_{uid}.png"
+                await page.screenshot(path=fail_img)
+                await ctx.bot.send_photo(
+                    chat_id=uid, photo=open(fail_img, 'rb'), 
+                    caption=f"❌ **LOGIN FAILED** ({phone})\nসাইটে ঢুকতে পারেনি অথবা পাসওয়ার্ড ভুল।"
+                )
                 await browser.close()
                 return
 
@@ -275,12 +291,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             # ---------------- ২. WinGo পেজ ----------------
             await page.goto(WIN_GO_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000) 
+            await page.wait_for_timeout(4000) 
             
             body_text = await page.evaluate("() => document.body.innerText")
             if "Time remaining" not in body_text and "WinGo" not in body_text:
                 await page.goto(HOME_URL, timeout=60000)
-                await page.wait_for_timeout(1500)
+                await page.wait_for_timeout(2000)
                 try:
                     await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
                     await page.wait_for_timeout(1000)
@@ -397,7 +413,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             if loading_msg_id:
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
-            await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **Error:**\n`{str(e)[:150]}`", parse_mode="Markdown")
+            await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **Browser Timeout:**\n`{str(e)[:150]}`", parse_mode="Markdown")
         finally:
             await browser.close()
 
@@ -622,7 +638,6 @@ def main():
         print("❌ Error: Render Environment Variable-এ BOT_TOKEN সেট করা নেই!")
         return
     
-    # Render এর পোর্ট এরর এড়াতে ওয়েব সার্ভার চালু
     threading.Thread(target=run_web_server, daemon=True).start()
     print("✅ Health check server started.")
 
