@@ -1,173 +1,61 @@
-import asyncio
-import logging
-import re
-import os
 import requests
+import time
 import json
-from datetime import datetime
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
-from playwright.async_api import async_playwright
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-SITE_URL = "http://dkwin8.com/#/login"
-
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-user_state = {}
-
-def get_state(uid):
-    if uid not in user_state:
-        user_state[uid] = {
-            "awaiting": None, "temp_phone": "", "temp_password": "",
-            "api_token": None, "balance": "0.00"
-        }
-    return user_state[uid]
-
-async def playwright_login_and_get_token(uid, ctx, loading_msg_id, phone, password):
-    state = get_state(uid)
-    login_phone = phone[3:] if phone.startswith("880") else phone
+def direct_api_login(phone, password):
+    # আপনার curl থেকে নেওয়া URL
+    url = "https://api.dkwinapi.com/api/webapi/Login"
     
-    async def update_loading(percent, text="CONNECTING"):
-        if not loading_msg_id: return
-        try:
-            await ctx.bot.edit_message_text(
-                chat_id=uid, message_id=loading_msg_id, 
-                text=f"🔄 **{text}** ({percent}%)", parse_mode="Markdown"
-            )
-        except: pass
+    # আপনার curl থেকে নেওয়া Headers
+    headers = {
+        "authority": "api.dkwinapi.com",
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9",
+        "ar-origin": "https://dkwin1.com",
+        "content-type": "application/json;charset=UTF-8",
+        "origin": "https://dkwin1.com",
+        "referer": "https://dkwin1.com/",
+        "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
+        "sec-ch-ua-mobile": "?1",
+        "sec-ch-ua-platform": '"Android"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "cross-site",
+        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
+        "x-app-type": "H5"
+    }
 
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"]) 
-        context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
-            viewport={"width": 412, "height": 915}
-        )
-        page = await context.new_page()
+    # বর্তমান টাইমস্ট্যাম্প (সেকেন্ডে)
+    current_timestamp = int(time.time())
 
-        # 🌟 API রেসপন্স ক্যাপচার করার ফাংশন
-        api_response_data = {}
-        async def handle_response(response):
-            if "api.dkwinapi.com/api/webapi/Login" in response.url and response.status == 200:
-                try:
-                    json_data = await response.json()
-                    api_response_data.update(json_data)
-                except: pass
-        
-        page.on("response", handle_response)
+    # আপনার curl থেকে নেওয়া Payload
+    payload = {
+        "username": phone,
+        "pwd": password,
+        "phonetype": 1,
+        "logintype": "mobile",
+        "packId": "",
+        "deviceId": "78a31db8d2dc8544556f9d82370be707",
+        "pixelId": "",
+        "fbcId": "",
+        "fbc": "",
+        "fbp": "",
+        "adId": "",
+        "language": 0,
+        # 🚨 এখানে আপনার আগের ওই সিগনেচার বসানো হলো (এটি সাধারণত কাজ করবে না)
+        "random": "52edcf73bb214f73888eca195ad1c5f8",
+        "signature": "1BBBE73DCEAA1BC85732D7379362D467",
+        "timestamp": current_timestamp
+    }
 
-        try:
-            await update_loading(20, "OPENING SITE")
-            await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(4000)
-
-            await update_loading(50, "ENTERING CREDENTIALS")
-            await page.evaluate(f"""
-                () => {{
-                    let inputs = document.querySelectorAll('input');
-                    for(let i of inputs) {{
-                        if(i.type === 'text' || i.type === 'tel') {{
-                            i.value = '{login_phone}';
-                            i.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                            i.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                        }}
-                        if(i.type === 'password') {{
-                            i.value = '{password}';
-                            i.dispatchEvent(new Event('input', {{ bubbles: true }}));
-                            i.dispatchEvent(new Event('change', {{ bubbles: true }}));
-                        }}
-                    }}
-                }}
-            """)
-
-            await update_loading(70, "CLICKING LOGIN")
-            await page.evaluate("""
-                () => {
-                    let els = document.querySelectorAll('button, div, span, a');
-                    for(let el of els) {
-                        let text = (el.innerText || el.value || '').trim().toLowerCase();
-                        if (text === 'log in' || text === 'login') { el.click(); return true; }
-                    }
-                    return false;
-                }
-            """)
-
-            await update_loading(90, "CAPTURING TOKEN")
-            await page.wait_for_timeout(5000) # রেসপন্স আসার জন্য অপেক্ষা
-
-            if loading_msg_id:
-                try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
-                except: pass
-
-            if api_response_data:
-                # সফলভাবে ডেটা পেয়েছি
-                res_str = json.dumps(api_response_data, indent=2, ensure_ascii=False)
-                
-                # টোকেন বের করা (সাধারণত data.token বা data.accessToken এ থাকে)
-                token = None
-                if "data" in api_response_data:
-                    token = api_response_data["data"].get("token") or api_response_data["data"].get("accessToken")
-                
-                state["api_token"] = token
-                
-                await ctx.bot.send_message(
-                    chat_id=uid, 
-                    text=f"✅ **LOGIN API CAPTURED!**\n\n`{res_str[:1000]}`\n\n(বাকি অংশ বড় হওয়ায় কাটা হয়েছে)\n\n🔑 **Token:** `{token}`",
-                    parse_mode="Markdown"
-                )
-            else:
-                await ctx.bot.send_message(chat_id=uid, text="❌ **API ক্যাপচার করা যায়নি!** সাইট হয়তো লোড হয়নি বা পাসওয়ার্ড ভুল।")
-
-        except Exception as e:
-            if loading_msg_id:
-                try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
-                except: pass
-            await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **Error:** `{str(e)[:100]}`")
-        finally:
-            await browser.close()
-
-# হ্যান্ডলার
-async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    keyboard = [[InlineKeyboardButton("🔐 LOGIN & GET TOKEN", callback_data="start_login")]]
-    await update.message.reply_text("🧠 **DKWIN API TOKEN EXTRACTOR**\n\n👇 Press to login and capture API response:", reply_markup=InlineKeyboardMarkup(keyboard))
-
-async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    state = get_state(uid)
-    text = update.message.text.strip()
+    print("Sending Request...")
     
-    if state.get("awaiting") == "phone":
-        state["temp_phone"] = text
-        state["awaiting"] = "password"
-        await update.message.reply_text(f"☎️ Number: {text}\n\n🔑 Enter password:")
-        return
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        print("Status Code:", response.status_code)
+        print("Response JSON:", json.dumps(response.json(), indent=4))
+    except Exception as e:
+        print("Error:", e)
 
-    if state.get("awaiting") == "password":
-        state["temp_password"] = text
-        state["awaiting"] = None 
-        try: await update.message.delete()
-        except: pass
-        
-        loading_msg = await update.message.reply_text("🔄 **CONNECTING...**")
-        asyncio.create_task(playwright_login_and_get_token(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"]))
-        return
-
-async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    state = get_state(update.effective_user.id)
-    if query.data == "start_login":
-        state["awaiting"] = "phone"
-        await ctx.bot.send_message(chat_id=update.effective_user.id, text="📱 Enter your DKWIN8 phone number:")
-
-def main():
-    if not BOT_TOKEN: return
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CallbackQueryHandler(callback_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
+# টেস্ট করার জন্য (পাসওয়ার্ড দিন)
+direct_api_login("8801745701676", "your_password_here")
