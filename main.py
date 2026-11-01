@@ -180,12 +180,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(30)
             try:
-                phone_input = page.locator('input[placeholder*="Phone number" i], input[type="tel"], input[type="text"]').first
+                # 💡 ফোন নাম্বার এবং পাসওয়ার্ড বসানোর নিখুঁত পদ্ধতি
+                # সাইটের ইনপুট ফিল্ডগুলো সাধারণত type="text" এবং type="password" হয়
+                phone_input = page.locator('input[type="text"]').first
                 await phone_input.wait_for(state="visible", timeout=20000)
                 await phone_input.fill(login_phone)
                 await page.wait_for_timeout(1000)
 
-                pass_input = page.locator('input[placeholder*="Password" i], input[type="password"]').first
+                pass_input = page.locator('input[type="password"]').first
                 await pass_input.wait_for(state="visible", timeout=20000)
                 await pass_input.fill(password)
                 await page.wait_for_timeout(1000)
@@ -195,25 +197,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(50)
             try:
-                # 💡 ঠিক করা হয়েছে: পেজের ওপরের 'Log in' লেখায় ক্লিক করবে না, শুধু হলুদ বাটনে ক্লিক করবে
-                login_btn = page.locator('button:has-text("Log in"), .van-button:has-text("Log in")').last
+                # 💡 ঠিক করা হয়েছে: শুধুমাত্র হলুদ রঙের 'Log in' বাটনে ক্লিক করবে
+                # 'button' ট্যাগ অথবা Vant UI এর ক্লাস দিয়ে খোঁজা হচ্ছে
+                login_btn = page.locator('button, .van-button').filter(has_text=re.compile(r"^Log in$", re.IGNORECASE)).last
                 await login_btn.wait_for(state="visible", timeout=15000)
                 await login_btn.click(force=True)
-                await page.wait_for_timeout(1500)
-                
-                # যদি উপরের ক্লিকে কাজ না হয়, তবে জাভাস্ক্রিপ্ট দিয়ে হলুদ বাটনে ক্লিক করবে
-                await page.evaluate("""() => {
-                    let btns = document.querySelectorAll('button, .van-button');
-                    for (let b of btns) {
-                        if (b.innerText.trim() === 'Log in') {
-                            b.click(); return true;
-                        }
-                    }
-                }""")
+                await page.wait_for_timeout(2000) # ক্লিক করার পর ২ সেকেন্ড অপেক্ষা
             except Exception as e:
                 logger.error(f"Login Button Error: {e}")
             
             await update_loading(70)
+            # পপআপ এবং নোটিফিকেশন ব্লক করা
             for _ in range(10):
                 await page.evaluate("""
                     (function() {
@@ -230,6 +224,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.wait_for_timeout(400)
 
             await update_loading(85)
+            # অ্যাকাউন্ট পেজে যাওয়া
             try:
                 await page.evaluate("""
                     (function() {
@@ -251,7 +246,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             for _ in range(10): 
                 page_text = await page.inner_text("body")
-                if "Wrong account or password" in page_text:
+                if "Wrong account or password" in page_text or "incorrect" in page_text.lower():
                     login_status = "failed"
                     break
                 
@@ -273,7 +268,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
 
             if login_status == "failed" or uid_val == "Unknown":
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})")
+                # লগইন ফেইল হলে স্ক্রিনশট নিবে
+                fail_path = f"login_fail_{uid}.png"
+                await page.screenshot(path=fail_path)
+                await ctx.bot.send_photo(
+                    chat_id=uid, 
+                    photo=open(fail_path, 'rb'), 
+                    caption=f"❌ **LOGIN FAILED** ({phone})\nসম্ভবত পাসওয়ার্ড ভুল অথবা সাইটে সমস্যা হচ্ছে।"
+                )
                 await browser.close()
                 return
 
@@ -370,7 +372,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         break
 
                     bet_amount = float(state['step_amounts'][current_step_idx])
-                    
                     choice, current_period = await get_history_and_prediction_async()
 
                     logger.info("Waiting for timer (30s to 7s)...")
