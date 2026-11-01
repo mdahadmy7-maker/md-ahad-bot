@@ -16,7 +16,6 @@ import threading
 # ১. কনফিগারেশন
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-# 💡 আপনি যে সাইটে লগইন করছেন, সেটার সঠিক লিংক এখানে দিন
 SITE_URL = "https://dkwin1.com/#/login" 
 HOME_URL = "https://dkwin1.com/#/"
 WIN_GO_URL = "https://dkwin1.com/#/WinGo_30S"
@@ -149,7 +148,7 @@ async def get_history_and_prediction_async():
     return await asyncio.to_thread(get_history_and_prediction_sync)
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (Debug Screenshot সহ)
+# ৩. লগইন এবং অটো-বেট ফাংশন
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -162,11 +161,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         try:
             await ctx.bot.edit_message_text(
                 chat_id=uid, message_id=loading_msg_id, 
-                text=f"🔄 **CONNECTING TO DK WIN**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
+                text=f"🔄 CONNECTING TO DK WIN\n[{filled}{empty}] {percent}%"
             )
         except: pass
 
     async with async_playwright() as p:
+        # 💡 মানুষের মতো মোবাইল ব্রাউজার সিমুলেট করা হচ্ছে
+        iphone_12 = p.devices['Samsung Galaxy S20']
+        
         browser = await p.chromium.launch(
             headless=True, 
             args=[
@@ -178,8 +180,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         ) 
         
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            viewport={"width": 1280, "height": 800},
+            **iphone_12, # মোবাইলের স্ক্রিন সাইজ ও ইউজার এজেন্ট
             locale="en-US",
             timezone_id="Asia/Dhaka"
         )
@@ -196,40 +197,39 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         try:
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
-            # সরাসরি সাইটে যাবে, অপেক্ষা করবে না
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             
             await update_loading(30)
+            
+            # 💡 স্ক্রিনশট নেওয়া হচ্ছে (ডিবাগ করার জন্য)
+            debug_img = f"debug_{uid}.png"
+            await page.screenshot(path=debug_img)
+            
             try:
-                # ইনপুট বক্স খোঁজা (২০ সেকেন্ড পর্যন্ত অপেক্ষা করবে)
+                # ইনপুট বক্স খোঁজা
                 phone_input = page.locator('input[type="text"], input[type="tel"]').first
-                await phone_input.wait_for(state="visible", timeout=20000)
+                await phone_input.wait_for(state="visible", timeout=15000)
                 await phone_input.fill(login_phone)
                 
                 pass_input = page.locator('input[type="password"]').first
                 await pass_input.fill(password)
                 
             except Exception as e:
-                # 💡 যদি ২০ সেকেন্ডেও ইনপুট বক্স না পায়, তবে স্ক্রিনশট তুলে পাঠাবে
-                await ctx.bot.send_message(chat_id=uid, text="⚠️ **লগইন পেজে সমস্যা!**\nসম্ভবত সাইট লোড হয়নি বা Cloudflare ব্লক করেছে। নিচে স্ক্রিনশট দেখুন...")
-                error_img = f"error_{uid}.png"
-                await page.screenshot(path=error_img)
-                await ctx.bot.send_photo(chat_id=uid, photo=open(error_img, 'rb'))
+                # 💡 যদি ১৫ সেকেন্ডেও ইনপুট বক্স না পায়, তবে স্ক্রিনশট তুলে পাঠাবে
+                await ctx.bot.send_message(chat_id=uid, text="⚠️ **লগইন পেজে সমস্যা!**\nবট ইনপুট বক্স খুঁজে পাচ্ছে না। নিচে স্ক্রিনশট দেখুন, সাইটে ঠিক কী দেখা যাচ্ছে।", parse_mode="Markdown")
+                await ctx.bot.send_photo(chat_id=uid, photo=open(debug_img, 'rb'))
                 await browser.close()
                 return
 
             await update_loading(50)
-            # লগইন বাটনে ক্লিক
             await page.locator('button, .van-button').filter(has_text=re.compile(r"^Log in$", re.IGNORECASE)).last.click(force=True)
             
             await update_loading(70)
             await page.wait_for_timeout(4000) 
             
-            # পপআপ ক্লোজ
             await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
 
             await update_loading(85)
-            # ব্যালেন্স চেক
             await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if(el.innerText && el.innerText.trim().toLowerCase() === 'account') { el.click(); return true; } } }""")
             await page.wait_for_timeout(3000) 
 
@@ -259,7 +259,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.screenshot(path=fail_img)
                 await ctx.bot.send_photo(
                     chat_id=uid, photo=open(fail_img, 'rb'), 
-                    caption=f"❌ **LOGIN FAILED** ({phone})\nসাইটে ঢুকতে পারেনি অথবা পাসওয়ার্ড ভুল।"
+                    caption=f"❌ **LOGIN FAILED** ({phone})\nসাইটে ঢুকতে পারেনি অথবা পাসওয়ার্ড ভুল। নিচে স্ক্রিনশট দেখুন।", parse_mode="Markdown"
                 )
                 await browser.close()
                 return
@@ -332,7 +332,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     current_bal = state["balance"]
                     
                     if current_bal >= target_balance or current_step_idx >= len(state['step_amounts']) or current_bal < float(state['step_amounts'][current_step_idx]):
-                        await ctx.bot.send_message(chat_id=uid, text="🛑 **TARGET REACHED OR NO BALANCE!**")
+                        await ctx.bot.send_message(chat_id=uid, text="🛑 **TARGET REACHED OR NO BALANCE!**", parse_mode="Markdown")
                         state["trade_running"] = False
                         break
 
@@ -391,7 +391,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             state["balance"] = new_balance
                             state["wins"] += 1
                             current_step_idx = 0
-                            await ctx.bot.send_message(chat_id=uid, text=f"🟢 **WIN!**\nব্যালেন্স: ৳ {new_balance:.2f}\n➡️ Next Step: 1")
+                            await ctx.bot.send_message(chat_id=uid, text=f"🟢 **WIN!**\nব্যালেন্স: ৳ {new_balance:.2f}\n➡️ Next Step: 1", parse_mode="Markdown")
                         else:
                             state["balance"] = new_balance
                             state["losses"] += 1
@@ -402,7 +402,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             else:
                                 next_step_txt = "🛑 No more steps left."
 
-                            await ctx.bot.send_message(chat_id=uid, text=f"🔴 **LOSS!**\nব্যালেন্স: ৳ {new_balance:.2f}\n{next_step_txt}")
+                            await ctx.bot.send_message(chat_id=uid, text=f"🔴 **LOSS!**\nব্যালেন্স: ৳ {new_balance:.2f}\n{next_step_txt}", parse_mode="Markdown")
 
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
@@ -426,28 +426,37 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state["first_bet"] = True 
     
     welcome_text = (
-        "🧠 **BD=DK WIN~GO=AUTO~BET 💥**\n"
+        "🧠 BD=DK WIN~GO=AUTO~BET 💥\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🧠 Mode    : Auto Analyse & bet\n"
-        "🔐 Access  : Private · Authorized Members\n"
+        "🔐 Access  : Private · Authorized\n"
+        "Members\n"
         "🔴 Status  : Not Logged In\n"
         f"👥 Accounts: {len(state['accounts'])}/6\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🧠 Prediction Engine — 9 Layers\n"
         "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
-        "🔍 Manipulation · 🎨 Colour · 🔢 Frequency\n"
-        "🔄 Markov · ♻️ Cycle · 💠 Momentum\n"
-        "🔁 Every layer is back-tested live so its vote\n"
+        "🔍 Manipulation · 🎨 Colour · 🔢\n"
+        "Frequency\n"
+        "🔄 Markov · ♻️ Cycle · 💠\n"
+        "Momentum\n"
+        "🔁 Every layer is back-tested live so\n"
+        "its vote\n"
         "weight follows its real hit-rate\n"
-        "🔴 Confidence below 30% → sit out\n"
+        "🔴 Confidence below 30% → sit\n"
+        "out\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🎬 4-second 🧠 generating prediction animation\n"
-        "🚀 Analysis → auto bet every 30s period\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "👇 Press the button below to LOGIN"
+        "🎬 4-second 🧠 generating\n"
+        "prediction animation\n"
+        "🚀 Analysis → auto bet every 30s\n"
+        "period\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "\n"
+        "👇 Press the button below to\n"
+        "LOGIN"
     )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
-    await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -475,7 +484,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         
         if state.get("task"): state["task"].cancel()
         state["first_bet"] = True 
-        loading_msg = await update.message.reply_text("🔄 **CONNECTING TO DK WIN**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
+        loading_msg = await update.message.reply_text("🔄 CONNECTING TO DK WIN\n[░░░░░░░░░░] 0%")
         state["task"] = asyncio.create_task(playwright_login_and_bet(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"]))
         return
         
@@ -618,7 +627,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["trade_running"] = True
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
-        await query.edit_message_text("❌ **TRADE CANCELLED**")
+        await query.edit_message_text("❌ **TRADE CANCELLED**", parse_mode="Markdown")
 
 async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
