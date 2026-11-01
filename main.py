@@ -11,7 +11,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন (শুধু লিংক পরিবর্তন করা হয়েছে)
+# ১. কনফিগারেশন (লিংক DKWIN1 করা হয়েছে)
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 SITE_URL = "https://dkwin1.com/#/login"
@@ -36,7 +36,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# 💡 ২. HTML ফাইলের NovaBrainV7 প্রেডিকশন লজিক
+# 💡 ২. NovaBrainV7 প্রেডিকশন লজিক
 # ───────────────────────────────────────────
 def markov_predict(sizes, order=2):
     if len(sizes) < order + 1: return {"Big": 0.5, "Small": 0.5}
@@ -136,7 +136,7 @@ async def get_history_and_prediction_async():
     return await asyncio.to_thread(get_history_and_prediction_sync)
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন
+# ৩. লগইন এবং অটো-বেট ফাংশন (ফিক্সড)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -176,20 +176,37 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         try:
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
-            await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000)
+            # networkidle দেওয়া হয়েছে যেন Vue.js পুরোপুরি লোড হয়
+            await page.goto(SITE_URL, timeout=60000, wait_until="networkidle")
+            await page.wait_for_timeout(5000) 
 
             await update_loading(30)
             try:
-                await page.get_by_placeholder("Please enter the phone number").fill(login_phone)
-                await page.locator('input[type="password"]').first.fill(password)
-            except: pass
+                # আপনার স্ক্রিনশট অনুযায়ী প্রথম text বা tel ইনপুট বক্সটি হলো ফোন নাম্বার
+                phone_input = page.locator('input[type="text"], input[type="tel"]').first
+                await phone_input.wait_for(state="visible", timeout=20000)
+                await phone_input.fill(login_phone)
+                await page.wait_for_timeout(1000)
+
+                # পাসওয়ার্ড ইনপুট বক্স
+                pass_input = page.locator('input[type="password"]').first
+                await pass_input.wait_for(state="visible", timeout=20000)
+                await pass_input.fill(password)
+                await page.wait_for_timeout(1000)
+
+            except Exception as e:
+                logger.error(f"Input Error: {e}")
 
             await update_loading(50)
             try:
-                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000)
-            except:
-                await page.locator('button:has-text("Log in")').last.click(timeout=10000)
+                # আপনার স্ক্রিনশটের হলুদ "Log in" বাটনে ক্লিক
+                login_btn = page.get_by_text("Log in", exact=True).last
+                await login_btn.wait_for(state="visible", timeout=20000)
+                await login_btn.click(force=True)
+            except Exception as e:
+                logger.error(f"Login Button Error: {e}")
+                # বিকল্প পদ্ধতি
+                await page.locator('.van-button').filter(has_text="Log in").first.click(force=True)
             
             await update_loading(70)
             for _ in range(10):
@@ -503,7 +520,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state["first_bet"] = True 
     
     welcome_text = (
-        "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
+        "🧠 **BD=DKWIN1~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🧠 Mode    : Auto Analyse & bet\n"
         "🔐 Access  : Private · Authorized Members\n"
