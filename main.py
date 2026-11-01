@@ -11,7 +11,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন (লিংক DKWIN1 করা হয়েছে)
+# ১. কনফিগারেশন
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 SITE_URL = "https://dkwin1.com/#/login"
@@ -97,7 +97,6 @@ def get_history_and_prediction_sync():
         if len(sizes) < 5: return "Big", latest_period
             
         scores = {"Big": 0, "Small": 0}
-        
         mk2 = markov_predict(sizes, 2)
         scores["Big"] += mk2["Big"] * 24
         scores["Small"] += mk2["Small"] * 24
@@ -149,7 +148,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         try:
             await ctx.bot.edit_message_text(
                 chat_id=uid, message_id=loading_msg_id, 
-                text=f"🔄 **CONNECTING TO DKWIN1**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
+                text=f"🔄 **CONNECTING TO DK WIN**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
             )
         except: pass
 
@@ -176,20 +175,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         try:
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
-            # networkidle দেওয়া হয়েছে যেন Vue.js পুরোপুরি লোড হয়
             await page.goto(SITE_URL, timeout=60000, wait_until="networkidle")
             await page.wait_for_timeout(5000) 
 
             await update_loading(30)
             try:
-                # আপনার স্ক্রিনশট অনুযায়ী প্রথম text বা tel ইনপুট বক্সটি হলো ফোন নাম্বার
-                phone_input = page.locator('input[type="text"], input[type="tel"]').first
+                phone_input = page.locator('input[placeholder*="Phone number" i], input[type="tel"], input[type="text"]').first
                 await phone_input.wait_for(state="visible", timeout=20000)
                 await phone_input.fill(login_phone)
                 await page.wait_for_timeout(1000)
 
-                # পাসওয়ার্ড ইনপুট বক্স
-                pass_input = page.locator('input[type="password"]').first
+                pass_input = page.locator('input[placeholder*="Password" i], input[type="password"]').first
                 await pass_input.wait_for(state="visible", timeout=20000)
                 await pass_input.fill(password)
                 await page.wait_for_timeout(1000)
@@ -199,14 +195,23 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(50)
             try:
-                # আপনার স্ক্রিনশটের হলুদ "Log in" বাটনে ক্লিক
-                login_btn = page.get_by_text("Log in", exact=True).last
-                await login_btn.wait_for(state="visible", timeout=20000)
+                # 💡 ঠিক করা হয়েছে: পেজের ওপরের 'Log in' লেখায় ক্লিক করবে না, শুধু হলুদ বাটনে ক্লিক করবে
+                login_btn = page.locator('button:has-text("Log in"), .van-button:has-text("Log in")').last
+                await login_btn.wait_for(state="visible", timeout=15000)
                 await login_btn.click(force=True)
+                await page.wait_for_timeout(1500)
+                
+                # যদি উপরের ক্লিকে কাজ না হয়, তবে জাভাস্ক্রিপ্ট দিয়ে হলুদ বাটনে ক্লিক করবে
+                await page.evaluate("""() => {
+                    let btns = document.querySelectorAll('button, .van-button');
+                    for (let b of btns) {
+                        if (b.innerText.trim() === 'Log in') {
+                            b.click(); return true;
+                        }
+                    }
+                }""")
             except Exception as e:
                 logger.error(f"Login Button Error: {e}")
-                # বিকল্প পদ্ধতি
-                await page.locator('.van-button').filter(has_text="Log in").first.click(force=True)
             
             await update_loading(70)
             for _ in range(10):
@@ -384,7 +389,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     if not timer_found: continue 
 
-                    # 💡 Big/Small ক্লিক (তৎক্ষণাৎ)
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(200)
                     
@@ -411,7 +415,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             else: await page.mouse.click(309, 890)
                         except: pass
 
-                    # 💡 Amount বসানো
                     try:
                         inputs = await page.locator('input[type="text"], input[type="number"]').all()
                         for inp in inputs:
@@ -430,7 +433,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             await page.wait_for_timeout(200)
                     except: pass
 
-                    # 💡 Total Amount ক্লিক (বাটন আসা মাত্রই ক্লিক করবে)
                     js_confirm_bet = """
                     (() => {
                         for(let el of document.querySelectorAll('button, div, span')) {
@@ -520,7 +522,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state["first_bet"] = True 
     
     welcome_text = (
-        "🧠 **BD=DKWIN1~GO=AUTO~BET 💥**\n"
+        "🧠 **BD=DK WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🧠 Mode    : Auto Analyse & bet\n"
         "🔐 Access  : Private · Authorized Members\n"
@@ -569,7 +571,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         
         if state.get("task"): state["task"].cancel()
         state["first_bet"] = True 
-        loading_msg = await update.message.reply_text("🔄 **CONNECTING TO DKWIN1**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
+        loading_msg = await update.message.reply_text("🔄 **CONNECTING TO DK WIN**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
         state["task"] = asyncio.create_task(playwright_login_and_bet(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"]))
         return
         
@@ -703,7 +705,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
             "╚════════════════════════╝\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "📱 Enter your DKWIN1 phone number:\n"
+            "📱 Enter your DK WIN phone number:\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "Everyone uses their own account — your session is private."
         )
