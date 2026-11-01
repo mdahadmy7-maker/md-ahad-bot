@@ -13,8 +13,8 @@ from playwright.async_api import async_playwright
 # ১. কনফিগারেশন
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-SITE_URL = "https://www.hgnice.site/#/login"
-HOME_URL = "https://www.hgnice.site/#/"
+SITE_URL = "http://dkwin8.com/#/login"
+HOME_URL = "http://dkwin8.com/#/"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -81,7 +81,7 @@ def get_history_and_prediction():
         return random.choice(["BIG", "SMALL"]), fallback_period
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট (আপনার অরিজিনাল লজিক)
+# ৩. লগইন এবং অটো-বেট
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -94,7 +94,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         try:
             await ctx.bot.edit_message_text(
                 chat_id=uid, message_id=loading_msg_id, 
-                text=f"🔄 **CONNECTING TO HGNICE**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
+                text=f"🔄 **CONNECTING TO DKWIN8**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
             )
         except: pass
 
@@ -232,7 +232,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # 💡 আপনার অরিজিনাল ফাইলের হুবহু নেভিগেশন লজিক
+            # 💡 নেভিগেশন লজিক
             logger.info("Navigating to WinGo page...")
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000) 
@@ -318,7 +318,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             body_text = await page.evaluate("() => document.body.innerText")
                             clean_text = body_text.replace(" ", "").replace("\n", "")
                             
-                            # আপনার কথামতো ৩০ থেকে ৭ সেকেন্ড
                             if re.search(r'00:(30|2[0-9]|1[0-9]|0[7-9])', clean_text):
                                 timer_found = True
                                 break
@@ -327,7 +326,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     if not timer_found: continue 
 
-                    # 💡 ২. সুপার ফাস্ট Big/Small ক্লিক (আপনার অরিজিনাল লজিক)
+                    # 💡 ২. সুপার ফাস্ট Big/Small ক্লিক
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(200)
                     
@@ -356,10 +355,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 await page.mouse.click(309, 890)
                         except: pass
 
-                    # 💡 ৩. মডাল ওপেন হওয়া পর্যন্ত অপেক্ষা (আপনার কথামতো সাথে সাথে আসে)
+                    # 💡 ৩. মডাল ওপেন হওয়া পর্যন্ত অপেক্ষা
                     await page.wait_for_timeout(500)
 
-                    # 💡 ৪. Amount বসানো (স্টেপ অনুযায়ী টাকা টাইপ করবে)
+                    # 💡 ৪. Amount বসানো
                     try:
                         inputs = await page.locator('input[type="text"], input[type="number"]').all()
                         for inp in inputs:
@@ -379,7 +378,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             await page.wait_for_timeout(200)
                     except: pass
 
-                    # 💡 ৫. Total Amount ক্লিক (জাভাস্ক্রিপ্ট ফোর্স ক্লিক)
+                    # 💡 ৫. Total Amount ক্লিক
                     js_confirm_bet = """
                     (() => {
                         for(let el of document.querySelectorAll('button, div, span')) {
@@ -425,7 +424,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
-                    # 💡 ৭. রেজাল্টের জন্য অপেক্ষা (0 0 আসা পর্যন্ত)
+                    # 💡 ৭. রেজাল্টের জন্য অপেক্ষা
                     for _ in range(350):
                         body_text = await page.evaluate("() => document.body.innerText")
                         if "0 0" in body_text:
@@ -570,7 +569,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         
         if state.get("task"): state["task"].cancel()
         state["first_bet"] = True 
-        loading_msg = await update.message.reply_text("🔄 **CONNECTING TO HGNICE**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
+        loading_msg = await update.message.reply_text("🔄 **CONNECTING TO DKWIN8**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
         state["task"] = asyncio.create_task(playwright_login_and_bet(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"]))
         return
         
@@ -704,7 +703,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
             "╚════════════════════════╝\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "📱 Enter your HGNICE phone number:\n"
+            "📱 Enter your DKWIN8 phone number:\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "Everyone uses their own account — your session is private."
         )
