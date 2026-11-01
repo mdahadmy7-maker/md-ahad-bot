@@ -9,7 +9,6 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKe
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from playwright.async_api import async_playwright
 
-# 🌟 Railway-এর পোর্ট সমস্যা সমাধানের জন্য ডামি সার্ভার
 class DummyServer(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
@@ -21,7 +20,6 @@ def run_dummy_server():
     server = HTTPServer(('0.0.0.0', port), DummyServer)
     server.serve_forever()
 
-# 🌟 কনফিগারেশন
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 SITE_URL = "https://dkwin8.com/#/login"      
 HOME_URL = "https://dkwin8.com/#/"           
@@ -41,7 +39,6 @@ def get_state(uid):
         }
     return user_state[uid]
 
-# 🌟 Playwright লগইন এবং বেটিং
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
     login_phone = phone[3:] if phone.startswith("880") else phone
@@ -55,16 +52,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        # মেমোরি বাঁচানোর জন্য args আপডেট করা হয়েছে
         browser = await p.chromium.launch(
             headless=True, 
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--single-process" 
-            ]
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--single-process"]
         ) 
         context = await browser.new_context(user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36", viewport={"width": 412, "height": 915})
         page = await context.new_page()
@@ -162,7 +152,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         break
 
                     bet_amount = float(state['step_amounts'][current_step_idx])
-                    choice = "BIG" if current_bal % 2 == 0 else "SMALL" # ডেমো প্রেডিকশন
+                    choice = "BIG" if current_bal % 2 == 0 else "SMALL"
 
                     timer_found = False
                     for _ in range(400): 
@@ -235,7 +225,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         finally:
             await browser.close()
 
-# 🌟 হ্যান্ডলারস
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
     await update.message.reply_text("🧠 **BD=WIN~GO=AUTO~BET 💥**\n\n👇 Press the button below to LOGIN", reply_markup=InlineKeyboardMarkup(keyboard))
