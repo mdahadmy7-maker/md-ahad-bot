@@ -170,9 +170,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         await update_loading(15)
         
         async with async_playwright() as p:
-            # 💡 মানুষের মতো মোবাইল ব্রাউজার সিমুলেট করা হচ্ছে
-            iphone_12 = p.devices['Samsung Galaxy S20']
-            
             # 💡 ব্রাউজার ওপেন করা
             browser = await p.chromium.launch(
                 headless=True, 
@@ -185,8 +182,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 ]
             ) 
             
+            # 💡 Samsung Galaxy S20 এরর ফিক্স: সরাসরি মোবাইলের সেটিংস দেওয়া হলো
             context = await browser.new_context(
-                **iphone_12,
+                user_agent="Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+                viewport={"width": 412, "height": 915},
+                is_mobile=True,
+                has_touch=True,
                 locale="en-US",
                 timezone_id="Asia/Dhaka"
             )
@@ -402,7 +403,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         if loading_msg_id:
             try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
             except: pass
-        # 💡 যদি ০% এ আটকে থাকে বা ক্র্যাশ করে, তবে এরর মেসেজ দেখাবে
         await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **Browser Error:**\n`{str(e)[:150]}`\n\nসম্ভবত Render-এ ব্রাউজার ওপেন করতে সমস্যা হচ্ছে।", parse_mode="Markdown")
     finally:
         try: await browser.close()
@@ -416,28 +416,36 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     state["first_bet"] = True 
     
-    # 💡 ওয়েলকাম মেসেজ একদম উপরে তোলা হয়েছে (অতিরিক্ত লাইন ব্রেক বাদ দেওয়া হয়েছে)
-    welcome_text = (
-        "🧠 BD=DK WIN~GO=AUTO~BET 💥\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🧠 Mode    : Auto Analyse & bet\n"
-        "🔐 Access  : Private · Authorized Members\n"
-        "🔴 Status  : Not Logged In\n"
-        f"👥 Accounts: {len(state['accounts'])}/6\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🧠 Prediction Engine — 9 Layers\n"
-        "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
-        "🔍 Manipulation · 🎨 Colour · 🔢 Frequency\n"
-        "🔄 Markov · ♻️ Cycle · 💠 Momentum\n"
-        "🔁 Every layer is back-tested live so its vote\n"
-        "weight follows its real hit-rate\n"
-        "🔴 Confidence below 30% → sit out\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🎬 4-second 🧠 generating prediction animation\n"
-        "🚀 Analysis → auto bet every 30s period\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "👇 Press the button below to LOGIN"
-    )
+    # 💡 আপনার স্ক্রিনশটের মতো হুবহু প্লেইন টেক্সট, এবং লাইন ব্রেকগুলো ঠিক করা হয়েছে
+    welcome_text = """🧠 BD=DK WIN~GO=AUTO~BET 💥
+━━━━━━━━━━━━━━━━━━━━━━━
+🧠 Mode    : Auto Analyse & bet
+🔐 Access  : Private · Authorized
+Members
+🔴 Status  : Not Logged In
+👥 Accounts: 0/6
+━━━━━━━━━━━━━━━━━━━━━━━
+🧠 Prediction Engine — 9 Layers
+⚡ Streak · 🔷 Pattern · 📈 Trend
+🔍 Manipulation · 🎨 Colour · 🔢
+Frequency
+🔄 Markov · ♻️ Cycle · 💠
+Momentum
+🔁 Every layer is back-tested live so
+its vote
+weight follows its real hit-rate
+🔴 Confidence below 30% → sit
+out
+━━━━━━━━━━━━━━━━━━━━━━━
+🎬 4-second 🧠 generating
+prediction animation
+🚀 Analysis → auto bet every 30s
+period
+━━━━━━━━━━━━━━━━━━━━━━━
+
+👇 Press the button below to
+LOGIN"""
+    
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
     await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
