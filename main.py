@@ -200,12 +200,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await update_loading(30)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             
-            # 💡 পেজ পুরোপুরি লোড হওয়ার জন্য বাড়তি ৮ সেকেন্ড অপেক্ষা
             await page.wait_for_timeout(8000)
             
             await update_loading(50)
             try:
-                # 💡 ১. পেজের প্রথম দৃশ্যমান ইনপুট বক্সটি খুঁজে বের করা (ফোন নাম্বারের জন্য)
                 inputs = await page.locator('input').all()
                 phone_filled = False
                 for inp in inputs:
@@ -217,13 +215,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 if not phone_filled:
                     raise Exception("No visible input found")
 
-                # 💡 ২. পাসওয়ার্ড বক্স খোঁজা
                 pass_input = page.locator('input[type="password"]').first
                 await pass_input.wait_for(state="visible", timeout=10000)
                 await pass_input.fill(password)
                 
             except Exception as e:
-                # 💡 যদি ইনপুট বক্স না পায়, তবে স্ক্রিনশট তুলে পাঠাবে
                 await ctx.bot.send_message(chat_id=uid, text="⚠️ **লগইন পেজে সমস্যা!**\nবট ইনপুট বক্স খুঁজে পাচ্ছে না। নিচে স্ক্রিনশট দেখুন, সাইটে ঠিক কী দেখা যাচ্ছে:", parse_mode="Markdown")
                 error_img = f"error_{uid}.png"
                 await page.screenshot(path=error_img)
@@ -232,13 +228,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 return
 
             await update_loading(70)
-            # 💡 ৩. হলুদ রঙের 'Log in' বাটনে ক্লিক
             try:
-                # একাধিক পদ্ধতিতে খোঁজা হচ্ছে (button ট্যাগ, van-button ক্লাস, বা exact text)
                 login_btn = page.locator('button, .van-button, div').filter(has_text=re.compile(r"^Log in$", re.IGNORECASE)).last
                 await login_btn.click(timeout=10000, force=True)
             except:
-                # জাভাস্ক্রিপ্ট দিয়ে জোর করে ক্লিক
                 await page.evaluate("""() => {
                     let els = document.querySelectorAll('button, div, span');
                     for (let el of els) {
@@ -444,37 +437,36 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     state["first_bet"] = True 
     
-    # 💡 আপনার প্রথম স্ক্রিনশটের মতো হুবহু এবং লেখা স্পষ্ট (বোল্ড) করা হয়েছে
-    welcome_text = (
-        "<b>🧠 BD=DK WIN~GO=AUTO~BET 💥</b>\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🧠 <b>Mode</b>    : Auto Analyse & bet\n"
-        "🔐 <b>Access</b>  : Private · Authorized\n"
-        "Members\n"
-        "🔴 <b>Status</b>  : Not Logged In\n"
-        f"👥 <b>Accounts:</b> {len(state['accounts'])}/6\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🧠 <b>Prediction Engine — 9 Layers</b>\n"
-        "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
-        "🔍 Manipulation · 🎨 Colour · 🔢\n"
-        "Frequency\n"
-        "🔄 Markov · ♻️ Cycle · 💠\n"
-        "Momentum\n"
-        "🔁 Every layer is back-tested live so\n"
-        "its vote\n"
-        "weight follows its real hit-rate\n"
-        "🔴 Confidence below 30% → sit\n"
-        "out\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🎬 4-second 🧠 generating\n"
-        "prediction animation\n"
-        "🚀 Analysis → auto bet every 30s\n"
-        "period\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "\n"
-        "👇 Press the button below to\n"
-        "<b>LOGIN</b>"
-    )
+    # 💡 ওয়েলকাম মেসেজ (একদম সামান্য উপরে, স্পষ্ট বোল্ড ফন্টে)
+    welcome_text = """<b>🧠 BD=DK WIN~GO=AUTO~BET 💥</b>
+━━━━━━━━━━━━━━━━━━━━━━━
+🧠 <b>Mode</b>    : Auto Analyse & bet
+🔐 <b>Access</b>  : Private · Authorized
+Members
+🔴 <b>Status</b>  : Not Logged In
+👥 <b>Accounts:</b> 0/6
+━━━━━━━━━━━━━━━━━━━━━━━
+🧠 <b>Prediction Engine — 9 Layers</b>
+⚡ Streak · 🔷 Pattern · 📈 Trend
+🔍 Manipulation · 🎨 Colour · 🔢
+Frequency
+🔄 Markov · ♻️ Cycle · 💠
+Momentum
+🔁 Every layer is back-tested live so
+its vote
+weight follows its real hit-rate
+🔴 Confidence below 30% → sit
+out
+━━━━━━━━━━━━━━━━━━━━━━━
+🎬 4-second 🧠 generating
+prediction animation
+🚀 Analysis → auto bet every 30s
+period
+━━━━━━━━━━━━━━━━━━━━━━━
+
+👇 Press the button below to
+<b>LOGIN</b>"""
+    
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
     await update.message.reply_text(welcome_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
