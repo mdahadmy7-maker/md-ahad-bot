@@ -9,9 +9,12 @@ from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from playwright.async_api import async_playwright
+# 💡 Render এর পোর্ট এরর ঠিক করার জন্য
+from flask import Flask
+import threading
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন
+# ১. কনফিগারেশন (টোকেন Render Env Var থেকে নিবে)
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 SITE_URL = "https://dkwin1.com/#/login"
@@ -21,6 +24,17 @@ HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# 💡 Render এর জন্য ডামি ওয়েব সার্ভার
+web_app = Flask(__name__)
+
+@web_app.route('/')
+def health_check():
+    return "Bot is running!", 200
+
+def run_web_server():
+    port = int(os.environ.get("PORT", 10000))
+    web_app.run(host='0.0.0.0', port=port)
 
 user_state = {}
 
@@ -181,12 +195,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         page = await context.new_page()
 
         try:
-            # ---------------- ১. লগইন ----------------
+            # ---------------- ১. লগইন (সুপার ফাস্ট) ----------------
             await update_loading(10)
-            # সোজা সাইটে যাবে, বাড়তি কোনো অপেক্ষা করবে না
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             
-            # ইনপুট ফিল্ডগুলো লোড হওয়া মাত্রই সাথে সাথে বসিয়ে দেবে
+            # ইনপুট বক্স খোঁজা এবং সাথে সাথে বসানো
             phone_input = page.locator('input[type="text"], input[type="tel"]').first
             await phone_input.wait_for(state="visible", timeout=20000)
             await phone_input.fill(login_phone)
@@ -195,18 +208,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await pass_input.fill(password)
             
             await update_loading(40)
-            # সাথে সাথে লগইন বাটনে ক্লিক
+            # লগইন বাটনে ক্লিক
             await page.locator('button, .van-button').filter(has_text=re.compile(r"^Log in$", re.IGNORECASE)).last.click(force=True)
             
             await update_loading(60)
-            # লগইন হওয়ার জন্য ৩ সেকেন্ড অপেক্ষা (যাতে পেজ রিফ্রেশ হয়)
             await page.wait_for_timeout(3000) 
             
             # পপআপ ক্লোজ
             await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
 
             await update_loading(80)
-            # ব্যালেন্স চেক করার জন্য অ্যাকাউন্ট পেজে ক্লিক
+            # ব্যালেন্স চেক
             await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if(el.innerText && el.innerText.trim().toLowerCase() === 'account') { el.click(); return true; } } }""")
             await page.wait_for_timeout(2000) 
 
@@ -215,7 +227,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             uid_val = "Unknown"
             balance = "0.00"
 
-            # UID এবং ব্যালেন্স খোঁজা
             page_text = await page.inner_text("body")
             uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
             balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
@@ -266,7 +277,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await page.goto(WIN_GO_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(3000) 
             
-            # সরাসরি গেম পেজে না গেলে মেনু থেকে যাবে
             body_text = await page.evaluate("() => document.body.innerText")
             if "Time remaining" not in body_text and "WinGo" not in body_text:
                 await page.goto(HOME_URL, timeout=60000)
@@ -313,7 +323,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     bet_amount = float(state['step_amounts'][current_step_idx])
                     choice, current_period = await get_history_and_prediction_async()
 
-                    # টাইমার চেক (দ্রুত)
                     timer_found = False
                     for _ in range(400): 
                         try:
@@ -342,20 +351,18 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     """
                     await page.evaluate(js_click)
 
-                    # অ্যামাউন্ট বসানো
                     inputs = await page.locator('input[type="text"], input[type="number"]').all()
                     for inp in inputs:
                         if await inp.is_visible():
                             await inp.fill(str(int(bet_amount)))
                             break
 
-                    # কনফার্ম বেট
                     for _ in range(10): 
                         if await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span')) { if(el.innerText && el.innerText.toLowerCase().includes('total amount')) { el.click(); return true; } } return false; }"""): 
                             break
                         await page.wait_for_timeout(500)
 
-                    await page.wait_for_timeout(3000) # রেজাল্ট আসার অপেক্ষা
+                    await page.wait_for_timeout(3000) 
                     
                     new_page_text = await page.evaluate("() => document.body.innerText")
                     new_bal_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
@@ -614,6 +621,11 @@ def main():
     if not BOT_TOKEN:
         print("❌ Error: Render Environment Variable-এ BOT_TOKEN সেট করা নেই!")
         return
+    
+    # Render এর পোর্ট এরর এড়াতে ওয়েব সার্ভার চালু
+    threading.Thread(target=run_web_server, daemon=True).start()
+    print("✅ Health check server started.")
+
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("reset", cmd_reset))
