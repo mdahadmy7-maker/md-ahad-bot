@@ -81,7 +81,7 @@ def get_history_and_prediction():
         return random.choice(["BIG", "SMALL"]), fallback_period
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট (আপনার অরিজিনাল লজিক)
+# ৩. লগইন এবং অটো-বেট
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -106,7 +106,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         )
         page = await context.new_page()
         
-        # API ক্যাপচার
         async def log_bet_api(request):
             if request.method == "POST" and "WinGoBet" in request.url:
                 try:
@@ -132,10 +131,16 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             except: pass
 
             await update_loading(50)
+            
+            # 💡 এখানে টাইমআউট ১০ সেকেন্ড থেকে বাড়িয়ে ৩০ সেকেন্ড করা হয়েছে
             try:
-                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000)
+                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=30000)
             except:
-                await page.locator('button:has-text("Log in")').last.click(timeout=10000)
+                try:
+                    await page.locator('button:has-text("Log in")').last.click(timeout=15000)
+                except:
+                    # যদি এখনো না পাওয়া যায়, তবে জাভাস্ক্রিপ্ট দিয়ে জোর করে ক্লিক করবে
+                    await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span, a')) { let t = (el.innerText||'').toLowerCase(); if(t==='log in' || t==='login') { el.click(); return true; } } return false; }""")
             
             await update_loading(70)
             for _ in range(10):
@@ -232,7 +237,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # 💡 আপনার অরিজিনাল ফাইলের হুবহু নেভিগেশন লজিক
             logger.info("Navigating to WinGo page...")
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000) 
@@ -254,7 +258,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, p')) { if((el.innerText||'').includes('Win Go') && (el.innerText||'').includes('Guess Number')) { el.click(); return true; } } return false; }""")
             await page.wait_for_timeout(3000) 
 
-            # 💡 AUTO TRADE ACTIVE মেসেজ
             step_plan_str = "┌────────────────────────────────┐\n"
             for i, amt in enumerate(state['step_amounts']):
                 step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
@@ -310,7 +313,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. টাইমার চেক (৩০ থেকে ৭ সেকেন্ড)
                     logger.info("Waiting for timer (30s to 7s)...")
                     timer_found = False
                     for _ in range(400): 
@@ -318,7 +320,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             body_text = await page.evaluate("() => document.body.innerText")
                             clean_text = body_text.replace(" ", "").replace("\n", "")
                             
-                            # আপনার কথামতো ৩০ থেকে ৭ সেকেন্ড
                             if re.search(r'00:(30|2[0-9]|1[0-9]|0[7-9])', clean_text):
                                 timer_found = True
                                 break
@@ -327,7 +328,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     if not timer_found: continue 
 
-                    # 💡 ২. সুপার ফাস্ট Big/Small ক্লিক (আপনার অরিজিনাল লজিক)
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(200)
                     
@@ -356,10 +356,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 await page.mouse.click(309, 890)
                         except: pass
 
-                    # 💡 ৩. মডাল ওপেন হওয়া পর্যন্ত অপেক্ষা
                     await page.wait_for_timeout(500)
 
-                    # 💡 ৪. Amount বসানো
                     try:
                         inputs = await page.locator('input[type="text"], input[type="number"]').all()
                         for inp in inputs:
@@ -371,7 +369,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 break
                     except: pass
 
-                    # I agree চেকবক্স
                     try:
                         agree_box = page.locator('text="I agree"').last
                         if await agree_box.count() > 0 and await agree_box.is_visible():
@@ -379,7 +376,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             await page.wait_for_timeout(200)
                     except: pass
 
-                    # 💡 ৫. Total Amount ক্লিক (জাভাস্ক্রিপ্ট ফোর্স ক্লিক)
                     js_confirm_bet = """
                     (() => {
                         for(let el of document.querySelectorAll('button, div, span')) {
@@ -425,7 +421,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
-                    # 💡 ৭. রেজাল্টের জন্য অপেক্ষা (0 0 আসা পর্যন্ত)
                     for _ in range(350):
                         body_text = await page.evaluate("() => document.body.innerText")
                         if "0 0" in body_text:
@@ -433,8 +428,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await asyncio.sleep(0.2)
 
                     await page.wait_for_timeout(2000)
-
-                    # 💡 ৮. উপরে স্ক্রল করে Wallet balance চেক করা
                     logger.info("Checking result...")
                     await page.evaluate("window.scrollTo(0, 0);")
                     await page.wait_for_timeout(1500) 
@@ -496,7 +489,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 f"{next_step_txt}"
                             ))
 
-                    # 💡 ৯. আবার নিচে স্ক্রল করে গেমে ফিরে আসা
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(1500)
 
