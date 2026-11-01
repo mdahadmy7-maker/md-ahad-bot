@@ -165,48 +165,45 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             )
         except: pass
 
-    async with async_playwright() as p:
-        # 💡 মানুষের মতো মোবাইল ব্রাউজার সিমুলেট করা হচ্ছে
-        iphone_12 = p.devices['Samsung Galaxy S20']
+    try:
+        # 💡 টাস্ক শুরুর সাথে সাথেই লোডিং বাড়িয়ে দেওয়া হচ্ছে
+        await update_loading(15)
         
-        browser = await p.chromium.launch(
-            headless=True, 
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage"
-            ]
-        ) 
-        
-        context = await browser.new_context(
-            **iphone_12, # মোবাইলের স্ক্রিন সাইজ ও ইউজার এজেন্ট
-            locale="en-US",
-            timezone_id="Asia/Dhaka"
-        )
-        
-        await context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-            window.chrome = { runtime: {} };
-            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
-        """)
-        
-        page = await context.new_page()
+        async with async_playwright() as p:
+            # 💡 মানুষের মতো মোবাইল ব্রাউজার সিমুলেট করা হচ্ছে
+            iphone_12 = p.devices['Samsung Galaxy S20']
+            
+            # 💡 ব্রাউজার ওপেন করা
+            browser = await p.chromium.launch(
+                headless=True, 
+                args=[
+                    "--disable-blink-features=AutomationControlled",
+                    "--no-sandbox",
+                    "--disable-setuid-sandbox",
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu"
+                ]
+            ) 
+            
+            context = await browser.new_context(
+                **iphone_12,
+                locale="en-US",
+                timezone_id="Asia/Dhaka"
+            )
+            
+            await context.add_init_script("""
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+                window.chrome = { runtime: {} };
+            """)
+            
+            page = await context.new_page()
 
-        try:
             # ---------------- ১. লগইন ----------------
-            await update_loading(10)
+            await update_loading(30)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             
-            await update_loading(30)
-            
-            # 💡 স্ক্রিনশট নেওয়া হচ্ছে (ডিবাগ করার জন্য)
-            debug_img = f"debug_{uid}.png"
-            await page.screenshot(path=debug_img)
-            
+            await update_loading(50)
             try:
-                # ইনপুট বক্স খোঁজা
                 phone_input = page.locator('input[type="text"], input[type="tel"]').first
                 await phone_input.wait_for(state="visible", timeout=15000)
                 await phone_input.fill(login_phone)
@@ -215,16 +212,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await pass_input.fill(password)
                 
             except Exception as e:
-                # 💡 যদি ১৫ সেকেন্ডেও ইনপুট বক্স না পায়, তবে স্ক্রিনশট তুলে পাঠাবে
-                await ctx.bot.send_message(chat_id=uid, text="⚠️ **লগইন পেজে সমস্যা!**\nবট ইনপুট বক্স খুঁজে পাচ্ছে না। নিচে স্ক্রিনশট দেখুন, সাইটে ঠিক কী দেখা যাচ্ছে।", parse_mode="Markdown")
-                await ctx.bot.send_photo(chat_id=uid, photo=open(debug_img, 'rb'))
+                await ctx.bot.send_message(chat_id=uid, text="⚠️ **লগইন পেজে সমস্যা!**\nবট ইনপুট বক্স খুঁজে পাচ্ছে না। সাইট হয়তো লোড হতে দেরি করছে।", parse_mode="Markdown")
                 await browser.close()
                 return
 
-            await update_loading(50)
+            await update_loading(70)
             await page.locator('button, .van-button').filter(has_text=re.compile(r"^Log in$", re.IGNORECASE)).last.click(force=True)
             
-            await update_loading(70)
             await page.wait_for_timeout(4000) 
             
             await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
@@ -255,12 +249,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
 
             if login_status == "failed":
-                fail_img = f"fail_{uid}.png"
-                await page.screenshot(path=fail_img)
-                await ctx.bot.send_photo(
-                    chat_id=uid, photo=open(fail_img, 'rb'), 
-                    caption=f"❌ **LOGIN FAILED** ({phone})\nসাইটে ঢুকতে পারেনি অথবা পাসওয়ার্ড ভুল। নিচে স্ক্রিনশট দেখুন।", parse_mode="Markdown"
-                )
+                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\nসাইটে ঢুকতে পারেনি অথবা পাসওয়ার্ড ভুল।", parse_mode="Markdown")
                 await browser.close()
                 return
 
@@ -408,14 +397,16 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     logger.error(f"Betting error: {e}")
                     state["trade_running"] = False
                     break
-                    
-        except Exception as e:
-            if loading_msg_id:
-                try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
-                except: pass
-            await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **Browser Timeout:**\n`{str(e)[:150]}`", parse_mode="Markdown")
-        finally:
-            await browser.close()
+
+    except Exception as e:
+        if loading_msg_id:
+            try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
+            except: pass
+        # 💡 যদি ০% এ আটকে থাকে বা ক্র্যাশ করে, তবে এরর মেসেজ দেখাবে
+        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **Browser Error:**\n`{str(e)[:150]}`\n\nসম্ভবত Render-এ ব্রাউজার ওপেন করতে সমস্যা হচ্ছে।", parse_mode="Markdown")
+    finally:
+        try: await browser.close()
+        except: pass
 
 # ═══════════════════════════════════════════
 # ৪. হ্যান্ডলারগুলো
@@ -425,35 +416,27 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     state["first_bet"] = True 
     
+    # 💡 ওয়েলকাম মেসেজ একদম উপরে তোলা হয়েছে (অতিরিক্ত লাইন ব্রেক বাদ দেওয়া হয়েছে)
     welcome_text = (
         "🧠 BD=DK WIN~GO=AUTO~BET 💥\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🧠 Mode    : Auto Analyse & bet\n"
-        "🔐 Access  : Private · Authorized\n"
-        "Members\n"
+        "🔐 Access  : Private · Authorized Members\n"
         "🔴 Status  : Not Logged In\n"
         f"👥 Accounts: {len(state['accounts'])}/6\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🧠 Prediction Engine — 9 Layers\n"
         "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
-        "🔍 Manipulation · 🎨 Colour · 🔢\n"
-        "Frequency\n"
-        "🔄 Markov · ♻️ Cycle · 💠\n"
-        "Momentum\n"
-        "🔁 Every layer is back-tested live so\n"
-        "its vote\n"
+        "🔍 Manipulation · 🎨 Colour · 🔢 Frequency\n"
+        "🔄 Markov · ♻️ Cycle · 💠 Momentum\n"
+        "🔁 Every layer is back-tested live so its vote\n"
         "weight follows its real hit-rate\n"
-        "🔴 Confidence below 30% → sit\n"
-        "out\n"
+        "🔴 Confidence below 30% → sit out\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🎬 4-second 🧠 generating\n"
-        "prediction animation\n"
-        "🚀 Analysis → auto bet every 30s\n"
-        "period\n"
+        "🎬 4-second 🧠 generating prediction animation\n"
+        "🚀 Analysis → auto bet every 30s period\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "\n"
-        "👇 Press the button below to\n"
-        "LOGIN"
+        "👇 Press the button below to LOGIN"
     )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
     await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
