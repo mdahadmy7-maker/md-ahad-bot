@@ -13,7 +13,7 @@ from playwright.async_api import async_playwright
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন
 # ═══════════════════════════════════════════
-BOT_TOKEN = os.environ.get("BOT_TOKEN") 
+BOT_TOKEN = os.environ.get("BOT_TOKEN") # এখানে আপনার টোকেন বসান
 SITE_URL = "https://dkwin1.com/#/login"
 HOME_URL = "https://dkwin1.com/#/"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
@@ -135,7 +135,7 @@ async def get_history_and_prediction_async():
     return await asyncio.to_thread(get_history_and_prediction_sync)
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (ফিক্সড)
+# ৩. লগইন এবং অটো-বেট ফাংশন (Anti-Bot Stealth ফিক্সড)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -153,11 +153,37 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"]) 
+        # 💡 Anti-Bot আর্গুমেন্টস যোগ করা হলো
+        browser = await p.chromium.launch(
+            headless=True, 
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-accelerated-2d-canvas",
+                "--no-first-run",
+                "--no-zygote",
+                "--disable-gpu"
+            ]
+        ) 
+        
+        # 💡 মোবাইলের বদলে ডেস্কটপ (Windows) ইউজার-এজেন্ট দেওয়া হলো
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
-            viewport={"width": 412, "height": 915}
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 800},
+            locale="en-US",
+            timezone_id="Asia/Dhaka"
         )
+        
+        # 💡 রোবট লুকানোর জাভাস্ক্রিপ্ট
+        await context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            window.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        """)
+        
         page = await context.new_page()
         
         async def log_bet_api(request):
@@ -178,10 +204,15 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await page.goto(SITE_URL, timeout=60000, wait_until="networkidle")
             await page.wait_for_timeout(5000) 
 
+            # 💡 Cloudflare ব্লক চেক
+            page_text_check = await page.inner_text("body")
+            if "Why have I been blocked?" in page_text_check or "Attention Required!" in page_text_check:
+                await ctx.bot.send_message(chat_id=uid, text="❌ **সাইট ব্লক করেছে!**\nসাইটের Cloudflare সিকিউরিটি আপনার আইপি (IP) ব্লক করেছে। দয়া করে আপনার রাউটার রিস্টার্ট দিন অথবা মোবাইল ডাটা চালু করে আবার চেষ্টা করুন।", parse_mode="Markdown")
+                await browser.close()
+                return
+
             await update_loading(30)
             try:
-                # 💡 ফোন নাম্বার এবং পাসওয়ার্ড বসানোর নিখুঁত পদ্ধতি
-                # সাইটের ইনপুট ফিল্ডগুলো সাধারণত type="text" এবং type="password" হয়
                 phone_input = page.locator('input[type="text"]').first
                 await phone_input.wait_for(state="visible", timeout=20000)
                 await phone_input.fill(login_phone)
@@ -197,17 +228,15 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(50)
             try:
-                # 💡 ঠিক করা হয়েছে: শুধুমাত্র হলুদ রঙের 'Log in' বাটনে ক্লিক করবে
-                # 'button' ট্যাগ অথবা Vant UI এর ক্লাস দিয়ে খোঁজা হচ্ছে
+                # শুধুমাত্র হলুদ 'Log in' বাটনে ক্লিক
                 login_btn = page.locator('button, .van-button').filter(has_text=re.compile(r"^Log in$", re.IGNORECASE)).last
                 await login_btn.wait_for(state="visible", timeout=15000)
                 await login_btn.click(force=True)
-                await page.wait_for_timeout(2000) # ক্লিক করার পর ২ সেকেন্ড অপেক্ষা
+                await page.wait_for_timeout(2000) 
             except Exception as e:
                 logger.error(f"Login Button Error: {e}")
             
             await update_loading(70)
-            # পপআপ এবং নোটিফিকেশন ব্লক করা
             for _ in range(10):
                 await page.evaluate("""
                     (function() {
@@ -224,7 +253,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.wait_for_timeout(400)
 
             await update_loading(85)
-            # অ্যাকাউন্ট পেজে যাওয়া
             try:
                 await page.evaluate("""
                     (function() {
@@ -268,7 +296,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
 
             if login_status == "failed" or uid_val == "Unknown":
-                # লগইন ফেইল হলে স্ক্রিনশট নিবে
                 fail_path = f"login_fail_{uid}.png"
                 await page.screenshot(path=fail_path)
                 await ctx.bot.send_photo(
