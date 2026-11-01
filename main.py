@@ -148,7 +148,7 @@ async def get_history_and_prediction_async():
     return await asyncio.to_thread(get_history_and_prediction_sync)
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন
+# ৩. লগইন এবং অটো-বেট ফাংশন (Debug Screenshot সহ)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -180,7 +180,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 ]
             ) 
             
-            # 💡 Samsung Galaxy S20 এরর ফিক্স: সরাসরি মোবাইলের সেটিংস দেওয়া হলো
             context = await browser.new_context(
                 user_agent="Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
                 viewport={"width": 412, "height": 915},
@@ -201,24 +200,55 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await update_loading(30)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             
+            # 💡 পেজ পুরোপুরি লোড হওয়ার জন্য বাড়তি ৮ সেকেন্ড অপেক্ষা
+            await page.wait_for_timeout(8000)
+            
             await update_loading(50)
             try:
-                phone_input = page.locator('input[type="text"], input[type="tel"]').first
-                await phone_input.wait_for(state="visible", timeout=15000)
-                await phone_input.fill(login_phone)
+                # 💡 ১. পেজের প্রথম দৃশ্যমান ইনপুট বক্সটি খুঁজে বের করা (ফোন নাম্বারের জন্য)
+                inputs = await page.locator('input').all()
+                phone_filled = False
+                for inp in inputs:
+                    if await inp.is_visible():
+                        await inp.fill(login_phone)
+                        phone_filled = True
+                        break
                 
+                if not phone_filled:
+                    raise Exception("No visible input found")
+
+                # 💡 ২. পাসওয়ার্ড বক্স খোঁজা
                 pass_input = page.locator('input[type="password"]').first
+                await pass_input.wait_for(state="visible", timeout=10000)
                 await pass_input.fill(password)
                 
             except Exception as e:
-                await ctx.bot.send_message(chat_id=uid, text="⚠️ **লগইন পেজে সমস্যা!**\nবট ইনপুট বক্স খুঁজে পাচ্ছে না। সাইট হয়তো লোড হতে দেরি করছে।", parse_mode="Markdown")
+                # 💡 যদি ইনপুট বক্স না পায়, তবে স্ক্রিনশট তুলে পাঠাবে
+                await ctx.bot.send_message(chat_id=uid, text="⚠️ **লগইন পেজে সমস্যা!**\nবট ইনপুট বক্স খুঁজে পাচ্ছে না। নিচে স্ক্রিনশট দেখুন, সাইটে ঠিক কী দেখা যাচ্ছে:", parse_mode="Markdown")
+                error_img = f"error_{uid}.png"
+                await page.screenshot(path=error_img)
+                await ctx.bot.send_photo(chat_id=uid, photo=open(error_img, 'rb'))
                 await browser.close()
                 return
 
             await update_loading(70)
-            await page.locator('button, .van-button').filter(has_text=re.compile(r"^Log in$", re.IGNORECASE)).last.click(force=True)
+            # 💡 ৩. হলুদ রঙের 'Log in' বাটনে ক্লিক
+            try:
+                # একাধিক পদ্ধতিতে খোঁজা হচ্ছে (button ট্যাগ, van-button ক্লাস, বা exact text)
+                login_btn = page.locator('button, .van-button, div').filter(has_text=re.compile(r"^Log in$", re.IGNORECASE)).last
+                await login_btn.click(timeout=10000, force=True)
+            except:
+                # জাভাস্ক্রিপ্ট দিয়ে জোর করে ক্লিক
+                await page.evaluate("""() => {
+                    let els = document.querySelectorAll('button, div, span');
+                    for (let el of els) {
+                        if (el.innerText && el.innerText.trim() === 'Log in') {
+                            el.click(); return true;
+                        }
+                    }
+                }""")
             
-            await page.wait_for_timeout(4000) 
+            await page.wait_for_timeout(5000) 
             
             await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
 
@@ -401,7 +431,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         if loading_msg_id:
             try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
             except: pass
-        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **Browser Error:**\n`{str(e)[:150]}`\n\nসম্ভবত Render-এ ব্রাউজার ওপেন করতে সমস্যা হচ্ছে।", parse_mode="Markdown")
+        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **Browser Error:**\n`{str(e)[:150]}`", parse_mode="Markdown")
     finally:
         try: await browser.close()
         except: pass
@@ -414,17 +444,17 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     state["first_bet"] = True 
     
-    # 💡 আপনার স্ক্রিনশটের মতো হুবহু প্লেইন টেক্সট (কোনো মার্কডাউন নেই)
+    # 💡 আপনার প্রথম স্ক্রিনশটের মতো হুবহু এবং লেখা স্পষ্ট (বোল্ড) করা হয়েছে
     welcome_text = (
-        "🧠 BD=DK WIN~GO=AUTO~BET 💥\n"
+        "<b>🧠 BD=DK WIN~GO=AUTO~BET 💥</b>\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🧠 Mode    : Auto Analyse & bet\n"
-        "🔐 Access  : Private · Authorized\n"
+        "🧠 <b>Mode</b>    : Auto Analyse & bet\n"
+        "🔐 <b>Access</b>  : Private · Authorized\n"
         "Members\n"
-        "🔴 Status  : Not Logged In\n"
-        f"👥 Accounts: {len(state['accounts'])}/6\n"
+        "🔴 <b>Status</b>  : Not Logged In\n"
+        f"👥 <b>Accounts:</b> {len(state['accounts'])}/6\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🧠 Prediction Engine — 9 Layers\n"
+        "🧠 <b>Prediction Engine — 9 Layers</b>\n"
         "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
         "🔍 Manipulation · 🎨 Colour · 🔢\n"
         "Frequency\n"
@@ -443,10 +473,10 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "\n"
         "👇 Press the button below to\n"
-        "LOGIN"
+        "<b>LOGIN</b>"
     )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
-    await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(welcome_text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
