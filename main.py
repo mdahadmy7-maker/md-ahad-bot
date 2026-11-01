@@ -11,7 +11,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন (Render Environment Variable থেকে টোকেন নিবে)
+# ১. কনফিগারেশন
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 SITE_URL = "https://dkwin1.com/#/login"
@@ -136,7 +136,7 @@ async def get_history_and_prediction_async():
     return await asyncio.to_thread(get_history_and_prediction_sync)
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (Render Linux Server)
+# ৩. লগইন এবং অটো-বেট ফাংশন (সুপার ফাস্ট)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -154,15 +154,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        # Render (Linux) এ headless=True থাকতে হবে
         browser = await p.chromium.launch(
             headless=True, 
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu"
+                "--disable-dev-shm-usage"
             ]
         ) 
         
@@ -183,30 +181,32 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         page = await context.new_page()
 
         try:
-            # ---------------- ১. ফাস্ট লগইন ----------------
+            # ---------------- ১. লগইন ----------------
             await update_loading(10)
-            await page.goto(SITE_URL, timeout=60000, wait_until="networkidle")
-            await page.wait_for_timeout(5000) 
-
-            page_text = await page.inner_text("body")
-            if "Why have I been blocked?" in page_text or "Attention Required!" in page_text:
-                await ctx.bot.send_message(chat_id=uid, text="❌ **সাইট ব্লক করেছে!**\nRender-এর আইপি Cloudflare ব্লক করেছে। দয়া করে লোকাল পিসিতে রান করুন।")
-                await browser.close()
-                return
-
-            await update_loading(30)
-            await page.locator('input[type="text"], input[type="tel"]').first.fill(login_phone)
-            await page.locator('input[type="password"]').first.fill(password)
+            # সোজা সাইটে যাবে, বাড়তি কোনো অপেক্ষা করবে না
+            await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             
-            await update_loading(50)
+            # ইনপুট ফিল্ডগুলো লোড হওয়া মাত্রই সাথে সাথে বসিয়ে দেবে
+            phone_input = page.locator('input[type="text"], input[type="tel"]').first
+            await phone_input.wait_for(state="visible", timeout=20000)
+            await phone_input.fill(login_phone)
+            
+            pass_input = page.locator('input[type="password"]').first
+            await pass_input.fill(password)
+            
+            await update_loading(40)
+            # সাথে সাথে লগইন বাটনে ক্লিক
             await page.locator('button, .van-button').filter(has_text=re.compile(r"^Log in$", re.IGNORECASE)).last.click(force=True)
             
-            await update_loading(70)
+            await update_loading(60)
+            # লগইন হওয়ার জন্য ৩ সেকেন্ড অপেক্ষা (যাতে পেজ রিফ্রেশ হয়)
             await page.wait_for_timeout(3000) 
             
+            # পপআপ ক্লোজ
             await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
 
-            await update_loading(85)
+            await update_loading(80)
+            # ব্যালেন্স চেক করার জন্য অ্যাকাউন্ট পেজে ক্লিক
             await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if(el.innerText && el.innerText.trim().toLowerCase() === 'account') { el.click(); return true; } } }""")
             await page.wait_for_timeout(2000) 
 
@@ -215,6 +215,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             uid_val = "Unknown"
             balance = "0.00"
 
+            # UID এবং ব্যালেন্স খোঁজা
             page_text = await page.inner_text("body")
             uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
             balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
@@ -232,7 +233,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
 
             if login_status == "failed":
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\nপাসওয়ার্ড বা সাইট চেক করুন।")
+                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\nসাইটে ঢুকতে পারেনি অথবা পাসওয়ার্ড ভুল।")
                 await browser.close()
                 return
 
@@ -261,18 +262,21 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await browser.close()
                     return
 
-            # ---------------- ২. WinGo পেজে যাওয়া ----------------
+            # ---------------- ২. WinGo পেজ ----------------
             await page.goto(WIN_GO_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(3000) 
             
+            # সরাসরি গেম পেজে না গেলে মেনু থেকে যাবে
             body_text = await page.evaluate("() => document.body.innerText")
             if "Time remaining" not in body_text and "WinGo" not in body_text:
                 await page.goto(HOME_URL, timeout=60000)
-                await page.wait_for_timeout(2000)
-                await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
                 await page.wait_for_timeout(1500)
-                await page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last.click(timeout=5000, force=True)
-                await page.wait_for_timeout(2000)
+                try:
+                    await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
+                    await page.wait_for_timeout(1000)
+                    await page.locator('div:has-text("Win Go")').filter(has_text="Guess Number").last.click(timeout=5000, force=True)
+                    await page.wait_for_timeout(1500)
+                except: pass
 
             initial_balance = float(balance)
             target_balance = initial_balance + float(state['target'])
@@ -296,6 +300,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "🧠 _AI Engine: NovaBrainV7_"
             ), parse_mode="Markdown")
 
+            # ---------------- ৩. বেটিং লুপ ----------------
             while state["trade_running"]:
                 try:
                     current_bal = state["balance"]
@@ -308,6 +313,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     bet_amount = float(state['step_amounts'][current_step_idx])
                     choice, current_period = await get_history_and_prediction_async()
 
+                    # টাইমার চেক (দ্রুত)
                     timer_found = False
                     for _ in range(400): 
                         try:
@@ -336,19 +342,20 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     """
                     await page.evaluate(js_click)
 
+                    # অ্যামাউন্ট বসানো
                     inputs = await page.locator('input[type="text"], input[type="number"]').all()
                     for inp in inputs:
                         if await inp.is_visible():
                             await inp.fill(str(int(bet_amount)))
                             break
 
+                    # কনফার্ম বেট
                     for _ in range(10): 
                         if await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span')) { if(el.innerText && el.innerText.toLowerCase().includes('total amount')) { el.click(); return true; } } return false; }"""): 
                             break
                         await page.wait_for_timeout(500)
 
-                    await page.wait_for_timeout(2000)
-                    await page.wait_for_timeout(3000)
+                    await page.wait_for_timeout(3000) # রেজাল্ট আসার অপেক্ষা
                     
                     new_page_text = await page.evaluate("() => document.body.innerText")
                     new_bal_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
