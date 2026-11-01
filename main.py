@@ -166,11 +166,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     try:
-        # 💡 টাস্ক শুরুর সাথে সাথেই লোডিং বাড়িয়ে দেওয়া হচ্ছে
         await update_loading(15)
         
         async with async_playwright() as p:
-            # 💡 ব্রাউজার ওপেন করা
             browser = await p.chromium.launch(
                 headless=True, 
                 args=[
@@ -416,36 +414,37 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     state["first_bet"] = True 
     
-    # 💡 আপনার স্ক্রিনশটের মতো হুবহু প্লেইন টেক্সট, এবং লাইন ব্রেকগুলো ঠিক করা হয়েছে
-    welcome_text = """🧠 BD=DK WIN~GO=AUTO~BET 💥
-━━━━━━━━━━━━━━━━━━━━━━━
-🧠 Mode    : Auto Analyse & bet
-🔐 Access  : Private · Authorized
-Members
-🔴 Status  : Not Logged In
-👥 Accounts: 0/6
-━━━━━━━━━━━━━━━━━━━━━━━
-🧠 Prediction Engine — 9 Layers
-⚡ Streak · 🔷 Pattern · 📈 Trend
-🔍 Manipulation · 🎨 Colour · 🔢
-Frequency
-🔄 Markov · ♻️ Cycle · 💠
-Momentum
-🔁 Every layer is back-tested live so
-its vote
-weight follows its real hit-rate
-🔴 Confidence below 30% → sit
-out
-━━━━━━━━━━━━━━━━━━━━━━━
-🎬 4-second 🧠 generating
-prediction animation
-🚀 Analysis → auto bet every 30s
-period
-━━━━━━━━━━━━━━━━━━━━━━━
-
-👇 Press the button below to
-LOGIN"""
-    
+    # 💡 আপনার স্ক্রিনশটের মতো হুবহু প্লেইন টেক্সট (কোনো মার্কডাউন নেই)
+    welcome_text = (
+        "🧠 BD=DK WIN~GO=AUTO~BET 💥\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 Mode    : Auto Analyse & bet\n"
+        "🔐 Access  : Private · Authorized\n"
+        "Members\n"
+        "🔴 Status  : Not Logged In\n"
+        f"👥 Accounts: {len(state['accounts'])}/6\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 Prediction Engine — 9 Layers\n"
+        "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
+        "🔍 Manipulation · 🎨 Colour · 🔢\n"
+        "Frequency\n"
+        "🔄 Markov · ♻️ Cycle · 💠\n"
+        "Momentum\n"
+        "🔁 Every layer is back-tested live so\n"
+        "its vote\n"
+        "weight follows its real hit-rate\n"
+        "🔴 Confidence below 30% → sit\n"
+        "out\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🎬 4-second 🧠 generating\n"
+        "prediction animation\n"
+        "🚀 Analysis → auto bet every 30s\n"
+        "period\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "\n"
+        "👇 Press the button below to\n"
+        "LOGIN"
+    )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
     await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
