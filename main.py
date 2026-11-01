@@ -11,9 +11,9 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন
+# ১. কনফিগারেশন (Render Environment Variable থেকে টোকেন নিবে)
 # ═══════════════════════════════════════════
-BOT_TOKEN = "এখানে_আপনার_টেলিগ্রাম_বট_টোকেন_বসান" 
+BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 SITE_URL = "https://dkwin1.com/#/login"
 HOME_URL = "https://dkwin1.com/#/"
 WIN_GO_URL = "https://dkwin1.com/#/WinGo_30S"
@@ -136,7 +136,7 @@ async def get_history_and_prediction_async():
     return await asyncio.to_thread(get_history_and_prediction_sync)
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন
+# ৩. লগইন এবং অটো-বেট ফাংশন (Render Linux Server)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -154,28 +154,30 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        # মোবাইলের জন্য স্টেলথ মোড
+        # Render (Linux) এ headless=True থাকতে হবে
         browser = await p.chromium.launch(
             headless=True, 
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage"
+                "--disable-dev-shm-usage",
+                "--disable-gpu"
             ]
         ) 
         
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-            viewport={"width": 412, "height": 915},
-            is_mobile=True,
-            has_touch=True,
-            locale="en-US"
+            user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            viewport={"width": 1280, "height": 800},
+            locale="en-US",
+            timezone_id="Asia/Dhaka"
         )
         
         await context.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
             window.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
         """)
         
         page = await context.new_page()
@@ -183,34 +185,28 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         try:
             # ---------------- ১. ফাস্ট লগইন ----------------
             await update_loading(10)
-            await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000) # ভিউ লোড হওয়ার জন্য একটু অপেক্ষা
+            await page.goto(SITE_URL, timeout=60000, wait_until="networkidle")
+            await page.wait_for_timeout(5000) 
 
-            # ক্যাপচা চেক
             page_text = await page.inner_text("body")
-            if "Why have I been blocked?" in page_text:
-                await ctx.bot.send_message(chat_id=uid, text="❌ **সাইট ব্লক করেছে!**\nআপনার মোবাইল ডাটা অন/অফ করে বা VPN দিয়ে আবার চেষ্টা করুন।")
+            if "Why have I been blocked?" in page_text or "Attention Required!" in page_text:
+                await ctx.bot.send_message(chat_id=uid, text="❌ **সাইট ব্লক করেছে!**\nRender-এর আইপি Cloudflare ব্লক করেছে। দয়া করে লোকাল পিসিতে রান করুন।")
                 await browser.close()
                 return
 
             await update_loading(30)
-            # 💡 ফাস্ট ইনপুট: সরাসরি fill() ব্যবহার করে নাম্বার ও পাসওয়ার্ড বসানো
-            await page.locator('input[type="text"]').first.fill(login_phone)
+            await page.locator('input[type="text"], input[type="tel"]').first.fill(login_phone)
             await page.locator('input[type="password"]').first.fill(password)
             
             await update_loading(50)
-            # 💡 ফাস্ট ক্লিক: সরাসরি হলুদ লগইন বাটনে ক্লিক
             await page.locator('button, .van-button').filter(has_text=re.compile(r"^Log in$", re.IGNORECASE)).last.click(force=True)
             
-            # লগইন প্রসেস হওয়ার জন্য অপেক্ষা
             await update_loading(70)
             await page.wait_for_timeout(3000) 
             
-            # পপআপ ক্লোজ (যদি থাকে)
             await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
 
             await update_loading(85)
-            # অ্যাকাউন্ট পেজে যাওয়া (ব্যালেন্স চেকের জন্য)
             await page.evaluate("""() => { for(let el of document.querySelectorAll('div, span, a')) { if(el.innerText && el.innerText.trim().toLowerCase() === 'account') { el.click(); return true; } } }""")
             await page.wait_for_timeout(2000) 
 
@@ -219,7 +215,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             uid_val = "Unknown"
             balance = "0.00"
 
-            # UID এবং ব্যালেন্স এক্সট্রাক্ট করা
             page_text = await page.inner_text("body")
             uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
             balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
@@ -244,7 +239,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             state["balance"] = float(balance)
             masked_phone = f"***{phone[-4:]}"
             
-            # 💡 ড্যাশবোর্ড মেসেজ (হুবহু আপনার ফরম্যাটে)
             dashboard_msg = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -261,22 +255,18 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]]
             await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
 
-            # ইউজার টার্গেট এবং স্টেপ সেট করা পর্যন্ত অপেক্ষা
             while not state.get("trade_running", False):
                 await asyncio.sleep(1)
                 if state.get("task") != asyncio.current_task():
                     await browser.close()
                     return
 
-            # ---------------- ২. WinGo পেজে যাওয়া (ফাস্ট) ----------------
-            logger.info("Navigating to WinGo page...")
+            # ---------------- ২. WinGo পেজে যাওয়া ----------------
             await page.goto(WIN_GO_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(3000) 
             
-            # গেম পেজ চেক
             body_text = await page.evaluate("() => document.body.innerText")
             if "Time remaining" not in body_text and "WinGo" not in body_text:
-                # যদি সরাসরি না যায়, তবে হোম থেকে ক্লিক
                 await page.goto(HOME_URL, timeout=60000)
                 await page.wait_for_timeout(2000)
                 await page.locator('text="Lottery"').first.click(timeout=5000, force=True)
@@ -306,7 +296,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "🧠 _AI Engine: NovaBrainV7_"
             ), parse_mode="Markdown")
 
-            # ---------------- ৩. মেইন বেটিং লুপ ----------------
             while state["trade_running"]:
                 try:
                     current_bal = state["balance"]
@@ -319,7 +308,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     bet_amount = float(state['step_amounts'][current_step_idx])
                     choice, current_period = await get_history_and_prediction_async()
 
-                    # টাইমার চেক
                     timer_found = False
                     for _ in range(400): 
                         try:
@@ -333,7 +321,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     if not timer_found: continue 
 
-                    # Big/Small ক্লিক
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(200)
                     
@@ -349,23 +336,20 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     """
                     await page.evaluate(js_click)
 
-                    # Amount বসানো
                     inputs = await page.locator('input[type="text"], input[type="number"]').all()
                     for inp in inputs:
                         if await inp.is_visible():
                             await inp.fill(str(int(bet_amount)))
                             break
 
-                    # Confirm Bet
                     for _ in range(10): 
                         if await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span')) { if(el.innerText && el.innerText.toLowerCase().includes('total amount')) { el.click(); return true; } } return false; }"""): 
                             break
                         await page.wait_for_timeout(500)
 
                     await page.wait_for_timeout(2000)
-                    
-                    # ব্যালেন্স আপডেট
                     await page.wait_for_timeout(3000)
+                    
                     new_page_text = await page.evaluate("() => document.body.innerText")
                     new_bal_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
                     
@@ -404,7 +388,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await browser.close()
 
 # ═══════════════════════════════════════════
-# ৪. হ্যান্ডলারগুলো (হুবহু আপনার আগের মতো)
+# ৪. হ্যান্ডলারগুলো
 # ═══════════════════════════════════════════
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -620,8 +604,8 @@ async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("🔄 সব ডেটা রিসেট হয়েছে। /start দিন।")
 
 def main():
-    if not BOT_TOKEN or BOT_TOKEN == "এখানে_আপনার_টেলিগ্রাম_বট_টোকেন_বসান":
-        print("❌ Error: BOT_TOKEN সেট করা নেই! কোডের ভেতরে টোকেন বসান।")
+    if not BOT_TOKEN:
+        print("❌ Error: Render Environment Variable-এ BOT_TOKEN সেট করা নেই!")
         return
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
