@@ -10,11 +10,11 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন
+# ১. কনফিগারেশন (নতুন সাইট লিংক)
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-SITE_URL = "https://dkwwin.com/#/login"
-HOME_URL = "https://dkwwin.com/#/"
+SITE_URL = "https://dkwin8.com/#/login"
+HOME_URL = "https://dkwin8.com/#/"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -114,7 +114,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(30)
             try:
-                # মানুষের মতো ধীরে ধীরে টাইপ করা
+                # মানুষের মতো ধীরে ধীরে টাইপ করা (React/Vue এর জন্য জরুরি)
                 phone_input = page.locator('input[type="text"], input[type="tel"]').first
                 await phone_input.wait_for(state="visible", timeout=20000)
                 await phone_input.click()
@@ -131,6 +131,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 logger.error(f"Input fill error: {e}")
 
             await update_loading(50)
+            # লগইন বাটনে ক্লিক
             try:
                 await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000, force=True)
             except:
@@ -170,6 +171,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(85)
             try:
+                # Account পেজে ক্লিক
                 await page.evaluate("""
                     (function() {
                         let elements = document.querySelectorAll('div, span, a, p');
@@ -772,7 +774,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
             "╚════════════════════════╝\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "📱 Enter your DKWIN phone number:\n"
+            "📱 Enter your DKWIN8 phone number:\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "Everyone uses their own account — your session is private."
         )
