@@ -99,7 +99,18 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"]) 
+        # 💡 GPU এবং Memory Fix: সার্ভারে কালো স্ক্রিন আটকানোর জন্য
+        browser = await p.chromium.launch(
+            headless=True, 
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox", 
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--use-gl=swiftshader"
+            ]
+        ) 
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
             viewport={"width": 412, "height": 915}
@@ -109,11 +120,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         try:
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
-            await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
+            await page.goto(SITE_URL, timeout=60000, wait_until="networkidle")
             await page.wait_for_timeout(5000)
 
-            # 💡 ধাপ ১: লাল বাটনে ক্লিক (Dk Win Login) - স্ক্রিনশট ২
             await update_loading(20)
+            # ধাপ ১: লাল বাটনে ক্লিক (Dk Win Login)
             try:
                 red_btn = page.locator('text="Dk Win Login"').first
                 if await red_btn.count() > 0 and await red_btn.is_visible():
@@ -125,8 +136,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             except Exception as e:
                 logger.error(f"Red button error: {e}")
 
-            # 💡 ধাপ ২: "I have an account Login" এ ক্লিক - স্ক্রিনশট ৩
             await update_loading(30)
+            # ধাপ ২: "I have an account Login" এ ক্লিক
             try:
                 acc_btn = page.locator('text="I have an account"').first
                 if await acc_btn.count() > 0 and await acc_btn.is_visible():
@@ -138,10 +149,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             except Exception as e:
                 logger.error(f"Account btn error: {e}")
 
-            # 💡 ধাপ ৩: ফোন এবং পাসওয়ার্ড বসানো - স্ক্রিনশট ৪
             await update_loading(40)
+            # ধাপ ৩: ফোন এবং পাসওয়ার্ড বসানো
             try:
-                # মানুষের মতো ধীরে ধীরে টাইপ করা
                 phone_input = page.locator('input[type="text"], input[type="tel"]').first
                 await phone_input.wait_for(state="visible", timeout=20000)
                 await phone_input.click()
@@ -178,7 +188,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
             
             await update_loading(70)
-            await page.wait_for_timeout(6000)
+            await page.wait_for_timeout(7000) # সাইট রেসপন্স করার জন্য অপেক্ষা
 
             # পপআপ ক্লোজ
             for _ in range(15):
@@ -196,8 +206,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 """)
                 await page.wait_for_timeout(500)
 
-            # 💡 ধাপ ৪: Account পেজে ক্লিক - স্ক্রিনশট ৫
             await update_loading(85)
+            # ধাপ ৪: Account পেজে ক্লিক
             try:
                 account_tab = page.get_by_text("Account", exact=True).last
                 if await account_tab.count() > 0 and await account_tab.is_visible():
@@ -246,10 +256,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
 
+            # 💡 কালো স্ক্রিন এড়াতে স্ক্রিনশট নেওয়ার আগে বাড়তি ৩ সেকেন্ড অপেক্ষা
+            await page.wait_for_timeout(3000) 
+
             # লগইন ফেইল করলে স্ক্রিনশট পাঠানো
             if login_status == "failed" or uid_val == "Unknown":
                 err_ss = f"login_fail_{uid}.png"
-                await page.screenshot(path=err_ss)
+                await page.screenshot(path=err_ss, full_page=True) # full_page=True দিলে পুরো পেজ ক্যাপচার হবে
                 await ctx.bot.send_photo(
                     chat_id=uid, 
                     photo=open(err_ss, 'rb'), 
@@ -291,7 +304,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             current_step_idx = 0
             
             logger.info("Navigating to WinGo page...")
-            await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
+            await page.goto(HOME_URL, timeout=60000, wait_until="networkidle")
             await page.wait_for_timeout(5000) 
             
             nav_success = False
