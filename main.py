@@ -181,7 +181,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         browser = await p.chromium.launch(
             headless=True, 
             args=launch_args,
-            proxy=proxy_settings  # প্রক্সি যুক্ত হলো
+            proxy=proxy_settings
         ) 
         
         context = await browser.new_context(
@@ -636,4 +636,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
-                    await ctx.bot
+                    await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **TRADE STOPPED**\nError: {str(e)[:50]}")
+                    state["trade_running"] = False
+                    break
+                    
+        except Exception as e
