@@ -10,11 +10,11 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন (নতুন সাইট লিংক)
+# ১. কনফিগারেশন (নতুন সাইট লিংক: dkwin0.com)
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-SITE_URL = "https://dkwin8.com/#/login"
-HOME_URL = "https://dkwin8.com/#/"
+SITE_URL = "https://dkwin0.com/#/login"
+HOME_URL = "https://dkwin0.com/#/"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -81,7 +81,7 @@ def get_history_and_prediction():
         return random.choice(["BIG", "SMALL"]), fallback_period
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন
+# ৩. লগইন এবং অটো-বেট ফাংশন (Anti-Bot Stealth)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -99,39 +99,61 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"]) 
+        # 💡 রোবট ডিটেক্ট এড়াতে বাড়তি আর্গুমেন্ট
+        browser = await p.chromium.launch(
+            headless=True, 
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-infobars",
+                "--window-position=0,0",
+                "--ignore-certificate-errors",
+                "--ignore-certificate-errors-spki-list"
+            ]
+        ) 
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
-            viewport={"width": 412, "height": 915}
+            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+            viewport={"width": 412, "height": 915},
+            device_scale_factor=3,
+            is_mobile=True,
+            has_touch=True
         )
+        
+        # 💡 navigator.webdriver হাইড করার স্ক্রিপ্ট
+        await context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        """)
+
         page = await context.new_page()
         
         try:
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(5000)
+            await page.wait_for_timeout(6000) # মানুষের মতো অপেক্ষা করা
 
             await update_loading(30)
             try:
-                # মানুষের মতো ধীরে ধীরে টাইপ করা (React/Vue এর জন্য জরুরি)
+                # মানুষের মতো ধীরে ধীরে টাইপ করা
                 phone_input = page.locator('input[type="text"], input[type="tel"]').first
                 await phone_input.wait_for(state="visible", timeout=20000)
                 await phone_input.click()
                 await phone_input.fill("")
-                await phone_input.type(login_phone, delay=100)
-                await page.wait_for_timeout(500)
+                await phone_input.type(login_phone, delay=120)
+                await page.wait_for_timeout(800)
                 
                 pass_input = page.locator('input[type="password"]').first
                 await pass_input.click()
                 await pass_input.fill("")
-                await pass_input.type(password, delay=100)
-                await page.wait_for_timeout(1000)
+                await pass_input.type(password, delay=120)
+                await page.wait_for_timeout(1200)
             except Exception as e:
                 logger.error(f"Input fill error: {e}")
 
             await update_loading(50)
-            # লগইন বাটনে ক্লিক
             try:
                 await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000, force=True)
             except:
@@ -151,7 +173,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
             
             await update_loading(70)
-            await page.wait_for_timeout(5000) # সাইট রেসপন্স করার জন্য অপেক্ষা
+            await page.wait_for_timeout(6000) # সাইট রেসপন্স করার জন্য অপেক্ষা
 
             # পপআপ ক্লোজ
             for _ in range(15):
@@ -171,7 +193,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(85)
             try:
-                # Account পেজে ক্লিক
                 await page.evaluate("""
                     (function() {
                         let elements = document.querySelectorAll('div, span, a, p');
@@ -221,7 +242,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await ctx.bot.send_photo(
                     chat_id=uid, 
                     photo=open(err_ss, 'rb'), 
-                    caption=f"❌ **LOGIN FAILED** ({phone})\n\nসম্ভবত পাসওয়ার্ড ভুল অথবা বট ক্যাপচা ধরতে পারছে না। নিচের স্ক্রিনশটে দেখুন সাইটে কী লেখা আছে।"
+                    caption=f"❌ **LOGIN FAILED** ({phone})\n\nসম্ভবত পাসওয়ার্ড ভুল অথবা সাইট বটকে ডিটেক্ট করেছে। নিচের স্ক্রিনশটে দেখুন সাইটে কী লেখা আছে।"
                 )
                 try: os.remove(err_ss)
                 except: pass
@@ -548,7 +569,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
-                    # 💡 বেটিং লুপে আটকে গেলে স্ক্রিনশট
                     err_ss = f"bet_fail_{uid}.png"
                     try:
                         await page.screenshot(path=err_ss)
@@ -569,7 +589,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
             
-            # 💡 ব্রাউজারে বড় এরর হলে স্ক্রিনশট
             try:
                 err_ss = f"browser_fail_{uid}.png"
                 await page.screenshot(path=err_ss)
@@ -774,7 +793,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
             "╚════════════════════════╝\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "📱 Enter your DKWIN8 phone number:\n"
+            "📱 Enter your DKWIN0 phone number:\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "Everyone uses their own account — your session is private."
         )
