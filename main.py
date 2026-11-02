@@ -125,7 +125,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
             await update_loading(70)
-            # পপআপ ক্লোজ
             for _ in range(10):
                 await page.evaluate("""
                     (function() {
@@ -516,8 +515,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 # হ্যান্ডলারগুলো
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    state = get_state(uid)
-    state["first_bet"] = True 
+    
+    # 💡 এখানে স্টেট রিসেট করা হয়েছে যাতে ওয়েলকাম মেসেজ নিশ্চিত আসে
+    user_state[uid] = {
+        "awaiting": None, "temp_phone": "", "temp_password": "",
+        "accounts": [], "balance": "0.00", "target": 0, 
+        "steps": 0, "step_amounts": [], "current_step": 0,
+        "trade_running": False, "task": None,
+        "wins": 0, "losses": 0, "total_trades": 0,
+        "first_bet": True
+    }
+    state = user_state[uid]
     
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
@@ -664,16 +672,3 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     f"🏦 Stop At  : ৳ {stop_at:.2f}\n"
                     f"📋 Steps    : {state['steps']}\n"
                     f"⚠️ Total Risk : ৳ {total_risk:.2f}\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    "📊 STEP PLAN\n"
-                    f"{step_plan_text}"
-                    "\n"
-                    "👇 Press START TRADE to begin."
-                )
-                inline_kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🚀 START TRADE", callback_data="start_trade_btn"), 
-                     InlineKeyboardButton("❌ CANCEL", callback_data="cancel_trade_btn")]
-                ])
-                await update.message.reply_text(combined_msg, reply_markup=inline_kb)
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 1)।
