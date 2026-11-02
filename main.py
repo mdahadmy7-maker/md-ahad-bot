@@ -25,6 +25,7 @@ PROXY_URL = os.environ.get("PROXY_URL", "")
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Render পোর্ট এরর ফিক্স
 web_app = Flask(__name__)
 @web_app.route('/')
 def health_check():
@@ -49,7 +50,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ───────────────────────────────────────────
-# 💡 ২. NovaBrainV7 প্রেডিকশন লজিক
+# ২. NovaBrainV7 প্রেডিকশন লজিক
 # ───────────────────────────────────────────
 def markov_predict(sizes, order=2):
     if len(sizes) < order + 1: return {"Big": 0.5, "Small": 0.5}
@@ -180,7 +181,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         browser = await p.chromium.launch(
             headless=True, 
             args=launch_args,
-            proxy=proxy_settings
+            proxy=proxy_settings  # প্রক্সি যুক্ত হলো
         ) 
         
         context = await browser.new_context(
@@ -327,7 +328,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 WinGo তে যাওয়ার সঠিক পথ
+                    # WinGo তে যাওয়ার সঠিক পথ
                     await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
                     await page.wait_for_timeout(2500) 
 
@@ -397,7 +398,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         """)
                         await page.wait_for_timeout(500)
 
-                    # 💡 ১. টাইমার 00:00 হওয়া পর্যন্ত অপেক্ষা করা
+                    # ১. টাইমার 00:00 হওয়া পর্যন্ত অপেক্ষা করা
                     logger.info("Waiting for current round to end (00:00)...")
                     for _ in range(40): 
                         try:
@@ -407,7 +408,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except: pass
                         await asyncio.sleep(1)
                     
-                    # 💡 ২. নতুন রাউন্ড শুরু হওয়ার জন্য অপেক্ষা করা (বাটন চালু হওয়া পর্যন্ত)
+                    # ২. নতুন রাউন্ড শুরু হওয়ার জন্য অপেক্ষা করা (বাটন চালু হওয়া পর্যন্ত)
                     logger.info("Waiting for new round to start...")
                     await page.wait_for_timeout(3000) # ৩ সেকেন্ড বাফার
 
@@ -425,7 +426,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
                     step_plan_str += "└────────────────────────────────┘"
 
-                    # 💡 ৩. প্রথমবার AUTO TRADE ACTIVE মেসেজ
+                    # ৩. প্রথমবার AUTO TRADE ACTIVE মেসেজ
                     pred_msg = None
                     if state.get("first_bet", True):
                         await ctx.bot.send_message(chat_id=uid, text=(
@@ -467,7 +468,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     
                     state["first_bet"] = False 
 
-                    # 💡 ৪. Big/Small ক্লিক করা
+                    # ৪. Big/Small ক্লিক করা
                     clicked = False
                     try:
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
@@ -500,7 +501,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except Exception as coord_e:
                             logger.error(f"Coordinate click failed: {coord_e}")
 
-                    # 💡 ৫. Confirm বাটন খোঁজা এবং ক্লিক করা
+                    # ৫. Confirm বাটন খোঁজা এবং ক্লিক করা
                     confirm_success = False
                     for _ in range(6):
                         try:
@@ -524,7 +525,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
-                    # 💡 ৬. ANALYSIS REPORT মেসেজ
+                    # ৬. ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
@@ -635,4 +636,4 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
-                    await ctx.bot.send_message(chat_id
+                    await ctx.bot
