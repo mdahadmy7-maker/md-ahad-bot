@@ -10,11 +10,12 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন
+# ১. কনফিগারেশন (নতুন সাইট অনুযায়ী আপডেট করা হয়েছে)
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 SITE_URL = "https://dkwin8.com/#/login"
-HOME_URL = "http://dkwin8.com"
+HOME_URL = "https://dkwin8.com/#/"
+# নোট: সাইট পরিবর্তন হলে API-ও পরিবর্তন হতে পারে। যদি WinGo 30S API ভিন্ন হয়, তবে নিচের লিঙ্কটি আপডেট করতে হবে।
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -94,7 +95,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         try:
             await ctx.bot.edit_message_text(
                 chat_id=uid, message_id=loading_msg_id, 
-                text=f"🔄 **CONNECTING TO HGNICE**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
+                text=f"🔄 **CONNECTING TO DK8**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
             )
         except: pass
 
@@ -113,16 +114,29 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await page.wait_for_timeout(3000)
 
             await update_loading(30)
+            # স্ক্রিনশট অনুযায়ী নতুন লগইন ফিল্ড সিলেক্টর (প্লেসহোল্ডার বা ইনপুট টাইপ দিয়ে)
             try:
-                await page.get_by_placeholder("Please enter the phone number").fill(login_phone)
-                await page.locator('input[type="password"]').first.fill(password)
-            except: pass
+                # ফোন নাম্বার ফিল্ড
+                phone_input = page.locator('input[type="text"], input[type="tel"], input[placeholder*="Phone"]').first
+                await phone_input.fill(login_phone)
+                
+                # পাসওয়ার্ড ফিল্ড
+                pass_input = page.locator('input[type="password"]').first
+                await pass_input.fill(password)
+            except Exception as e:
+                logger.error(f"Input fill error: {e}")
 
             await update_loading(50)
+            # লগইন বাটনে ক্লিক
             try:
+                # স্ক্রিনশটে বাটনের নাম "Log in"
                 await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000)
             except:
-                await page.locator('button:has-text("Log in")').last.click(timeout=10000)
+                try:
+                    await page.locator('button:has-text("Log in")').last.click(timeout=10000)
+                except:
+                    # যদি বাটন না পাওয়া যায়, তবে সরাসরি টেক্সট দিয়ে ক্লিক
+                    await page.locator('text="Log in"').last.click(timeout=10000)
             
             await update_loading(70)
             for _ in range(10):
@@ -162,7 +176,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             for _ in range(10): 
                 page_text = await page.inner_text("body")
-                if "Wrong account or password" in page_text:
+                if "Wrong account or password" in page_text or "incorrect" in page_text.lower():
                     login_status = "failed"
                     break
                 
@@ -317,7 +331,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
                             
-                            # 0 0 থাকলে অপেক্ষা করবে, ক্লিক করবে না
                             if "0 0" in body_text:
                                 await asyncio.sleep(0.1)
                                 continue
@@ -325,7 +338,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             match = re.search(r'0\s*0\s*:\s*(\d{2})', body_text)
                             if match:
                                 sec = int(match.group(1))
-                                # 00 চলে যাওয়ার পর টাইমার ২৫-২৯ হলে তখনই ক্লিক করবে
                                 if 25 <= sec <= 29: 
                                     timer_val = f"{sec}s"
                                     break
@@ -372,10 +384,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 await page.mouse.click(309, 890)
                         except: pass
 
-                    # 💡 ৩. মডাল ওপেন হওয়া পর্যন্ত অপেক্ষা
                     await page.wait_for_timeout(1000)
 
-                    # 💡 ৪. সরাসরি "Total amount" বাটনে ক্লিক করা (কোনো এমাউন্ট টাইপিং নেই)
                     js_confirm_bet = """
                     (() => {
                         for(let el of document.querySelectorAll('span, div, label')) {
@@ -408,7 +418,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 await confirm_btn.click(timeout=2000, force=True)
                         except: pass
 
-                    # 💡 ৫. সফলভাবে বিট হওয়ার পর স্ক্রিনশট
                     await page.wait_for_timeout(2000)
                     proof_path = f"proof_success_{uid}.png"
                     await page.screenshot(path=proof_path)
@@ -433,7 +442,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
-                    # 💡 ৬. রেজাল্টের জন্য অপেক্ষা (0 0 আসা পর্যন্ত)
                     for _ in range(350):
                         body_text = await page.evaluate("() => document.body.innerText")
                         if "0 0" in body_text:
@@ -442,7 +450,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     await page.wait_for_timeout(2000)
 
-                    # 💡 ৭. উপরে স্ক্রল করে Wallet balance চেক করা
                     logger.info("Checking result...")
                     await page.evaluate("window.scrollTo(0, 0);")
                     await page.wait_for_timeout(1500) 
@@ -504,7 +511,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 f"{next_step_txt}"
                             ))
 
-                    # 💡 ৮. আবার নিচে স্ক্রল করে গেমে ফিরে আসা
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(1500)
 
@@ -529,7 +535,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state["first_bet"] = True 
     
     welcome_text = (
-        "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
+        "🧠 **DK8~WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🧠 Mode    : Auto Analyse & bet\n"
         "🔐 Access  : Private · Authorized Members\n"
@@ -578,7 +584,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         
         if state.get("task"): state["task"].cancel()
         state["first_bet"] = True 
-        loading_msg = await update.message.reply_text("🔄 **CONNECTING TO HGNICE**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
+        loading_msg = await update.message.reply_text("🔄 **CONNECTING TO DK8**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
         state["task"] = asyncio.create_task(playwright_login_and_bet(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"]))
         return
         
@@ -678,75 +684,3 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     f"{step_plan_text}"
                     "\n"
                     "👇 Press START TRADE to begin."
-                )
-                inline_kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🚀 START TRADE", callback_data="start_trade_btn"), 
-                     InlineKeyboardButton("❌ CANCEL", callback_data="cancel_trade_btn")]
-                ])
-                await update.message.reply_text(combined_msg, reply_markup=inline_kb)
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 1)।")
-        return
-
-    if text == "🛑 STOP TRADE":
-        state["trade_running"] = False
-        await update.message.reply_text("🛑 TRADE STOPPED")
-        return
-    if text == "🚪 LOGOUT":
-        state["trade_running"] = False
-        state["temp_phone"] = ""
-        state["temp_password"] = ""
-        await update.message.reply_text("🚪 LOGGED OUT")
-        return
-
-async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    uid = update.effective_user.id
-    state = get_state(uid)
-    data = query.data
-    if data == "start_login":
-        state["awaiting"] = "phone"
-        login_msg = (
-            "╔════════════════════════╗\n"
-            "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
-            "╚════════════════════════╝\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "📱 Enter your HGNICE phone number:\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Everyone uses their own account — your session is private."
-        )
-        await ctx.bot.send_message(chat_id=uid, text=login_msg)
-    elif data == "start_trade_btn":
-        state["trade_running"] = True
-    elif data == "cancel_trade_btn":
-        state["trade_running"] = False
-        await query.edit_message_text("❌ **TRADE CANCELLED**")
-
-async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    state = get_state(uid)
-    state["trade_running"] = False
-    if state.get("task"): state["task"].cancel()
-    user_state[uid] = {
-        "awaiting": None, "temp_phone": "", "temp_password": "",
-        "accounts": [], "balance": "0.00", "target": 0, 
-        "steps": 0, "step_amounts": [], "current_step": 0, "trade_running": False, "task": None,
-        "wins": 0, "losses": 0, "total_trades": 0, "first_bet": True
-    }
-    await update.message.reply_text("🔄 সব ডেটা রিসেট হয়েছে। /start দিন।")
-
-def main():
-    if not BOT_TOKEN:
-        print("❌ Error: BOT_TOKEN সেট করা নেই!")
-        return
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("reset", cmd_reset))
-    app.add_handler(CallbackQueryHandler(callback_handler))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    print("🤖 Bot started...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
