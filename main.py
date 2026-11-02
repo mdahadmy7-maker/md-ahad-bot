@@ -13,8 +13,8 @@ from playwright.async_api import async_playwright
 # ১. কনফিগারেশন
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-SITE_URL = "https://www.hgnice.vip/#/login"
-HOME_URL = "https://www.hgnice.vip/#/"
+SITE_URL = "https://dkwin8.com/#/login"
+HOME_URL = "http://dkwin8.com"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
