@@ -110,20 +110,40 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(4000)
+            await page.wait_for_timeout(5000) # ৫ সেকেন্ড অপেক্ষা করবে পেজ লোড হওয়ার জন্য
 
             await update_loading(30)
             try:
-                # ফোন নাম্বার এবং পাসওয়ার্ড
-                await page.locator('input[type="text"], input[type="tel"]').first.fill(login_phone)
-                await page.locator('input[type="password"]').first.fill(password)
-            except: pass
+                # ইনপুট ফিল্ডগুলো খুঁজে বের করা
+                phone_input = page.locator('input[type="text"], input[type="tel"]').first
+                await phone_input.wait_for(state="visible", timeout=20000)
+                await phone_input.fill(login_phone)
+                await page.wait_for_timeout(500)
+                
+                pass_input = page.locator('input[type="password"]').first
+                await pass_input.fill(password)
+                await page.wait_for_timeout(1000)
+            except Exception as e:
+                logger.error(f"Input fill error: {e}")
 
             await update_loading(50)
+            # জাভাস্ক্রিপ্ট দিয়ে সরাসরি Log in বাটনে ক্লিক (সবচেয়ে নিরাপদ পদ্ধতি)
             try:
-                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000)
+                await page.evaluate("""
+                    () => {
+                        let elements = document.querySelectorAll('button, div, span, a');
+                        for (let el of elements) {
+                            let text = (el.innerText || el.textContent || '').trim().toLowerCase();
+                            if (text === 'log in' || text === 'login') {
+                                el.click();
+                                return true;
+                            }
+                        }
+                        return false;
+                    }
+                """)
             except:
-                await page.locator('button:has-text("Log in")').last.click(timeout=10000)
+                pass
             
             await update_loading(70)
             # পপআপ ক্লোজ (Confirm, Receive, Close)
@@ -144,9 +164,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(85)
             try:
+                # Account পেজে ক্লিক
                 await page.evaluate("""
                     (function() {
-                        let elements = document.querySelectorAll('div, span, a');
+                        let elements = document.querySelectorAll('div, span, a, p');
                         for (let el of elements) {
                             if (el.innerText && el.innerText.trim().toLowerCase() === 'account') {
                                 el.click(); return true;
@@ -168,7 +189,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     login_status = "failed"
                     break
                 
-                # UID এবং Balance খোঁজা
                 uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
                 balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
                 
@@ -188,7 +208,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
 
             if login_status == "failed" or uid_val == "Unknown":
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})")
+                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\nসাইট লোড হতে সমস্যা হয়েছে অথবা পাসওয়ার্ড ভুল।")
                 await browser.close()
                 return
 
@@ -224,7 +244,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             
             logger.info("Navigating to WinGo page...")
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(4000) 
+            await page.wait_for_timeout(5000) 
             
             nav_success = False
             for attempt in range(15):
