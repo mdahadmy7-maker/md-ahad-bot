@@ -2,8 +2,8 @@ import asyncio
 import logging
 import re
 import os
+import random
 import requests
-import json
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
@@ -21,6 +21,10 @@ logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=lo
 logger = logging.getLogger(__name__)
 
 user_state = {}
+
+# 💡 মানুষের মতো র‍্যান্ডম অপেক্ষা করার ফাংশন (বট ডিটেকশন এড়াতে)
+async def human_delay(min_s=0.8, max_s=1.5):
+    await asyncio.sleep(random.uniform(min_s, max_s))
 
 def get_state(uid):
     if uid not in user_state:
@@ -77,7 +81,6 @@ def get_history_and_prediction():
     except Exception as e:
         logger.error(f"History API error: {e}")
         fallback_period = datetime.now().strftime("%Y%m%d%H%M%S")
-        import random
         return random.choice(["BIG", "SMALL"]), fallback_period
 
 # ───────────────────────────────────────────
@@ -99,7 +102,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        # 💡 GPU এবং Memory Fix: সার্ভারে কালো স্ক্রিন আটকানোর জন্য
+        # 💡 GPU সমস্যা সমাধান ও স্পিড বাড়ানোর আর্গুমেন্ট
         browser = await p.chromium.launch(
             headless=True, 
             args=[
@@ -108,31 +111,45 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
-                "--use-gl=swiftshader"
+                "--use-gl=swiftshader", # কালো স্ক্রিন ঠিক করার জন্য
+                "--window-size=412,915"
             ]
         ) 
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
-            viewport={"width": 412, "height": 915}
+            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
+            viewport={"width": 412, "height": 915},
+            device_scale_factor=3,
+            is_mobile=True,
+            has_touch=True
         )
+        
+        # 💡 রোবট ডিটেকশন বাইপাস স্ক্রিপ্ট
+        await context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+            window.chrome = { runtime: {} };
+        """)
+
         page = await context.new_page()
         
         try:
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
-            await page.goto(SITE_URL, timeout=60000, wait_until="networkidle")
-            await page.wait_for_timeout(5000)
+            await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
+            # সাইট লোড হওয়ার জন্য স্মার্ট ওয়েট
+            try: await page.wait_for_load_state("networkidle", timeout=10000)
+            except: pass
 
             await update_loading(20)
             # ধাপ ১: লাল বাটনে ক্লিক (Dk Win Login)
             try:
                 red_btn = page.locator('text="Dk Win Login"').first
                 if await red_btn.count() > 0 and await red_btn.is_visible():
+                    await human_delay() # মানুষের মতো অপেক্ষা
                     await red_btn.click(force=True, timeout=10000)
-                    await page.wait_for_timeout(4000)
-                else:
-                    await page.evaluate("() => { for(let el of document.querySelectorAll('button, div, span, a')) { if((el.innerText||'').includes('Dk Win Login')) el.click(); } }")
-                    await page.wait_for_timeout(4000)
+                    try: await page.wait_for_load_state("networkidle", timeout=5000)
+                    except: pass
             except Exception as e:
                 logger.error(f"Red button error: {e}")
 
@@ -141,11 +158,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             try:
                 acc_btn = page.locator('text="I have an account"').first
                 if await acc_btn.count() > 0 and await acc_btn.is_visible():
+                    await human_delay()
                     await acc_btn.click(force=True, timeout=10000)
-                    await page.wait_for_timeout(4000)
-                else:
-                    await page.evaluate("() => { for(let el of document.querySelectorAll('button, div, span, a, p')) { if((el.innerText||'').includes('I have an account')) el.click(); } }")
-                    await page.wait_for_timeout(4000)
+                    try: await page.wait_for_load_state("networkidle", timeout=5000)
+                    except: pass
             except Exception as e:
                 logger.error(f"Account btn error: {e}")
 
@@ -154,22 +170,24 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             try:
                 phone_input = page.locator('input[type="text"], input[type="tel"]').first
                 await phone_input.wait_for(state="visible", timeout=20000)
+                await human_delay(0.5, 0.8)
                 await phone_input.click()
                 await phone_input.fill("")
-                await phone_input.type(login_phone, delay=100)
-                await page.wait_for_timeout(500)
+                await phone_input.type(login_phone, delay=150) # টাইপিং স্পিড
+                await human_delay(0.5, 1.0)
                 
                 pass_input = page.locator('input[type="password"]').first
                 await pass_input.click()
                 await pass_input.fill("")
-                await pass_input.type(password, delay=100)
-                await page.wait_for_timeout(1000)
+                await pass_input.type(password, delay=150)
+                await human_delay(0.5, 1.0)
             except Exception as e:
                 logger.error(f"Input fill error: {e}")
 
             await update_loading(50)
             # লগইন বাটনে ক্লিক
             try:
+                await human_delay()
                 await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000, force=True)
             except:
                 try:
@@ -188,7 +206,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
             
             await update_loading(70)
-            await page.wait_for_timeout(7000) # সাইট রেসপন্স করার জন্য অপেক্ষা
+            # লগইন রেসপন্সের জন্য অপেক্ষা
+            try: await page.wait_for_load_state("networkidle", timeout=10000)
+            except: pass
+            await human_delay(1.0, 2.0)
 
             # পপআপ ক্লোজ
             for _ in range(15):
@@ -204,13 +225,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         }
                     })();
                 """)
-                await page.wait_for_timeout(500)
+                await asyncio.sleep(0.5)
 
             await update_loading(85)
             # ধাপ ৪: Account পেজে ক্লিক
             try:
                 account_tab = page.get_by_text("Account", exact=True).last
                 if await account_tab.count() > 0 and await account_tab.is_visible():
+                    await human_delay()
                     await account_tab.click(force=True, timeout=10000)
                 else:
                     await page.evaluate("""
@@ -223,7 +245,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             }
                         })();
                     """)
-                await page.wait_for_timeout(5000) 
+                # একাউন্ট পেজ লোড হওয়ার জন্য অপেক্ষা
+                try: await page.wait_for_load_state("networkidle", timeout=8000)
+                except: pass
+                await human_delay(1.0, 1.5)
             except Exception as e:
                 logger.error(f"Account tab click error: {e}")
 
@@ -247,22 +272,22 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         balance = balance_match.group(1)
                     login_status = "success"
                     break
-                await page.wait_for_timeout(500)
+                await asyncio.sleep(0.5)
 
             await update_loading(100)
-            await asyncio.sleep(0.2)
+            await asyncio.sleep(0.5)
 
             if loading_msg_id:
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
 
-            # 💡 কালো স্ক্রিন এড়াতে স্ক্রিনশট নেওয়ার আগে বাড়তি ৩ সেকেন্ড অপেক্ষা
-            await page.wait_for_timeout(3000) 
+            # 💡 স্ক্রিনশট নেওয়ার আগে বাড়তি ২ সেকেন্ড অপেক্ষা (কালো স্ক্রিন রোধে)
+            await asyncio.sleep(2.0) 
 
             # লগইন ফেইল করলে স্ক্রিনশট পাঠানো
             if login_status == "failed" or uid_val == "Unknown":
                 err_ss = f"login_fail_{uid}.png"
-                await page.screenshot(path=err_ss, full_page=True) # full_page=True দিলে পুরো পেজ ক্যাপচার হবে
+                await page.screenshot(path=err_ss, animations="disabled") 
                 await ctx.bot.send_photo(
                     chat_id=uid, 
                     photo=open(err_ss, 'rb'), 
@@ -276,14 +301,19 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             state["balance"] = float(balance)
             masked_phone = f"***{phone[-4:]}"
             
+            # সফল হলে স্ক্রিনশট নেওয়া
+            success_ss = f"dash_{uid}.png"
+            await page.screenshot(path=success_ss, animations="disabled")
+            
+            await ctx.bot.send_photo(
+                chat_id=uid, 
+                photo=open(success_ss, 'rb'), 
+                caption=f"🎉 **LOGIN SUCCESSFUL**\n\n☎️ Phone: {masked_phone}\n👤 UID: `{uid_val}`\n💰 Balance: ৳ {balance}\n\n👇 নিচের স্ক্রিনশটে আপনার ড্যাশবোর্ড দেখুন।"
+            )
+            try: os.remove(success_ss)
+            except: pass
+
             dashboard_msg = (
-                "╔════════════════════════╗\n"
-                "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
-                "╚════════════════════════╝\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"☎️ Phone Number\n{masked_phone}\n\n"
-                f"👤 Account UID\n{uid_val}\n\n"
-                f"💰 Account Balance\n৳ {balance}\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "🧠 Analysis Engine:  READY\n"
                 "🚀 AutoTrade System: READY\n\n"
@@ -304,8 +334,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             current_step_idx = 0
             
             logger.info("Navigating to WinGo page...")
-            await page.goto(HOME_URL, timeout=60000, wait_until="networkidle")
-            await page.wait_for_timeout(5000) 
+            await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
+            try: await page.wait_for_load_state("networkidle", timeout=8000)
+            except: pass
             
             nav_success = False
             for attempt in range(15):
@@ -316,12 +347,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     break
                 
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span, a')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
-                await page.wait_for_timeout(500)
+                await asyncio.sleep(0.5)
                 
                 try:
                     await page.get_by_text("Lottery", exact=True).first.click(timeout=2000, force=True)
                 except: pass
-                await page.wait_for_timeout(1000)
+                await asyncio.sleep(1)
                 
                 try:
                     await page.get_by_text("WinGo 30sec", exact=True).first.click(timeout=2000, force=True)
@@ -329,7 +360,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     try:
                         await page.get_by_text("Win Go", exact=False).first.click(timeout=2000, force=True)
                     except: pass
-                await page.wait_for_timeout(2000)
+                await asyncio.sleep(2)
 
             if not nav_success:
                 await ctx.bot.send_message(chat_id=uid, text="❌ **গেম পেজে ঢুকতে সমস্যা হচ্ছে!** বট বন্ধ করা হচ্ছে।")
@@ -411,7 +442,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await asyncio.sleep(0.1)
 
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                    await page.wait_for_timeout(200)
+                    await asyncio.sleep(0.2)
                     
                     clicked = False
                     try:
@@ -449,7 +480,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 await page.mouse.click(309, 890)
                         except: pass
 
-                    await page.wait_for_timeout(1000)
+                    await asyncio.sleep(1)
 
                     js_confirm_bet = """
                     (() => {
@@ -483,9 +514,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 await confirm_btn.click(timeout=2000, force=True)
                         except: pass
 
-                    await page.wait_for_timeout(2000)
+                    await asyncio.sleep(2)
                     proof_path = f"proof_success_{uid}.png"
-                    await page.screenshot(path=proof_path)
+                    await page.screenshot(path=proof_path, animations="disabled")
                     
                     await ctx.bot.send_photo(
                         chat_id=uid, 
@@ -516,11 +547,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             break
                         await asyncio.sleep(0.2)
 
-                    await page.wait_for_timeout(2000)
+                    await asyncio.sleep(2)
 
                     logger.info("Checking result...")
                     await page.evaluate("window.scrollTo(0, 0);")
-                    await page.wait_for_timeout(1500) 
+                    await asyncio.sleep(1.5) 
                     
                     new_page_text = await page.evaluate("() => document.body.innerText")
                     new_balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', new_page_text, re.IGNORECASE)
@@ -580,7 +611,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             ))
 
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-                    await page.wait_for_timeout(1500)
+                    await asyncio.sleep(1.5)
 
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
