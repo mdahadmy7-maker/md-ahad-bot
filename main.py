@@ -110,43 +110,49 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(5000) # ৫ সেকেন্ড অপেক্ষা করবে পেজ লোড হওয়ার জন্য
+            await page.wait_for_timeout(5000)
 
             await update_loading(30)
             try:
-                # ইনপুট ফিল্ডগুলো খুঁজে বের করা
+                # মানুষের মতো ধীরে ধীরে টাইপ করা
                 phone_input = page.locator('input[type="text"], input[type="tel"]').first
                 await phone_input.wait_for(state="visible", timeout=20000)
-                await phone_input.fill(login_phone)
+                await phone_input.click()
+                await phone_input.fill("")
+                await phone_input.type(login_phone, delay=100)
                 await page.wait_for_timeout(500)
                 
                 pass_input = page.locator('input[type="password"]').first
-                await pass_input.fill(password)
+                await pass_input.click()
+                await pass_input.fill("")
+                await pass_input.type(password, delay=100)
                 await page.wait_for_timeout(1000)
             except Exception as e:
                 logger.error(f"Input fill error: {e}")
 
             await update_loading(50)
-            # জাভাস্ক্রিপ্ট দিয়ে সরাসরি Log in বাটনে ক্লিক (সবচেয়ে নিরাপদ পদ্ধতি)
             try:
-                await page.evaluate("""
-                    () => {
-                        let elements = document.querySelectorAll('button, div, span, a');
-                        for (let el of elements) {
-                            let text = (el.innerText || el.textContent || '').trim().toLowerCase();
-                            if (text === 'log in' || text === 'login') {
-                                el.click();
-                                return true;
-                            }
-                        }
-                        return false;
-                    }
-                """)
+                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000, force=True)
             except:
-                pass
+                try:
+                    await page.evaluate("""
+                        () => {
+                            let elements = document.querySelectorAll('button, div, span, a');
+                            for (let el of elements) {
+                                let text = (el.innerText || el.textContent || '').trim().toLowerCase();
+                                if (text === 'log in' || text === 'login') {
+                                    el.click(); return true;
+                                }
+                            }
+                            return false;
+                        }
+                    """)
+                except: pass
             
             await update_loading(70)
-            # পপআপ ক্লোজ (Confirm, Receive, Close)
+            await page.wait_for_timeout(5000) # সাইট রেসপন্স করার জন্য অপেক্ষা
+
+            # পপআপ ক্লোজ
             for _ in range(15):
                 await page.evaluate("""
                     (function() {
@@ -164,7 +170,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(85)
             try:
-                # Account পেজে ক্লিক
                 await page.evaluate("""
                     (function() {
                         let elements = document.querySelectorAll('div, span, a, p');
@@ -175,7 +180,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         }
                     })();
                 """)
-                await page.wait_for_timeout(3000) 
+                await page.wait_for_timeout(4000) 
             except: pass
 
             await update_loading(95)
@@ -185,7 +190,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             for _ in range(15): 
                 page_text = await page.inner_text("body")
-                if "Wrong account or password" in page_text:
+                if "Wrong account or password" in page_text or "incorrect" in page_text.lower():
                     login_status = "failed"
                     break
                 
@@ -207,8 +212,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
 
+            # 💡 লগইন ফেইল করলে স্ক্রিনশট পাঠানো
             if login_status == "failed" or uid_val == "Unknown":
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\nসাইট লোড হতে সমস্যা হয়েছে অথবা পাসওয়ার্ড ভুল।")
+                err_ss = f"login_fail_{uid}.png"
+                await page.screenshot(path=err_ss)
+                await ctx.bot.send_photo(
+                    chat_id=uid, 
+                    photo=open(err_ss, 'rb'), 
+                    caption=f"❌ **LOGIN FAILED** ({phone})\n\nসম্ভবত পাসওয়ার্ড ভুল অথবা বট ক্যাপচা ধরতে পারছে না। নিচের স্ক্রিনশটে দেখুন সাইটে কী লেখা আছে।"
+                )
+                try: os.remove(err_ss)
+                except: pass
                 await browser.close()
                 return
 
@@ -270,8 +284,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     except: pass
                 await page.wait_for_timeout(2000)
 
+            # 💡 গেম পেজ না পেলে স্ক্রিনশট
             if not nav_success:
-                await ctx.bot.send_message(chat_id=uid, text="❌ **গেম পেজে ঢুকতে সমস্যা হচ্ছে!** বট বন্ধ করা হচ্ছে।")
+                err_ss = f"game_fail_{uid}.png"
+                await page.screenshot(path=err_ss)
+                await ctx.bot.send_photo(
+                    chat_id=uid, 
+                    photo=open(err_ss, 'rb'), 
+                    caption="❌ **গেম পেজে ঢুকতে সমস্যা হচ্ছে!**\n\nবট WinGo পেজ খুঁজে পাচ্ছে না। নিচের স্ক্রিনশটে দেখুন সাইটে কী অবস্থা।"
+                )
+                try: os.remove(err_ss)
+                except: pass
                 state["trade_running"] = False
                 await browser.close()
                 return
@@ -523,7 +546,19 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                 except Exception as e:
                     logger.error(f"Betting error: {e}")
-                    await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **TRADE STOPPED**\nCould not place bet. Error: {str(e)[:50]}")
+                    # 💡 বেটিং লুপে আটকে গেলে স্ক্রিনশট
+                    err_ss = f"bet_fail_{uid}.png"
+                    try:
+                        await page.screenshot(path=err_ss)
+                        await ctx.bot.send_photo(
+                            chat_id=uid, 
+                            photo=open(err_ss, 'rb'), 
+                            caption=f"⚠️ **TRADE STOPPED**\n\nবট বেট দিতে গিয়ে আটকে গেছে। এরর: `{str(e)[:50]}`\n\nস্ক্রিনশট দেখুন ↓"
+                        )
+                        os.remove(err_ss)
+                    except:
+                        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **TRADE STOPPED**\nCould not place bet. Error: {str(e)[:50]}")
+                    
                     state["trade_running"] = False
                     break
                     
@@ -531,7 +566,19 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             if loading_msg_id:
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
-            await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **Browser Error:**\n`{str(e)[:150]}`", parse_mode="Markdown")
+            
+            # 💡 ব্রাউজারে বড় এরর হলে স্ক্রিনশট
+            try:
+                err_ss = f"browser_fail_{uid}.png"
+                await page.screenshot(path=err_ss)
+                await ctx.bot.send_photo(
+                    chat_id=uid, 
+                    photo=open(err_ss, 'rb'), 
+                    caption=f"⚠️ **Browser Error:**\n`{str(e)[:150]}`\n\nস্ক্রিনশট দেখুন ↓"
+                )
+                os.remove(err_ss)
+            except:
+                await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **Browser Error:**\n`{str(e)[:150]}`", parse_mode="Markdown")
         finally:
             await browser.close()
 
@@ -705,7 +752,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["trade_running"] = False
         await update.message.reply_text("🛑 TRADE STOPPED")
         return
-
     if text == "🚪 LOGOUT":
         state["trade_running"] = False
         state["temp_phone"] = ""
