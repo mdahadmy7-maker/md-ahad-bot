@@ -112,9 +112,36 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(5000)
 
+            # 💡 ধাপ ১: লাল বাটনে ক্লিক (Dk Win Login) - স্ক্রিনশট ২
+            await update_loading(20)
+            try:
+                red_btn = page.locator('text="Dk Win Login"').first
+                if await red_btn.count() > 0 and await red_btn.is_visible():
+                    await red_btn.click(force=True, timeout=10000)
+                    await page.wait_for_timeout(4000)
+                else:
+                    await page.evaluate("() => { for(let el of document.querySelectorAll('button, div, span, a')) { if((el.innerText||'').includes('Dk Win Login')) el.click(); } }")
+                    await page.wait_for_timeout(4000)
+            except Exception as e:
+                logger.error(f"Red button error: {e}")
+
+            # 💡 ধাপ ২: "I have an account Login" এ ক্লিক - স্ক্রিনশট ৩
             await update_loading(30)
             try:
-                # মানুষের মতো ধীরে ধীরে টাইপ করা (React/Vue এর জন্য জরুরি)
+                acc_btn = page.locator('text="I have an account"').first
+                if await acc_btn.count() > 0 and await acc_btn.is_visible():
+                    await acc_btn.click(force=True, timeout=10000)
+                    await page.wait_for_timeout(4000)
+                else:
+                    await page.evaluate("() => { for(let el of document.querySelectorAll('button, div, span, a, p')) { if((el.innerText||'').includes('I have an account')) el.click(); } }")
+                    await page.wait_for_timeout(4000)
+            except Exception as e:
+                logger.error(f"Account btn error: {e}")
+
+            # 💡 ধাপ ৩: ফোন এবং পাসওয়ার্ড বসানো - স্ক্রিনশট ৪
+            await update_loading(40)
+            try:
+                # মানুষের মতো ধীরে ধীরে টাইপ করা
                 phone_input = page.locator('input[type="text"], input[type="tel"]').first
                 await phone_input.wait_for(state="visible", timeout=20000)
                 await phone_input.click()
@@ -133,11 +160,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await update_loading(50)
             # লগইন বাটনে ক্লিক
             try:
-                # প্রথমে সাধারণ ক্লিক
                 await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000, force=True)
             except:
                 try:
-                    # জাভাস্ক্রিপ্ট ক্লিক
                     await page.evaluate("""
                         () => {
                             let elements = document.querySelectorAll('button, div, span, a');
@@ -153,8 +178,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
             
             await update_loading(70)
-            # সাইট রেসপন্স করার জন্য অপেক্ষা করা
-            await page.wait_for_timeout(5000)
+            await page.wait_for_timeout(6000)
 
             # পপআপ ক্লোজ
             for _ in range(15):
@@ -172,21 +196,26 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 """)
                 await page.wait_for_timeout(500)
 
+            # 💡 ধাপ ৪: Account পেজে ক্লিক - স্ক্রিনশট ৫
             await update_loading(85)
             try:
-                # Account পেজে ক্লিক
-                await page.evaluate("""
-                    (function() {
-                        let elements = document.querySelectorAll('div, span, a, p');
-                        for (let el of elements) {
-                            if (el.innerText && el.innerText.trim().toLowerCase() === 'account') {
-                                el.click(); return true;
+                account_tab = page.get_by_text("Account", exact=True).last
+                if await account_tab.count() > 0 and await account_tab.is_visible():
+                    await account_tab.click(force=True, timeout=10000)
+                else:
+                    await page.evaluate("""
+                        (function() {
+                            let elements = document.querySelectorAll('div, span, a, p');
+                            for (let el of elements) {
+                                if (el.innerText && el.innerText.trim().toLowerCase() === 'account') {
+                                    el.click(); return true;
+                                }
                             }
-                        }
-                    })();
-                """)
-                await page.wait_for_timeout(4000) 
-            except: pass
+                        })();
+                    """)
+                await page.wait_for_timeout(5000) 
+            except Exception as e:
+                logger.error(f"Account tab click error: {e}")
 
             await update_loading(95)
             login_status = "unknown"
@@ -217,14 +246,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
 
-            # 💡 লগইন ফেইল করলে স্ক্রিনশট পাঠানো
+            # লগইন ফেইল করলে স্ক্রিনশট পাঠানো
             if login_status == "failed" or uid_val == "Unknown":
                 err_ss = f"login_fail_{uid}.png"
                 await page.screenshot(path=err_ss)
                 await ctx.bot.send_photo(
                     chat_id=uid, 
                     photo=open(err_ss, 'rb'), 
-                    caption=f"❌ **LOGIN FAILED** ({phone})\n\nসম্ভবত পাসওয়ার্ড ভুল অথবা বট ক্যাপচা ধরতে পারছে না। নিচের স্ক্রিনশটে দেখুন সাইটে কী লেখা আছে।"
+                    caption=f"❌ **LOGIN FAILED** ({phone})\n\nসম্ভবত পাসওয়ার্ড ভুল অথবা সাইট বটকে ডিটেক্ট করেছে। নিচের স্ক্রিনশটে দেখুন সাইটে কী লেখা আছে।"
                 )
                 try: os.remove(err_ss)
                 except: pass
