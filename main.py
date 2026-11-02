@@ -10,10 +10,10 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন (আপনার দেওয়া নতুন সাইট লিংক)
+# ১. কনফিগারেশন
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-SITE_URL = "https://dkwwin.com/login/"
+SITE_URL = "https://dkwwin.com"
 HOME_URL = "https://dkwwin.com/#/"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
@@ -130,36 +130,47 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         page = await context.new_page()
         
         try:
-            # ---------------- ১. সাইটে প্রবেশ ও লগইন পেজে যাওয়া ----------------
+            # ---------------- ১. সাইটে প্রবেশ ----------------
             await update_loading(10)
-            await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
+            # নেটওয়ার্ক স্লো থাকলে যাতে লোড হতে সমস্যা না হয়
+            await page.goto(SITE_URL, timeout=60000, wait_until="networkidle")
             await page.wait_for_timeout(5000) 
 
             await update_loading(20)
-            # "I have an account Login" বাটন খোঁজা
-            login_btn_found = False
-            for attempt in range(10):
+            # 💡 ১ নম্বর বা ২ নম্বর স্ক্রিনশটের লজিক (Login পেজে যাওয়া)
+            logger.info("Searching for Login button or link...")
+            login_clicked = False
+            
+            # ১০ সেকেন্ড ধরে লগইন বাটন খোঁজা
+            for _ in range(10):
+                # লাল বাটন (১ নম্বর স্ক্রিনশট)
                 try:
-                    await page.evaluate("window.scrollTo(0, 0);")
-                    await page.wait_for_timeout(1000)
-                    
-                    login_btn = page.get_by_text(re.compile(r"I have an account.*Login|Login", re.IGNORECASE)).last
-                    if await login_btn.count() > 0:
-                        await login_btn.scroll_into_view_if_needed()
-                        await login_btn.click(force=True, timeout=5000)
-                        login_btn_found = True
+                    red_btn = page.locator('text="Dk Win Login (Quick Sign-In Link)"').first
+                    if await red_btn.count() > 0 and await red_btn.is_visible():
+                        await red_btn.click(force=True, timeout=3000)
+                        login_clicked = True
                         await page.wait_for_timeout(3000)
                         break
-                except:
-                    pass
+                except: pass
                 
+                # I have an account Login (২ নম্বর স্ক্রিনশট)
                 try:
-                    clicked = await page.evaluate("""
+                    acc_btn = page.locator('text="I have an account"').first
+                    if await acc_btn.count() > 0 and await acc_btn.is_visible():
+                        await acc_btn.click(force=True, timeout=3000)
+                        login_clicked = True
+                        await page.wait_for_timeout(3000)
+                        break
+                except: pass
+                
+                # যদি উপরের দুটোই না থাকে, তবে জাভাস্ক্রিপ্ট দিয়ে Login টেক্সট খোঁজা
+                try:
+                    clicked_js = await page.evaluate("""
                         () => {
                             let els = document.querySelectorAll('a, button, div, span, p');
-                            for (let el of els) {
-                                let txt = (el.innerText || el.textContent || '').trim();
-                                if (txt.includes('I have an account') || txt.includes('Login')) {
+                            for(let el of els) {
+                                let t = (el.innerText||'').trim();
+                                if(t.includes('Dk Win Login') || t.includes('I have an account') || t.toLowerCase() === 'login') {
                                     el.click();
                                     return true;
                                 }
@@ -167,20 +178,19 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             return false;
                         }
                     """)
-                    if clicked:
-                        login_btn_found = True
+                    if clicked_js:
+                        login_clicked = True
                         await page.wait_for_timeout(3000)
                         break
-                except:
-                    pass
+                except: pass
                 
                 await page.wait_for_timeout(1000)
 
             await update_loading(40)
-            # ---------------- ২. ফোন নম্বর ও পাসওয়ার্ড দেওয়া ----------------
+            # ---------------- ২. ফোন নম্বর ও পাসওয়ার্ড দেওয়া (৩ নম্বর স্ক্রিনশট) ----------------
             try:
                 # মানুষের মতো ধীরে ধীরে টাইপ করা
-                phone_input = page.locator('input[type="text"], input[type="tel"]').first
+                phone_input = page.locator('input[placeholder*="phone"], input[type="text"], input[type="tel"]').first
                 await phone_input.wait_for(state="visible", timeout=20000)
                 await phone_input.click()
                 await phone_input.fill("")
@@ -196,15 +206,15 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 logger.error(f"Input fill error: {e}")
 
             await update_loading(60)
-            # লগইন বাটনে ক্লিক
+            # "Log in" বাটনে ক্লিক
             try:
                 await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=15000, force=True)
             except:
                 try:
                     await page.evaluate("""
                         () => {
-                            let elements = document.querySelectorAll('button, div, span, a');
-                            for (let el of elements) {
+                            let els = document.querySelectorAll('button, div, span, a');
+                            for (let el of els) {
                                 let text = (el.innerText || el.textContent || '').trim().toLowerCase();
                                 if (text === 'log in' || text === 'login') {
                                     el.click(); return true;
@@ -221,7 +231,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ৩. পপআপ বন্ধ করা (Confirm, Receive, Close, OK) ----------------
             logger.info("Closing any popups if present...")
             for _ in range(15):
-                # পপআপে থাকা বাটনগুলো খুঁজে ক্লিক করা
                 await page.evaluate("""
                     (function() {
                         let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
@@ -242,14 +251,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.wait_for_timeout(500)
 
             await update_loading(85)
-            # ---------------- ৪. Account পেজে যাওয়া ----------------
+            # ---------------- ৪. Account পেজে যাওয়া (৪ নম্বর স্ক্রিনশট) ----------------
             logger.info("Navigating to Account page...")
             try:
                 await page.evaluate("""
                     (function() {
                         let elements = document.querySelectorAll('div, span, a, p');
                         for (let el of elements) {
-                            if (el.innerText && el.innerText.trim().toLowerCase().includes('account')) {
+                            if (el.innerText && el.innerText.trim().toLowerCase() === 'account') {
                                 el.click(); return true;
                             }
                         }
@@ -269,8 +278,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     login_status = "failed"
                     break
                 
-                # UID এবং Balance খোঁজার regex
+                # UID এবং Balance খোঁজার regex (স্ক্রিনশট ৪ অনুযায়ী)
+                # UID | 1010493
                 uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
+                # Total balance ৳17.27
                 balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
                 if not balance_match:
                     balance_match = re.search(r'৳\s*([\d.]+)', page_text)
@@ -849,7 +860,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
             "╚════════════════════════╝\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "📱 Enter your DKWWIN phone number:\n"
+            "📱 Enter your DKWIN phone number:\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "Everyone uses their own account — your session is private."
         )
