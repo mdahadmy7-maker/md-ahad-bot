@@ -3,19 +3,17 @@ import logging
 import re
 import os
 import requests
-import json
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন (নতুন সাইট অনুযায়ী আপডেট করা হয়েছে)
+# ১. কনফিগারেশন (নতুন সাইট)
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 SITE_URL = "https://dkwin8.com/#/login"
 HOME_URL = "https://dkwin8.com/#/"
-# নোট: সাইট পরিবর্তন হলে API-ও পরিবর্তন হতে পারে। যদি WinGo 30S API ভিন্ন হয়, তবে নিচের লিঙ্কটি আপডেট করতে হবে।
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -111,13 +109,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(4000) # সাইট লোড হতে একটু বেশি সময় দিন
 
             await update_loading(30)
-            # স্ক্রিনশট অনুযায়ী নতুন লগইন ফিল্ড সিলেক্টর (প্লেসহোল্ডার বা ইনপুট টাইপ দিয়ে)
+            # নতুন সাইটের লগইন ফিল্ড
             try:
-                # ফোন নাম্বার ফিল্ড
-                phone_input = page.locator('input[type="text"], input[type="tel"], input[placeholder*="Phone"]').first
+                # ফোন নাম্বার ফিল্ড (স্ক্রিনশট অনুযায়ী টেক্সট বা টেল ইনপুট)
+                phone_input = page.locator('input[type="tel"], input[type="text"]').first
                 await phone_input.fill(login_phone)
                 
                 # পাসওয়ার্ড ফিল্ড
@@ -127,32 +125,29 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 logger.error(f"Input fill error: {e}")
 
             await update_loading(50)
-            # লগইন বাটনে ক্লিক
+            # Log in বাটনে ক্লিক
             try:
-                # স্ক্রিনশটে বাটনের নাম "Log in"
-                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000)
+                # স্ক্রিনশটের হলুদ বাটন
+                await page.get_by_text("Log in", exact=False).last.click(timeout=10000)
             except:
-                try:
-                    await page.locator('button:has-text("Log in")').last.click(timeout=10000)
-                except:
-                    # যদি বাটন না পাওয়া যায়, তবে সরাসরি টেক্সট দিয়ে ক্লিক
-                    await page.locator('text="Log in"').last.click(timeout=10000)
+                await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
             await update_loading(70)
+            # পপআপ ক্লোজ করা (যদি থাকে)
             for _ in range(10):
                 await page.evaluate("""
                     (function() {
                         let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
                         for (let el of elements) {
                             let text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
-                            if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok') {
+                            if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok' || text === 'i know') {
                                 let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
                                 el.dispatchEvent(event);
                             }
                         }
                     })();
                 """)
-                await page.wait_for_timeout(400)
+                await page.wait_for_timeout(500)
 
             await update_loading(85)
             try:
@@ -199,7 +194,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
 
             if login_status == "failed" or uid_val == "Unknown":
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})")
+                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\n\nসম্ভবত পাসওয়ার্ড ভুল অথবা সাইটে ক্যাপচা আছে।")
                 await browser.close()
                 return
 
@@ -233,10 +228,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # 💡 WinGo পেজে ঢোকার কঠোর (Strict) সিস্টেম
+            # 💡 WinGo পেজে ঢোকার সিস্টেম
             logger.info("Navigating to WinGo page...")
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000) 
+            await page.wait_for_timeout(4000) 
             
             nav_success = False
             for attempt in range(15):
@@ -246,14 +241,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     logger.info("Successfully entered WinGo game!")
                     break
                 
+                # পপআপ ক্লোজ
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span, a')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
                 await page.wait_for_timeout(500)
                 
+                # Lottery মেনুতে ক্লিক
                 try:
                     await page.get_by_text("Lottery", exact=True).first.click(timeout=2000, force=True)
                 except: pass
-                await page.wait_for_timeout(1000)
+                await page.wait_for_timeout(1500)
                 
+                # WinGo 30sec এ ক্লিক
                 try:
                     await page.get_by_text("WinGo 30sec", exact=True).first.click(timeout=2000, force=True)
                 except:
@@ -263,12 +261,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.wait_for_timeout(2000)
 
             if not nav_success:
-                await ctx.bot.send_message(chat_id=uid, text="❌ **গেম পেজে ঢুকতে সমস্যা হচ্ছে!** বট বন্ধ করা হচ্ছে।")
+                await ctx.bot.send_message(chat_id=uid, text="❌ **গেম পেজে ঢুকতে সমস্যা হচ্ছে!** বট বন্ধ করা হচ্ছে। (সম্ভবত সাইটের মেনুর নাম পরিবর্তন হয়েছে)")
                 state["trade_running"] = False
                 await browser.close()
                 return
 
-            # 💡 ৩ নাম্বার মেসেজ (AUTO TRADE ACTIVE) সাথে সাথে পাঠানো
+            # 💡 ৩ নাম্বার মেসেজ (AUTO TRADE ACTIVE)
             step_plan_str = "┌────────────────────────────────┐\n"
             for i, amt in enumerate(state['step_amounts']):
                 step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
@@ -324,7 +322,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. কঠোর টাইমার চেক (শুধুমাত্র ২৫ থেকে ২৯ সেকেন্ডের মধ্যে ক্লিক করবে)
+                    # 💡 ১. কঠোর টাইমার চেক (২৫-২৯ সেকেন্ড)
                     logger.info("Waiting for new round (29s)...")
                     timer_val = "0s"
                     for _ in range(600): 
@@ -344,7 +342,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except: pass
                         await asyncio.sleep(0.1)
 
-                    # 💡 ২. সুপার ফাস্ট Big/Small ক্লিক (আগে স্ক্রল করে নিচে নামবে)
+                    # 💡 ২. Big/Small ক্লিক
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(200)
                     
@@ -386,6 +384,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     await page.wait_for_timeout(1000)
 
+                    # 💡 ৩. "Total amount" এ ক্লিক
                     js_confirm_bet = """
                     (() => {
                         for(let el of document.querySelectorAll('span, div, label')) {
@@ -427,6 +426,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         photo=open(proof_path, 'rb'), 
                         caption=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice}**\n💵 Amount: ৳ {bet_amount:.2f}\n📱 স্ক্রিনশটে দেখুন সাইটে কি হয়েছে ↓"
                     )
+                    
+                    try: os.remove(proof_path)
+                    except: pass
 
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -442,6 +444,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
+                    # রেজাল্টের জন্য অপেক্ষা
                     for _ in range(350):
                         body_text = await page.evaluate("() => document.body.innerText")
                         if "0 0" in body_text:
@@ -535,24 +538,13 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state["first_bet"] = True 
     
     welcome_text = (
-        "🧠 **DK8~WIN~GO=AUTO~BET 💥**\n"
+        "🧠 **DK8 WIN GO AUTO BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🧠 Mode    : Auto Analyse & bet\n"
         "🔐 Access  : Private · Authorized Members\n"
         "🔴 Status  : Not Logged In\n"
         f"👥 Accounts: {len(state['accounts'])}/6\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🧠 Prediction Engine — 9 Layers\n"
-        "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
-        "🔍 Manipulation · 🎨 Colour · 🔢 Frequency\n"
-        "🔄 Markov · ♻️ Cycle · 💠 Momentum\n"
-        "🔁 Every layer is back-tested live so its vote\n"
-        "weight follows its real hit-rate\n"
-        "🔴 Confidence below 30% → sit out\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🎬 4-second 🧠 generating prediction animation\n"
-        "🚀 Analysis → auto bet every 30s period\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
         "👇 Press the button below to LOGIN"
     )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
@@ -594,11 +586,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "╔════════════════════════╗\n"
             "║   🚀 START YOUR TARGET 🚀   ║\n"
             "╚════════════════════════╝\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "💰 YOUR BALANCE\n"
-            f"৳ {state.get('balance', '0.00')}\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"💰 YOUR BALANCE: ৳ {state.get('balance', '0.00')}\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
             "🎯 Enter your TARGET profit amount:\n"
             "How much do you want to earn? (in ৳)"
@@ -615,13 +603,10 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             target_set_msg = (
                 "╔════════════════════════╗\n"
                 "║   🎯 TARGET SET 🎯   ║\n"
-                "╚════════════════════════╝\n\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "╚════════════════════════╝\n"
                 f"💰 Balance  : ৳ {balance:.2f}\n"
                 f"🎯 Target   : ৳ {target_amount:.2f} profit\n"
                 f"🏦 Stop At  : ৳ {stop_at:.2f}\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
                 "🚀 Enter your STEP COUNT:\n"
                 "How many steps? (e.g. 5, max 50)"
@@ -684,3 +669,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     f"{step_plan_text}"
                     "\n"
                     "👇 Press START TRADE to begin."
+                )
+                inline_kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🚀 START TRADE", callback_data="start_trade_btn"), 
+                     Inline
