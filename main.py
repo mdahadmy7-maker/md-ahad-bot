@@ -10,11 +10,11 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন (শুধু সাইটের লিংক পরিবর্তন করা হয়েছে)
+# ১. কনফিগারেশন (নতুন সাইট লিংক)
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-SITE_URL = "https://dkwin8.com/#/login"
-HOME_URL = "https://dkwin8.com/#/"
+SITE_URL = "https://dkwwin.com/#/login"
+HOME_URL = "https://dkwwin.com/#/"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -94,7 +94,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         try:
             await ctx.bot.edit_message_text(
                 chat_id=uid, message_id=loading_msg_id, 
-                text=f"🔄 **CONNECTING TO SITE**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
+                text=f"🔄 **CONNECTING TO HGNICE**\n[{filled}{empty}] {percent}%", parse_mode="Markdown"
             )
         except: pass
 
@@ -110,11 +110,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000)
+            await page.wait_for_timeout(4000)
 
             await update_loading(30)
             try:
-                # ফোন নাম্বার এবং পাসওয়ার্ড বসানো (নতুন সাইটের জন্য একটু জেনেরিক করা হয়েছে)
+                # ফোন এবং পাসওয়ার্ড বসানোর জেনেরিক সিস্টেম
                 await page.locator('input[type="text"], input[type="tel"]').first.fill(login_phone)
                 await page.locator('input[type="password"]').first.fill(password)
             except: pass
@@ -126,23 +126,24 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
             await update_loading(70)
-            # পপআপ বন্ধ করা (Confirm, Receive, Close)
-            for _ in range(10):
+            # পপআপ ক্লোজ (Confirm, Receive, Close)
+            for _ in range(15):
                 await page.evaluate("""
                     (function() {
                         let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
                         for (let el of elements) {
                             let text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
-                            if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok') {
+                            if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok' || text === 'i know') {
                                 let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
                                 el.dispatchEvent(event);
                             }
                         }
                     })();
                 """)
-                await page.wait_for_timeout(400)
+                await page.wait_for_timeout(500)
 
             await update_loading(85)
+            # Account পেজে ক্লিক
             try:
                 await page.evaluate("""
                     (function() {
@@ -162,8 +163,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             uid_val = "Unknown"
             balance = "0.00"
 
-            # UID এবং Balance খোঁজা (স্ক্রিনশট ৩ এর রেফারেন্স অনুযায়ী)
-            for _ in range(10): 
+            # UID এবং Balance খোঁজার আপডেট করা Regex (আপনার স্ক্রিনশট ৩ এর মতো)
+            for _ in range(15): 
                 page_text = await page.inner_text("body")
                 if "Wrong account or password" in page_text:
                     login_status = "failed"
@@ -171,8 +172,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 
                 uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
                 balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
-                
-                # যদি Total balance না পায়, শুধু ৳ চিহ্ন দিয়ে খুঁজবে
                 if not balance_match:
                     balance_match = re.search(r'৳\s*([\d.]+)', page_text)
                 
@@ -192,13 +191,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 except: pass
 
             if login_status == "failed" or uid_val == "Unknown":
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\nসম্ভবত পাসওয়ার্ড ভুল অথবা সাইটে ক্যাপচা আছে।")
+                await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})")
                 await browser.close()
                 return
 
             state["balance"] = float(balance)
             masked_phone = f"***{phone[-4:]}"
             
+            # 💡 আপনার প্রথম দেওয়া ফাইলের হুবহু ড্যাশবোর্ড মেসেজ
             dashboard_msg = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -228,7 +228,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             
             logger.info("Navigating to WinGo page...")
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(3000) 
+            await page.wait_for_timeout(4000) 
             
             nav_success = False
             for attempt in range(15):
@@ -260,7 +260,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await browser.close()
                 return
 
-            # 💡 ৩ নাম্বার মেসেজ (AUTO TRADE ACTIVE)
+            # 💡 আপনার ফাইলের হুবহু ৩ নাম্বার মেসেজ
             step_plan_str = "┌────────────────────────────────┐\n"
             for i, amt in enumerate(state['step_amounts']):
                 step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
@@ -321,7 +321,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     for _ in range(600): 
                         try:
                             body_text = await page.evaluate("() => document.body.innerText")
-                            
                             if "0 0" in body_text:
                                 await asyncio.sleep(0.1)
                                 continue
@@ -521,7 +520,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         finally:
             await browser.close()
 
-# হ্যান্ডলারগুলো
+# হ্যান্ডলারগুলো (হুবহু আপনার ফাইলের মতো)
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
@@ -577,7 +576,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         
         if state.get("task"): state["task"].cancel()
         state["first_bet"] = True 
-        loading_msg = await update.message.reply_text("🔄 **CONNECTING TO SITE**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
+        loading_msg = await update.message.reply_text("🔄 **CONNECTING TO HGNICE**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
         state["task"] = asyncio.create_task(playwright_login_and_bet(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"]))
         return
         
@@ -669,4 +668,4 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     "━━━━━━━━━━━━━━━━━━━━━━━\n"
                     f"💰 Balance  : ৳ {balance:.2f}\n"
                     f"🎯 Target   : ৳ {target:.2f} profit\n"
-                    f"🏦 Stop At  : ৳ {stop_at:.2f
+                    f"🏦 Stop At  : ৳ {stop_at
