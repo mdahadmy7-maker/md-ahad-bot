@@ -18,7 +18,9 @@ import threading
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 SITE_URL = "https://dkwin8.com/#/login" 
 HOME_URL = "https://dkwin8.com/#/"
+WIN_GO_URL = "https://dkwin8.com/#/WinGo_30S"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
+PROXY_URL = os.environ.get("PROXY_URL", "")  # 💡 Render Env Var থেকে প্রক্সি নেবে
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -147,7 +149,7 @@ async def get_history_and_prediction_async():
     return await asyncio.to_thread(get_history_and_prediction_sync)
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন
+# ৩. লগইন এবং অটো-বেট ফাংশন (প্রক্সি সহ)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -165,24 +167,27 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        # 💡 এখানে মোবাইল সিমুলেশন যোগ করা হলো
-        iphone_13 = p.devices['iPhone 13']
+        launch_args = [
+            "--disable-blink-features=AutomationControlled",
+            "--no-sandbox",
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage"
+        ]
         
+        # 💡 প্রক্সি সেটআপ
+        proxy_settings = None
+        if PROXY_URL:
+            proxy_settings = {"server": PROXY_URL}
+            
         browser = await p.chromium.launch(
             headless=True, 
-            args=[
-                "--disable-blink-features=AutomationControlled",
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-gpu"
-            ]
+            args=launch_args,
+            proxy=proxy_settings  # 💡 এখানে প্রক্সি যুক্ত হলো
         ) 
         
         context = await browser.new_context(
-            **iphone_13, 
-            locale="en-US",
-            timezone_id="Asia/Dhaka"
+            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36",
+            viewport={"width": 412, "height": 915}
         )
         
         await context.add_init_script("""
@@ -195,23 +200,21 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         try:
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
-            # 💡 Cloudflare বাইপাসের জন্য প্রথমে গুগলে যাবে, তারপর সাইটে
+            # 💡 প্রথমে গুগলে যাবে (ক্লাউডফ্লেয়ার বোকা বানাতে)
             await page.goto("https://www.google.com", timeout=60000)
             await page.wait_for_timeout(2000)
             
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            
-            # 💡 ক্লাউডফ্লেয়ার চেক
             await page.wait_for_timeout(5000) 
+
             page_text_check = await page.inner_text("body")
             if "Why have I been blocked?" in page_text_check or "Attention Required!" in page_text_check:
-                await ctx.bot.send_message(chat_id=uid, text="❌ **সাইট ব্লক করেছে!**\nRender-এর আইপি Cloudflare ব্লক করেছে। দয়া করে নিজের মোবাইল বা পিসি থেকে চালান, অথবা প্রক্সি ব্যবহার করুন।")
+                await ctx.bot.send_message(chat_id=uid, text="❌ **সাইট ব্লক করেছে!**\nআপনার প্রক্সিটি কাজ করছে না বা ব্লকড। দয়া করে অন্য একটি ফ্রি প্রক্সি চেষ্টা করুন।")
                 await browser.close()
                 return
 
             await update_loading(30)
             try:
-                # ফোন নাম্বার এবং পাসওয়ার্ড বসানো
                 phone_input = page.locator('input[type="text"], input[type="tel"]').first
                 await phone_input.wait_for(state="visible", timeout=15000)
                 await phone_input.fill(login_phone)
@@ -220,7 +223,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await pass_input.fill(password)
                 
             except Exception as e:
-                await ctx.bot.send_message(chat_id=uid, text="⚠️ **লগইন পেজে সমস্যা!**\nবট ইনপুট বক্স খুঁজে পাচ্ছে না। সাইট হয়তো লোড হতে দেরি করছে।", parse_mode="Markdown")
+                await ctx.bot.send_message(chat_id=uid, text="⚠️ **লগইন পেজে সমস্যা!**\nবট ইনপুট বক্স খুঁজে পাচ্ছে না।", parse_mode="Markdown")
                 await browser.close()
                 return
 
@@ -625,12 +628,4 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 "📊 Result : LOSS ❌\n"
                                 f"💹 P/L : -৳ {bet_amount:.2f}\n"
                                 f"💰 Balance : ৳ {new_balance:.2f}\n"
-                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                "—\n"
-                                f"🏆 Wins : {state['wins']} 🔴 Losses : {state['losses']} 📈 Rate :\n"
-                                f"{win_rate:.1f}%\n"
-                                "🧠 Mind State : 😐 Focused\n"
-                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                                "—\n"
-                                f"{next_step_txt}"
-                            ))
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\
