@@ -20,12 +20,11 @@ SITE_URL = "https://dkwin8.com/#/login"
 HOME_URL = "https://dkwin8.com/#/"
 WIN_GO_URL = "https://dkwin8.com/#/WinGo_30S"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
-PROXY_URL = os.environ.get("PROXY_URL", "")  # 💡 Render Env Var থেকে প্রক্সি নেবে
+PROXY_URL = os.environ.get("PROXY_URL", "")
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# 💡 Render পোর্ট এরর ফিক্স
 web_app = Flask(__name__)
 @web_app.route('/')
 def health_check():
@@ -174,7 +173,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             "--disable-dev-shm-usage"
         ]
         
-        # 💡 প্রক্সি সেটআপ
         proxy_settings = None
         if PROXY_URL:
             proxy_settings = {"server": PROXY_URL}
@@ -182,7 +180,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         browser = await p.chromium.launch(
             headless=True, 
             args=launch_args,
-            proxy=proxy_settings  # 💡 এখানে প্রক্সি যুক্ত হলো
+            proxy=proxy_settings
         ) 
         
         context = await browser.new_context(
@@ -200,7 +198,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         try:
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
-            # 💡 প্রথমে গুগলে যাবে (ক্লাউডফ্লেয়ার বোকা বানাতে)
             await page.goto("https://www.google.com", timeout=60000)
             await page.wait_for_timeout(2000)
             
@@ -476,10 +473,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                         await page.wait_for_timeout(1000)
                         
-                        # বাটনটি খুঁজে বের করা
                         target_locator = page.get_by_text(re.compile(f"^{choice}$", re.IGNORECASE)).last
                         
-                        # বাটনটি ক্লিক করার জন্য প্রস্তুত হওয়া পর্যন্ত অপেক্ষা করা
                         await target_locator.wait_for(state="visible", timeout=5000)
                         await target_locator.scroll_into_view_if_needed(timeout=4000)
                         
@@ -507,7 +502,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     # 💡 ৫. Confirm বাটন খোঁজা এবং ক্লিক করা
                     confirm_success = False
-                    for _ in range(6): # ৬ সেকেন্ড পর্যন্ত অপেক্ষা করবে Confirm বাটনের জন্য
+                    for _ in range(6):
                         try:
                             confirm_btn = page.locator('text="Confirm", text="Confirm Bet", button:has-text("Confirm"), div:has-text("Confirm")').last
                             if await confirm_btn.count() > 0 and await confirm_btn.is_visible():
@@ -529,7 +524,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         state["trade_running"] = False
                         break
 
-                    # 💡 ৬. ANALYSIS REPORT মেসেজ (আপনার স্ক্রিনশটের মতো হুবহু)
+                    # 💡 ৬. ANALYSIS REPORT মেসেজ
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                         "🤖 NEW TRADE PLACED\n"
@@ -628,4 +623,16 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                                 "📊 Result : LOSS ❌\n"
                                 f"💹 P/L : -৳ {bet_amount:.2f}\n"
                                 f"💰 Balance : ৳ {new_balance:.2f}\n"
-                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "—\n"
+                                f"🏆 Wins : {state['wins']} 🔴 Losses : {state['losses']} 📈 Rate :\n"
+                                f"{win_rate:.1f}%\n"
+                                "🧠 Mind State : 😐 Focused\n"
+                                "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                                "—\n"
+                                f"{next_step_txt}"
+                            ))
+
+                except Exception as e:
+                    logger.error(f"Betting error: {e}")
+                    await ctx.bot.send_message(chat_id
