@@ -114,11 +114,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(30)
             try:
-                await page.get_by_placeholder("Please enter the phone number").fill(login_phone)
-                await page.locator('input[type="password"]').first.fill(password)
-            except:
                 await page.locator('input[type="text"], input[type="tel"]').first.fill(login_phone)
                 await page.locator('input[type="password"]').first.fill(password)
+            except: pass
 
             await update_loading(50)
             try:
@@ -517,8 +515,16 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 # হ্যান্ডলারগুলো
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    state = get_state(uid)
-    state["first_bet"] = True 
+    
+    user_state[uid] = {
+        "awaiting": None, "temp_phone": "", "temp_password": "",
+        "accounts": [], "balance": "0.00", "target": 0, 
+        "steps": 0, "step_amounts": [], "current_step": 0,
+        "trade_running": False, "task": None,
+        "wins": 0, "losses": 0, "total_trades": 0,
+        "first_bet": True
+    }
+    state = user_state[uid]
     
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
@@ -682,4 +688,14 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if text == "🛑 STOP TRADE":
         state["trade_running"] = False
-        await update.message.reply_text("🛑 TR
+        await update.message.reply_text("🛑 TRADE STOPPED")
+        return
+    if text == "🚪 LOGOUT":
+        state["trade_running"] = False
+        state["temp_phone"] = ""
+        state["temp_password"] = ""
+        await update.message.reply_text("🚪 LOGGED OUT")
+        return
+
+async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback
