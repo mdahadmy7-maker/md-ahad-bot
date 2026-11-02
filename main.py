@@ -10,11 +10,11 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন (নতুন সাইট লিংক: dkwin0.com)
+# ১. কনফিগারেশন (আপনার দেওয়া নতুন সাইট লিংক)
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-SITE_URL = "https://dkwin0.com/#/login"
-HOME_URL = "https://dkwin0.com/#/"
+SITE_URL = "https://dkwwin.com/login/"
+HOME_URL = "https://dkwwin.com/#/"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -99,7 +99,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        # 💡 রোবট ডিটেক্ট এড়াতে বাড়তি আর্গুমেন্ট
+        # রোবট ডিটেক্ট এড়াতে বাড়তি আর্গুমেন্ট
         browser = await p.chromium.launch(
             headless=True, 
             args=[
@@ -120,7 +120,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             has_touch=True
         )
         
-        # 💡 navigator.webdriver হাইড করার স্ক্রিপ্ট
+        # navigator.webdriver হাইড করার স্ক্রিপ্ট
         await context.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
             Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
@@ -130,12 +130,54 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         page = await context.new_page()
         
         try:
-            # ---------------- ১. লগইন ----------------
+            # ---------------- ১. সাইটে প্রবেশ ও লগইন পেজে যাওয়া ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(6000) # মানুষের মতো অপেক্ষা করা
+            await page.wait_for_timeout(5000) 
 
-            await update_loading(30)
+            await update_loading(20)
+            # "I have an account Login" বাটন খোঁজা
+            login_btn_found = False
+            for attempt in range(10):
+                try:
+                    await page.evaluate("window.scrollTo(0, 0);")
+                    await page.wait_for_timeout(1000)
+                    
+                    login_btn = page.get_by_text(re.compile(r"I have an account.*Login|Login", re.IGNORECASE)).last
+                    if await login_btn.count() > 0:
+                        await login_btn.scroll_into_view_if_needed()
+                        await login_btn.click(force=True, timeout=5000)
+                        login_btn_found = True
+                        await page.wait_for_timeout(3000)
+                        break
+                except:
+                    pass
+                
+                try:
+                    clicked = await page.evaluate("""
+                        () => {
+                            let els = document.querySelectorAll('a, button, div, span, p');
+                            for (let el of els) {
+                                let txt = (el.innerText || el.textContent || '').trim();
+                                if (txt.includes('I have an account') || txt.includes('Login')) {
+                                    el.click();
+                                    return true;
+                                }
+                            }
+                            return false;
+                        }
+                    """)
+                    if clicked:
+                        login_btn_found = True
+                        await page.wait_for_timeout(3000)
+                        break
+                except:
+                    pass
+                
+                await page.wait_for_timeout(1000)
+
+            await update_loading(40)
+            # ---------------- ২. ফোন নম্বর ও পাসওয়ার্ড দেওয়া ----------------
             try:
                 # মানুষের মতো ধীরে ধীরে টাইপ করা
                 phone_input = page.locator('input[type="text"], input[type="tel"]').first
@@ -153,9 +195,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             except Exception as e:
                 logger.error(f"Input fill error: {e}")
 
-            await update_loading(50)
+            await update_loading(60)
+            # লগইন বাটনে ক্লিক
             try:
-                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000, force=True)
+                await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=15000, force=True)
             except:
                 try:
                     await page.evaluate("""
@@ -172,38 +215,47 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     """)
                 except: pass
             
-            await update_loading(70)
+            await update_loading(75)
             await page.wait_for_timeout(6000) # সাইট রেসপন্স করার জন্য অপেক্ষা
 
-            # পপআপ ক্লোজ
+            # ---------------- ৩. পপআপ বন্ধ করা (Confirm, Receive, Close, OK) ----------------
+            logger.info("Closing any popups if present...")
             for _ in range(15):
+                # পপআপে থাকা বাটনগুলো খুঁজে ক্লিক করা
                 await page.evaluate("""
                     (function() {
                         let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
                         for (let el of elements) {
                             let text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
-                            if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok') {
+                            if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok' || text === 'got it' || text === 'i know') {
                                 let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
                                 el.dispatchEvent(event);
                             }
                         }
                     })();
                 """)
+                # স্ক্রিনের বাইরে ক্লিক করে পপআপ বন্ধ করা (যদি থাকে)
+                try:
+                    await page.evaluate("document.body.click();")
+                except:
+                    pass
                 await page.wait_for_timeout(500)
 
             await update_loading(85)
+            # ---------------- ৪. Account পেজে যাওয়া ----------------
+            logger.info("Navigating to Account page...")
             try:
                 await page.evaluate("""
                     (function() {
                         let elements = document.querySelectorAll('div, span, a, p');
                         for (let el of elements) {
-                            if (el.innerText && el.innerText.trim().toLowerCase() === 'account') {
+                            if (el.innerText && el.innerText.trim().toLowerCase().includes('account')) {
                                 el.click(); return true;
                             }
                         }
                     })();
                 """)
-                await page.wait_for_timeout(4000) 
+                await page.wait_for_timeout(5000) 
             except: pass
 
             await update_loading(95)
@@ -217,8 +269,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     login_status = "failed"
                     break
                 
+                # UID এবং Balance খোঁজার regex
                 uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
                 balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
+                if not balance_match:
+                    balance_match = re.search(r'৳\s*([\d.]+)', page_text)
                 
                 if uid_match:
                     uid_val = uid_match.group(1)
@@ -235,7 +290,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
 
-            # 💡 লগইন ফেইল করলে স্ক্রিনশট পাঠানো
+            # লগইন ফেইল করলে স্ক্রিনশট পাঠানো
             if login_status == "failed" or uid_val == "Unknown":
                 err_ss = f"login_fail_{uid}.png"
                 await page.screenshot(path=err_ss)
@@ -268,13 +323,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]]
             await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
 
+            # পরবর্তী নির্দেশনার জন্য অপেক্ষা (START YOUR TARGET)
             while not state.get("trade_running", False):
                 await asyncio.sleep(1)
                 if state.get("task") != asyncio.current_task():
                     await browser.close()
                     return
 
-            # ---------------- ৪. অটো-বেট লুপ ----------------
+            # ---------------- ৫. অটো-বেট লুপ ----------------
             initial_balance = float(balance)
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
@@ -307,7 +363,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     except: pass
                 await page.wait_for_timeout(2000)
 
-            # 💡 গেম পেজ না পেলে স্ক্রিনশট
+            # গেম পেজ না পেলে স্ক্রিনশট
             if not nav_success:
                 err_ss = f"game_fail_{uid}.png"
                 await page.screenshot(path=err_ss)
@@ -341,7 +397,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "🎬 _Bot is monitoring the timer._"
             ), parse_mode="Markdown")
 
-            # ---------------- ৫. মেইন বেটিং লুপ ----------------
+            # ---------------- ৬. মেইন বেটিং লুপ ----------------
             while state["trade_running"]:
                 try:
                     current_bal = state["balance"]
@@ -793,7 +849,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
             "╚════════════════════════╝\n\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "📱 Enter your DKWIN0 phone number:\n"
+            "📱 Enter your DKWWIN phone number:\n"
             "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
             "Everyone uses their own account — your session is private."
         )
