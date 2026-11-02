@@ -109,38 +109,33 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ১. লগইন ----------------
             await update_loading(10)
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await page.wait_for_timeout(4000) # সাইট লোড হতে একটু বেশি সময় দিন
+            await page.wait_for_timeout(4000) 
 
             await update_loading(30)
-            # নতুন সাইটের লগইন ফিল্ড
             try:
-                # ফোন নাম্বার ফিল্ড (স্ক্রিনশট অনুযায়ী টেক্সট বা টেল ইনপুট)
                 phone_input = page.locator('input[type="tel"], input[type="text"]').first
                 await phone_input.fill(login_phone)
                 
-                # পাসওয়ার্ড ফিল্ড
                 pass_input = page.locator('input[type="password"]').first
                 await pass_input.fill(password)
             except Exception as e:
                 logger.error(f"Input fill error: {e}")
 
             await update_loading(50)
-            # Log in বাটনে ক্লিক
             try:
-                # স্ক্রিনশটের হলুদ বাটন
                 await page.get_by_text("Log in", exact=False).last.click(timeout=10000)
             except:
                 await page.locator('button:has-text("Log in")').last.click(timeout=10000)
             
             await update_loading(70)
-            # পপআপ ক্লোজ করা (যদি থাকে)
-            for _ in range(10):
+            # 💡 পপআপ বন্ধ করার লজিক (Confirm, Receive, Close ইত্যাদি)
+            for _ in range(20):
                 await page.evaluate("""
                     (function() {
                         let elements = document.querySelectorAll('button, div, span, a, input[type="button"]');
                         for (let el of elements) {
                             let text = (el.innerText || el.value || el.textContent || '').trim().toLowerCase();
-                            if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok' || text === 'i know') {
+                            if (text === 'confirm' || text === 'receive' || text === 'close' || text === 'ok' || text === 'i know' || text === 'got it') {
                                 let event = new MouseEvent('click', { view: window, bubbles: true, cancelable: true });
                                 el.dispatchEvent(event);
                             }
@@ -150,10 +145,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.wait_for_timeout(500)
 
             await update_loading(85)
+            # Account পেজে যাওয়া
             try:
                 await page.evaluate("""
                     (function() {
-                        let elements = document.querySelectorAll('div, span, a');
+                        let elements = document.querySelectorAll('div, span, a, p');
                         for (let el of elements) {
                             if (el.innerText && el.innerText.trim().toLowerCase() === 'account') {
                                 el.click(); return true;
@@ -169,14 +165,20 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             uid_val = "Unknown"
             balance = "0.00"
 
-            for _ in range(10): 
+            # 💡 UID এবং Balance খোঁজার নতুন Regex (স্ক্রিনশট ৩ অনুযায়ী)
+            for _ in range(15): 
                 page_text = await page.inner_text("body")
                 if "Wrong account or password" in page_text or "incorrect" in page_text.lower():
                     login_status = "failed"
                     break
                 
+                # UID | 1010493 অথবা UID: 1010493 ফরম্যাট ধরবে
                 uid_match = re.search(r'UID\s*[|:]?\s*(\d+)', page_text, re.IGNORECASE)
+                # Total balance ৳17.27 অথবা Total balance 17.27 ফরম্যাট ধরবে
                 balance_match = re.search(r'(?:Total|Wallet)\s*balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
+                
+                if not balance_match:
+                    balance_match = re.search(r'৳\s*([\d.]+)', page_text)
                 
                 if uid_match:
                     uid_val = uid_match.group(1)
@@ -228,7 +230,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
             
-            # 💡 WinGo পেজে ঢোকার সিস্টেম
             logger.info("Navigating to WinGo page...")
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
             await page.wait_for_timeout(4000) 
@@ -245,19 +246,21 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await page.evaluate("""() => { for(let el of document.querySelectorAll('button, div, span, a')) { let t = (el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }""")
                 await page.wait_for_timeout(500)
                 
-                # Lottery মেনুতে ক্লিক
+                # গেমে ঢোকার চেষ্টা (Lottery অথবা WinGo)
                 try:
                     await page.get_by_text("Lottery", exact=True).first.click(timeout=2000, force=True)
                 except: pass
-                await page.wait_for_timeout(1500)
+                await page.wait_for_timeout(1000)
                 
-                # WinGo 30sec এ ক্লিক
                 try:
                     await page.get_by_text("WinGo 30sec", exact=True).first.click(timeout=2000, force=True)
                 except:
                     try:
                         await page.get_by_text("Win Go", exact=False).first.click(timeout=2000, force=True)
-                    except: pass
+                    except:
+                        try:
+                            await page.get_by_text("WinGo", exact=False).first.click(timeout=2000, force=True)
+                        except: pass
                 await page.wait_for_timeout(2000)
 
             if not nav_success:
@@ -266,7 +269,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await browser.close()
                 return
 
-            # 💡 ৩ নাম্বার মেসেজ (AUTO TRADE ACTIVE)
             step_plan_str = "┌────────────────────────────────┐\n"
             for i, amt in enumerate(state['step_amounts']):
                 step_plan_str += f"│  Step {i+1:02d} ➤ ৳ {amt:.2f}             │\n"
@@ -322,7 +324,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     choice, current_period = get_history_and_prediction()
 
-                    # 💡 ১. কঠোর টাইমার চেক (২৫-২৯ সেকেন্ড)
                     logger.info("Waiting for new round (29s)...")
                     timer_val = "0s"
                     for _ in range(600): 
@@ -342,7 +343,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except: pass
                         await asyncio.sleep(0.1)
 
-                    # 💡 ২. Big/Small ক্লিক
                     await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
                     await page.wait_for_timeout(200)
                     
@@ -384,7 +384,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     await page.wait_for_timeout(1000)
 
-                    # 💡 ৩. "Total amount" এ ক্লিক
                     js_confirm_bet = """
                     (() => {
                         for(let el of document.querySelectorAll('span, div, label')) {
@@ -444,7 +443,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         "⏳ Waiting for result..."
                     ), parse_mode="Markdown")
 
-                    # রেজাল্টের জন্য অপেক্ষা
                     for _ in range(350):
                         body_text = await page.evaluate("() => document.body.innerText")
                         if "0 0" in body_text:
@@ -664,12 +662,4 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     f"🏦 Stop At  : ৳ {stop_at:.2f}\n"
                     f"📋 Steps    : {state['steps']}\n"
                     f"⚠️ Total Risk : ৳ {total_risk:.2f}\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    "📊 STEP PLAN\n"
-                    f"{step_plan_text}"
-                    "\n"
-                    "👇 Press START TRADE to begin."
-                )
-                inline_kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🚀 START TRADE", callback_data="start_trade_btn"), 
-                     Inline
+                    "━━━━━━
