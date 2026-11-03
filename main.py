@@ -75,7 +75,7 @@ def get_history_and_prediction():
         return "BIG", datetime.now().strftime("%Y%m%d%H%M%S")
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন
+# ৩. লগইন এবং অটো-বেট ফাংশন (স্মার্ট স্ক্রিনশট ফিক্স)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -93,7 +93,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        # 💡 Render-এর মেমোরি এবং গ্রাফিক্স সমস্যা সমাধানের আর্গুমেন্ট
         browser = await p.chromium.launch(
             headless=True, 
             args=[
@@ -101,8 +100,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "--no-sandbox", 
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--use-gl=swiftshader",
+                "--disable-gpu", 
+                "--use-gl=swiftshader", 
                 "--window-size=400,800"
             ]
         ) 
@@ -213,11 +212,12 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(100, "PREPARING SCREENSHOT")
             
-            # 💡 কালো স্ক্রিন ফিক্স: পেজকে ফোর্স রেন্ডার করা
+            # 💡 কালো স্ক্রিন ফিক্স: ব্যাকগ্রাউন্ড সাদা করা (যদি সম্ভব হয়) এবং পেজ রেন্ডার করা
+            await page.evaluate("document.body.style.background = '#ffffff';")
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
             await asyncio.sleep(1)
             await page.evaluate("window.scrollTo(0, 0);")
-            await asyncio.sleep(3) # স্ক্রিনশটের আগে ৩ সেকেন্ড অপেক্ষা
+            await asyncio.sleep(3) 
 
             # 💡 JPEG ফরম্যাটে স্ক্রিনশট
             ss_path = f"dash_{uid}.jpg"
@@ -232,7 +232,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             # ---------------- ৮. রেজাল্ট পাঠানো ----------------
             if login_status == "failed" or uid_val == "Unknown":
-                if os.path.exists(ss_path):
+                # 💡 কালো স্ক্রিন চেক (ফাইল সাইজ ৫ কেবি এর কম হলে কালো ধরা হবে)
+                if os.path.exists(ss_path) and os.path.getsize(ss_path) > 5000:
                     await ctx.bot.send_photo(
                         chat_id=uid, 
                         photo=open(ss_path, 'rb'), 
@@ -241,7 +242,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     try: os.remove(ss_path)
                     except: pass
                 else:
-                    await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\n\nস্ক্রিনশট তৈরি করা যায়নি, তবে পাসওয়ার্ড চেক করুন।")
+                    if os.path.exists(ss_path): os.remove(ss_path)
+                    await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\n\nসম্ভবত পাসওয়ার্ড ভুল। (Render সার্ভারের কারণে স্ক্রিনশট কালো এসেছে, তাই পাঠানো হলো না)।")
                 
                 await browser.close()
                 return
@@ -263,8 +265,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "👇 Press START YOUR TARGET to begin"
             )
             
-            # 💡 যদি স্ক্রিনশট তৈরি হয়ে থাকে তবে ছবিসহ, না হলে শুধু টেক্সট
-            if os.path.exists(ss_path) and os.path.getsize(ss_path) > 1000:
+            # 💡 কালো স্ক্রিন চেক (ফাইল সাইজ ৫ কেবি এর কম হলে কালো ধরা হবে)
+            if os.path.exists(ss_path) and os.path.getsize(ss_path) > 5000:
                 await ctx.bot.send_photo(
                     chat_id=uid, 
                     photo=open(ss_path, 'rb'), 
@@ -274,8 +276,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 try: os.remove(ss_path)
                 except: pass
             else:
-                # স্ক্রিনশট কালো হলে বা না হলে বট শুধু মেসেজ পাঠাবে
+                if os.path.exists(ss_path): os.remove(ss_path)
                 await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, parse_mode="Markdown")
+                await ctx.bot.send_message(chat_id=uid, text="⚠️ **নোট:** Render সার্ভারের কারণে স্ক্রিনশট কালো এসেছে, তাই শুধু টেক্সট পাঠানো হলো।")
 
             reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]]
             await ctx.bot.send_message(chat_id=uid, text="👇 Press START YOUR TARGET to begin", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
@@ -473,7 +476,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     except: pass
                     
                     # 💡 বেট স্ক্রিনশট ফেইল-সেফ
-                    if os.path.exists(proof_path) and os.path.getsize(proof_path) > 1000:
+                    if os.path.exists(proof_path) and os.path.getsize(proof_path) > 5000:
                         await ctx.bot.send_photo(
                             chat_id=uid, 
                             photo=open(proof_path, 'rb'), 
@@ -482,6 +485,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         try: os.remove(proof_path)
                         except: pass
                     else:
+                        if os.path.exists(proof_path): os.remove(proof_path)
                         await ctx.bot.send_message(chat_id=uid, text=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice}**\n💵 Amount: ৳ {bet_amount:.2f}")
 
                     await ctx.bot.send_message(chat_id=uid, text=(
@@ -589,7 +593,6 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     state["first_bet"] = True 
     
-    # 💡 মেসেজের শেষের বাড়তি ফাঁকা লাইন বাদ দেওয়া হয়েছে
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
