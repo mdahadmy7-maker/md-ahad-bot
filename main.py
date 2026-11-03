@@ -126,11 +126,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ১. লগইন ফর্মে প্রবেশ ----------------
             await update_loading(10, "OPENING WEBSITE")
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await asyncio.sleep(4) # সাইট লোড হওয়ার জন্য অপেক্ষা
+            await asyncio.sleep(4) 
 
             await update_loading(30, "ENTERING CREDENTIALS")
             try:
-                # সরাসরি ইনপুট ফিল্ড খোঁজা (dkwin8.com-এ সরাসরি ফর্ম থাকে)
                 phone_input = page.locator('input[type="text"], input[type="tel"]').first
                 await phone_input.wait_for(state="visible", timeout=20000)
                 await phone_input.click()
@@ -147,7 +146,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 logger.error(f"Input fill error: {e}")
 
             await update_loading(50, "LOGGING IN")
-            # Log in বাটনে ক্লিক
             try:
                 await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000, force=True)
             except:
@@ -155,7 +153,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await page.evaluate("() => { for(let el of document.querySelectorAll('button, div, span, a')) { if((el.innerText||'').toLowerCase()==='log in') el.click(); } }")
                 except: pass
             
-            await asyncio.sleep(6) # সাইট রেসপন্স করার জন্য অপেক্ষা
+            await asyncio.sleep(6) 
 
             # ---------------- ২. পপআপ ক্লোজ ----------------
             for _ in range(10):
@@ -197,13 +195,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(100, "PREPARING SCREENSHOT")
             
-            # স্ক্রিনশট নেওয়ার আগে পেজ স্ক্রল করে ফোর্স রেন্ডার করা
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
             await asyncio.sleep(1)
             await page.evaluate("window.scrollTo(0, 0);")
             await asyncio.sleep(2) 
 
-            # স্ক্রিনশট নেওয়া (JPEG ফরম্যাটে)
             ss_path = f"dash_{uid}.jpg"
             try:
                 await page.screenshot(path=ss_path, type="jpeg", quality=80, full_page=False)
@@ -215,7 +211,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             # ---------------- ৫. রেজাল্ট পাঠানো ----------------
             if login_status == "failed" or uid_val == "Unknown":
-                # কালো স্ক্রিন চেক (ফাইল সাইজ ৫ কেবি এর কম হলে কালো ধরা হবে)
                 if os.path.exists(ss_path) and os.path.getsize(ss_path) > 5000:
                     await ctx.bot.send_photo(
                         chat_id=uid, 
