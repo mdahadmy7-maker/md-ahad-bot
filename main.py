@@ -10,11 +10,11 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন
+# ১. কনফিগারেশন (নতুন সাইট: dkwin19.com)
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-SITE_URL = "https://dkwwin.com/#/login"
-HOME_URL = "https://dkwwin.com/#/"
+SITE_URL = "https://dkwin19.com"
+HOME_URL = "https://dkwin19.com/#/"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -75,7 +75,7 @@ def get_history_and_prediction():
         return "BIG", datetime.now().strftime("%Y%m%d%H%M%S")
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (স্মার্ট স্ক্রিনশট ফিক্স)
+# ৩. লগইন এবং অটো-বেট ফাংশন (Render-এর জন্য অপটিমাইজড)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -93,6 +93,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
+        # 💡 Render-এ কালো স্ক্রিন আটকানোর জন্য শক্তিশালী ফ্ল্যাগ
         browser = await p.chromium.launch(
             headless=True, 
             args=[
@@ -100,14 +101,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "--no-sandbox", 
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
-                "--disable-gpu", 
-                "--use-gl=swiftshader", 
+                "--disable-gpu",
+                "--use-gl=angle",
+                "--use-angle=swiftshader",
+                "--enable-unsafe-swiftshader",
                 "--window-size=400,800"
             ]
         ) 
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
             viewport={"width": 400, "height": 800},
+            device_scale_factor=1, # 💡 মেমোরি সাশ্রয়ের জন্য
             is_mobile=True,
             has_touch=True
         )
@@ -212,17 +216,16 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(100, "PREPARING SCREENSHOT")
             
-            # 💡 কালো স্ক্রিন ফিক্স: ব্যাকগ্রাউন্ড সাদা করা (যদি সম্ভব হয়) এবং পেজ রেন্ডার করা
-            await page.evaluate("document.body.style.background = '#ffffff';")
+            # 💡 কালো স্ক্রিন ফিক্স: পেজ রেন্ডারিংয়ের জন্য 충분한 সময়
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
             await asyncio.sleep(1)
             await page.evaluate("window.scrollTo(0, 0);")
             await asyncio.sleep(3) 
 
-            # 💡 JPEG ফরম্যাটে স্ক্রিনশট
+            # 💡 JPEG ফরম্যাটে স্ক্রিনশট (মেমোরি সাশ্রয়ী)
             ss_path = f"dash_{uid}.jpg"
             try:
-                await page.screenshot(path=ss_path, type="jpeg", quality=80, full_page=False)
+                await page.screenshot(path=ss_path, type="jpeg", quality=80, full_page=False, animations="disabled")
             except:
                 pass
 
@@ -232,7 +235,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             # ---------------- ৮. রেজাল্ট পাঠানো ----------------
             if login_status == "failed" or uid_val == "Unknown":
-                # 💡 কালো স্ক্রিন চেক (ফাইল সাইজ ৫ কেবি এর কম হলে কালো ধরা হবে)
                 if os.path.exists(ss_path) and os.path.getsize(ss_path) > 5000:
                     await ctx.bot.send_photo(
                         chat_id=uid, 
@@ -243,7 +245,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     except: pass
                 else:
                     if os.path.exists(ss_path): os.remove(ss_path)
-                    await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\n\nসম্ভবত পাসওয়ার্ড ভুল। (Render সার্ভারের কারণে স্ক্রিনশট কালো এসেছে, তাই পাঠানো হলো না)।")
+                    await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\n\nসম্ভবত পাসওয়ার্ড ভুল অথবা স্ক্রিনশট তৈরি করা যায়নি।")
                 
                 await browser.close()
                 return
@@ -265,7 +267,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "👇 Press START YOUR TARGET to begin"
             )
             
-            # 💡 কালো স্ক্রিন চেক (ফাইল সাইজ ৫ কেবি এর কম হলে কালো ধরা হবে)
             if os.path.exists(ss_path) and os.path.getsize(ss_path) > 5000:
                 await ctx.bot.send_photo(
                     chat_id=uid, 
@@ -472,10 +473,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await page.evaluate("window.scrollTo(0, 0);")
                     await asyncio.sleep(1)
                     try:
-                        await page.screenshot(path=proof_path, type="jpeg", quality=60, full_page=False)
+                        await page.screenshot(path=proof_path, type="jpeg", quality=60, full_page=False, animations="disabled")
                     except: pass
                     
-                    # 💡 বেট স্ক্রিনশট ফেইল-সেফ
                     if os.path.exists(proof_path) and os.path.getsize(proof_path) > 5000:
                         await ctx.bot.send_photo(
                             chat_id=uid, 
@@ -593,14 +593,15 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     state["first_bet"] = True 
     
+    # 💡 আপনার নির্দেশ অনুযায়ী আরও লম্বা ওয়েলকাম মেসেজ
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🧠 Mode    : Auto Analyse & bet\n"
         "🔐 Access  : Private · Authorized Members\n"
         "🔴 Status  : Not Logged In\n"
         f"👥 Accounts: {len(state['accounts'])}/6\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🧠 Prediction Engine — 9 Layers\n"
         "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
         "🔍 Manipulation · 🎨 Colour · 🔢 Frequency\n"
@@ -608,10 +609,12 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "🔁 Every layer is back-tested live so its vote\n"
         "weight follows its real hit-rate\n"
         "🔴 Confidence below 30% → sit out\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🎬 4-second 🧠 generating prediction animation\n"
         "🚀 Analysis → auto bet every 30s period\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "📊 Real-time balance tracking\n"
+        "🛡️ Secure session handling\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         "👇 Press the button below to LOGIN"
     )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
