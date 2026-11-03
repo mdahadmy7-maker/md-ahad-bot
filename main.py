@@ -55,7 +55,6 @@ def get_history_and_prediction():
             num = int(item.get("number", 0))
             history.append("SMALL" if num <= 4 else "BIG")
             
-        if len(history) == 0: return "BIG", latest_period
         if len(history) < 3:
             return ("SMALL" if history[-1] == 'BIG' else "BIG"), latest_period
             
@@ -67,26 +66,22 @@ def get_history_and_prediction():
             
         if n >= 4:
             l4 = history[n-4]
-            if l4 == l3 and l2 == l1 and l4 != l3:
-                return l4, latest_period
-            if l4 == l2 and l3 == l1 and l4 != l3:
-                return l4, latest_period
+            if l4 == l3 and l2 == l1 and l4 != l3: return l4, latest_period
+            if l4 == l2 and l3 == l1 and l4 != l3: return l4, latest_period
                 
         return ("SMALL" if l1 == 'BIG' else "BIG"), latest_period
-        
     except Exception as e:
         logger.error(f"History API error: {e}")
-        fallback_period = datetime.now().strftime("%Y%m%d%H%M%S")
-        return random.choice(["BIG", "SMALL"]), fallback_period
+        return "BIG", datetime.now().strftime("%Y%m%d%H%M%S")
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (লোডিং মেসেজ সহ)
+# ৩. লগইন এবং অটো-বেট ফাংশন (লোডিং মেসেজ ও ব্ল্যাক স্ক্রিন ফিক্স সহ)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
     login_phone = phone[3:] if phone.startswith("880") else phone
     
-    # 💡 লোডিং মেসেজ আপডেট করার ফাংশন
+    # লোডিং মেসেজ আপডেট করার ফাংশন
     async def update_loading(percent, text_status="CONNECTING TO SITE"):
         if not loading_msg_id: return
         filled = "█" * (percent // 10)
@@ -99,7 +94,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        # 💡 কালো স্ক্রিন এবং স্লো হওয়া ঠিক করার আর্গুমেন্ট
+        # 💡 কালো স্ক্রিন এবং Render-এর মেমোরি ক্র্যাশ ঠিক করার আর্গুমেন্ট
         browser = await p.chromium.launch(
             headless=True, 
             args=[
@@ -108,25 +103,22 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
-                "--use-gl=swiftshader",
-                "--window-size=412,915"
+                "--disable-software-rasterizer",
+                "--window-size=400,800"
             ]
         ) 
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-            viewport={"width": 412, "height": 915},
-            device_scale_factor=3,
+            viewport={"width": 400, "height": 800},
+            device_scale_factor=1, # 💡 ব্ল্যাক স্ক্রিন ফিক্স: ডিভাইস স্কেল ১ করা হয়েছে
             is_mobile=True,
-            has_touch=True,
-            locale="en-US",
-            timezone_id="Asia/Dhaka"
+            has_touch=True
         )
         
-        # 💡 রোবট ডিটেকশন বাইপাস স্ক্রিপ্ট
+        # রোবট ডিটেকশন বাইপাস স্ক্রিপ্ট
         await context.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
             Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
-            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
             window.chrome = { runtime: {} };
         """)
 
@@ -136,9 +128,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ১. সাইটে প্রবেশ ----------------
             await update_loading(10, "OPENING WEBSITE")
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await asyncio.sleep(3) # সাইট লোড হওয়ার জন্য অপেক্ষা
+            await asyncio.sleep(3)
 
-            # ---------------- ২. ধাপ ১: লাল বাটনে ক্লিক ----------------
+            # ---------------- ২. লাল বাটনে ক্লিক (Dk Win Login) ----------------
             await update_loading(25, "NAVIGATING TO LOGIN")
             try:
                 red_btn = page.locator('text="Dk Win Login"').first
@@ -147,7 +139,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await asyncio.sleep(2)
             except: pass
 
-            # ---------------- ৩. ধাপ ২: "I have an account" এ ক্লিক ----------------
+            # ---------------- ৩. "I have an account Login" এ ক্লিক ----------------
             await update_loading(40, "OPENING LOGIN FORM")
             try:
                 acc_btn = page.locator('text="I have an account"').first
@@ -156,14 +148,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await asyncio.sleep(2)
             except: pass
 
-            # ---------------- ৪. ধাপ ৩: ফোন এবং পাসওয়ার্ড বসানো ----------------
+            # ---------------- ৪. ফোন এবং পাসওয়ার্ড বসানো ----------------
             await update_loading(55, "ENTERING CREDENTIALS")
             try:
                 phone_input = page.locator('input[type="text"], input[type="tel"]').first
                 await phone_input.wait_for(state="visible", timeout=15000)
                 await phone_input.click()
                 await phone_input.fill("")
-                # মানুষের মতো টাইপ করা
                 await phone_input.type(login_phone, delay=random.randint(80, 150))
                 await asyncio.sleep(0.5)
                 
@@ -174,7 +165,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await asyncio.sleep(0.5)
             except: pass
 
-            # ---------------- ৫. ধাপ ৪: Log in বাটনে ক্লিক ----------------
+            # ---------------- ৫. Log in বাটনে ক্লিক ----------------
             await update_loading(70, "LOGGING IN")
             try:
                 await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=10000, force=True)
@@ -183,14 +174,14 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await page.evaluate("() => { for(let el of document.querySelectorAll('button, div, span, a')) { if((el.innerText||'').toLowerCase()==='log in') el.click(); } }")
                 except: pass
             
-            await asyncio.sleep(5) # সাইট রেসপন্স করার জন্য অপেক্ষা
+            await asyncio.sleep(5)
 
             # পপআপ ক্লোজ
             for _ in range(10):
                 await page.evaluate("() => { for(let el of document.querySelectorAll('button, div, span')) { let t=(el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok') el.click(); } }")
                 await asyncio.sleep(0.5)
 
-            # ---------------- ৬. ধাপ ৫: Account পেজে ক্লিক ----------------
+            # ---------------- ৬. Account পেজে ক্লিক ----------------
             await update_loading(85, "FETCHING ACCOUNT DETAILS")
             try:
                 account_tab = page.get_by_text("Account", exact=True).last
@@ -225,14 +216,15 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(100, "PREPARING SCREENSHOT")
             
-            # 💡 কালো স্ক্রিন সমাধান: পেইজটিকে ফোকাস করা এবং অপেক্ষা করা
-            await page.bring_to_front()
+            # 💡 ব্ল্যাক স্ক্রিন ফিক্স: পেইজটিকে ফোর্স রেন্ডার করা
+            await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+            await asyncio.sleep(1)
             await page.evaluate("window.scrollTo(0, 0);")
-            await asyncio.sleep(3) 
+            await asyncio.sleep(2) 
 
-            # স্ক্রিনশট নেওয়া
+            # স্ক্রিনশট নেওয়া (animations="disabled" বাদ দেওয়া হয়েছে যাতে পেইজ ফ্রিজ না হয়)
             ss_path = f"dash_{uid}.png"
-            await page.screenshot(path=ss_path, full_page=False, animations="disabled")
+            await page.screenshot(path=ss_path, full_page=False)
 
             if loading_msg_id:
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
@@ -466,8 +458,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await asyncio.sleep(2)
                     proof_path = f"proof_success_{uid}.png"
                     
-                    await page.bring_to_front()
-                    await page.screenshot(path=proof_path, full_page=False, animations="disabled")
+                    await page.evaluate("window.scrollTo(0, 0);")
+                    await asyncio.sleep(1)
+                    await page.screenshot(path=proof_path, full_page=False)
                     
                     await ctx.bot.send_photo(
                         chat_id=uid, 
@@ -634,7 +627,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if state.get("task"): state["task"].cancel()
         state["first_bet"] = True 
         
-        # 💡 পাসওয়ার্ড দেওয়া মাত্রই লোডিং মেসেজ চলে আসবে
+        # লোডিং মেসেজ ফিরিয়ে আনা হয়েছে
         loading_msg = await update.message.reply_text("🔄 **CONNECTING TO SITE**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
         state["task"] = asyncio.create_task(playwright_login_and_bet(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"]))
         return
