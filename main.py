@@ -93,7 +93,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        # 💡 Termux-এর জন্য executable_path যুক্ত করা হয়েছে
+        # 💡 এখানে Termux-এর ব্রাউজার পাথ (executable_path) বসানো হয়েছে
         browser = await p.chromium.launch(
             headless=True, 
             executable_path="/data/data/com.termux/files/usr/bin/chromium-browser",
