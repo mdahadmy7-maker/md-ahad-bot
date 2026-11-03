@@ -75,13 +75,12 @@ def get_history_and_prediction():
         return "BIG", datetime.now().strftime("%Y%m%d%H%M%S")
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (লোডিং মেসেজ ও ব্ল্যাক স্ক্রিন ফিক্স সহ)
+# ৩. লগইন এবং অটো-বেট ফাংশন (লোডিং ও স্ক্রিনশট ফিক্স)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
     login_phone = phone[3:] if phone.startswith("880") else phone
     
-    # লোডিং মেসেজ আপডেট করার ফাংশন
     async def update_loading(percent, text_status="CONNECTING TO SITE"):
         if not loading_msg_id: return
         filled = "█" * (percent // 10)
@@ -94,7 +93,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        # 💡 কালো স্ক্রিন এবং Render-এর মেমোরি ক্র্যাশ ঠিক করার আর্গুমেন্ট
         browser = await p.chromium.launch(
             headless=True, 
             args=[
@@ -103,19 +101,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
-                "--disable-software-rasterizer",
+                "--use-gl=swiftshader",
                 "--window-size=400,800"
             ]
         ) 
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
             viewport={"width": 400, "height": 800},
-            device_scale_factor=1, # 💡 ব্ল্যাক স্ক্রিন ফিক্স: ডিভাইস স্কেল ১ করা হয়েছে
             is_mobile=True,
             has_touch=True
         )
         
-        # রোবট ডিটেকশন বাইপাস স্ক্রিপ্ট
         await context.add_init_script("""
             Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
             Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
@@ -130,7 +126,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
             await asyncio.sleep(3)
 
-            # ---------------- ২. লাল বাটনে ক্লিক (Dk Win Login) ----------------
+            # ---------------- ২. লাল বাটনে ক্লিক ----------------
             await update_loading(25, "NAVIGATING TO LOGIN")
             try:
                 red_btn = page.locator('text="Dk Win Login"').first
@@ -216,15 +212,18 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(100, "PREPARING SCREENSHOT")
             
-            # 💡 ব্ল্যাক স্ক্রিন ফিক্স: পেইজটিকে ফোর্স রেন্ডার করা
+            # 💡 কালো স্ক্রিন ফিক্স
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
             await asyncio.sleep(1)
             await page.evaluate("window.scrollTo(0, 0);")
             await asyncio.sleep(2) 
 
-            # স্ক্রিনশট নেওয়া (animations="disabled" বাদ দেওয়া হয়েছে যাতে পেইজ ফ্রিজ না হয়)
-            ss_path = f"dash_{uid}.png"
-            await page.screenshot(path=ss_path, full_page=False)
+            # 💡 JPEG ফরম্যাটে স্ক্রিনশট
+            ss_path = f"dash_{uid}.jpg"
+            try:
+                await page.screenshot(path=ss_path, type="jpeg", quality=70, full_page=False)
+            except:
+                pass
 
             if loading_msg_id:
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
@@ -232,14 +231,18 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             # ---------------- ৮. রেজাল্ট পাঠানো ----------------
             if login_status == "failed" or uid_val == "Unknown":
-                await ctx.bot.send_photo(
-                    chat_id=uid, 
-                    photo=open(ss_path, 'rb'), 
-                    caption=f"❌ **LOGIN FAILED** ({phone})\n\nসম্ভবত পাসওয়ার্ড ভুল অথবা সাইট বটকে ডিটেক্ট করেছে। নিচের স্ক্রিনশটে দেখুন সাইটে কী লেখা আছে।"
-                )
+                if os.path.exists(ss_path):
+                    await ctx.bot.send_photo(
+                        chat_id=uid, 
+                        photo=open(ss_path, 'rb'), 
+                        caption=f"❌ **LOGIN FAILED** ({phone})\n\nসম্ভবত পাসওয়ার্ড ভুল অথবা সাইট বটকে ডিটেক্ট করেছে।"
+                    )
+                    try: os.remove(ss_path)
+                    except: pass
+                else:
+                    await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED** ({phone})\n\nস্ক্রিনশট তৈরি করা যায়নি, তবে পাসওয়ার্ড চেক করুন।")
+                
                 await browser.close()
-                try: os.remove(ss_path)
-                except: pass
                 return
 
             state["balance"] = float(balance)
@@ -259,15 +262,17 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "👇 Press START YOUR TARGET to begin"
             )
             
-            # স্ক্রিনশট এবং মেসেজ একসাথে পাঠানো
-            await ctx.bot.send_photo(
-                chat_id=uid, 
-                photo=open(ss_path, 'rb'), 
-                caption=dashboard_msg, 
-                parse_mode="Markdown"
-            )
-            try: os.remove(ss_path)
-            except: pass
+            if os.path.exists(ss_path):
+                await ctx.bot.send_photo(
+                    chat_id=uid, 
+                    photo=open(ss_path, 'rb'), 
+                    caption=dashboard_msg, 
+                    parse_mode="Markdown"
+                )
+                try: os.remove(ss_path)
+                except: pass
+            else:
+                await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, parse_mode="Markdown")
 
             reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]]
             await ctx.bot.send_message(chat_id=uid, text="👇 Press START YOUR TARGET to begin", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
@@ -456,20 +461,24 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except: pass
 
                     await asyncio.sleep(2)
-                    proof_path = f"proof_success_{uid}.png"
+                    proof_path = f"proof_success_{uid}.jpg"
                     
                     await page.evaluate("window.scrollTo(0, 0);")
                     await asyncio.sleep(1)
-                    await page.screenshot(path=proof_path, full_page=False)
-                    
-                    await ctx.bot.send_photo(
-                        chat_id=uid, 
-                        photo=open(proof_path, 'rb'), 
-                        caption=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice}**\n💵 Amount: ৳ {bet_amount:.2f}\n📱 স্ক্রিনশটে দেখুন সাইটে কি হয়েছে ↓"
-                    )
-                    
-                    try: os.remove(proof_path)
+                    try:
+                        await page.screenshot(path=proof_path, type="jpeg", quality=60, full_page=False)
                     except: pass
+                    
+                    if os.path.exists(proof_path):
+                        await ctx.bot.send_photo(
+                            chat_id=uid, 
+                            photo=open(proof_path, 'rb'), 
+                            caption=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice}**\n💵 Amount: ৳ {bet_amount:.2f}"
+                        )
+                        try: os.remove(proof_path)
+                        except: pass
+                    else:
+                        await ctx.bot.send_message(chat_id=uid, text=f"✅ **BET PLACED SUCCESSFULLY!**\n\n🎯 Prediction: **{choice}**\n💵 Amount: ৳ {bet_amount:.2f}")
 
                     await ctx.bot.send_message(chat_id=uid, text=(
                         "━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -576,6 +585,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     state["first_bet"] = True 
     
+    # 💡 মেসেজের শেষের বাড়তি ফাঁকা লাইন বাদ দেওয়া হয়েছে যাতে বাটন মিশে থাকে
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -593,8 +603,8 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "🔴 Confidence below 30% → sit out\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🎬 4-second 🧠 generating prediction animation\n"
-        "🚀 Analysis → auto bet every 30s period\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "🚀 Analysis → auto bet every 30s period\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "👇 Press the button below to LOGIN"
     )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
@@ -627,7 +637,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if state.get("task"): state["task"].cancel()
         state["first_bet"] = True 
         
-        # লোডিং মেসেজ ফিরিয়ে আনা হয়েছে
         loading_msg = await update.message.reply_text("🔄 **CONNECTING TO SITE**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
         state["task"] = asyncio.create_task(playwright_login_and_bet(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"]))
         return
