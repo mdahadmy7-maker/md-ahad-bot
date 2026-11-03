@@ -75,7 +75,7 @@ def get_history_and_prediction():
         return "BIG", datetime.now().strftime("%Y%m%d%H%M%S")
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (লোডিং ও স্ক্রিনশট ফিক্স)
+# ৩. লগইন এবং অটো-বেট ফাংশন
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -93,6 +93,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
+        # 💡 Render-এর মেমোরি এবং গ্রাফিক্স সমস্যা সমাধানের আর্গুমেন্ট
         browser = await p.chromium.launch(
             headless=True, 
             args=[
@@ -212,16 +213,16 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             await update_loading(100, "PREPARING SCREENSHOT")
             
-            # 💡 কালো স্ক্রিন ফিক্স
+            # 💡 কালো স্ক্রিন ফিক্স: পেজকে ফোর্স রেন্ডার করা
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
             await asyncio.sleep(1)
             await page.evaluate("window.scrollTo(0, 0);")
-            await asyncio.sleep(2) 
+            await asyncio.sleep(3) # স্ক্রিনশটের আগে ৩ সেকেন্ড অপেক্ষা
 
             # 💡 JPEG ফরম্যাটে স্ক্রিনশট
             ss_path = f"dash_{uid}.jpg"
             try:
-                await page.screenshot(path=ss_path, type="jpeg", quality=70, full_page=False)
+                await page.screenshot(path=ss_path, type="jpeg", quality=80, full_page=False)
             except:
                 pass
 
@@ -262,7 +263,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "👇 Press START YOUR TARGET to begin"
             )
             
-            if os.path.exists(ss_path):
+            # 💡 যদি স্ক্রিনশট তৈরি হয়ে থাকে তবে ছবিসহ, না হলে শুধু টেক্সট
+            if os.path.exists(ss_path) and os.path.getsize(ss_path) > 1000:
                 await ctx.bot.send_photo(
                     chat_id=uid, 
                     photo=open(ss_path, 'rb'), 
@@ -272,6 +274,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 try: os.remove(ss_path)
                 except: pass
             else:
+                # স্ক্রিনশট কালো হলে বা না হলে বট শুধু মেসেজ পাঠাবে
                 await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, parse_mode="Markdown")
 
             reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]]
@@ -469,7 +472,8 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         await page.screenshot(path=proof_path, type="jpeg", quality=60, full_page=False)
                     except: pass
                     
-                    if os.path.exists(proof_path):
+                    # 💡 বেট স্ক্রিনশট ফেইল-সেফ
+                    if os.path.exists(proof_path) and os.path.getsize(proof_path) > 1000:
                         await ctx.bot.send_photo(
                             chat_id=uid, 
                             photo=open(proof_path, 'rb'), 
@@ -585,7 +589,7 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     state["first_bet"] = True 
     
-    # 💡 মেসেজের শেষের বাড়তি ফাঁকা লাইন বাদ দেওয়া হয়েছে যাতে বাটন মিশে থাকে
+    # 💡 মেসেজের শেষের বাড়তি ফাঁকা লাইন বাদ দেওয়া হয়েছে
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
