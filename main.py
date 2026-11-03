@@ -75,7 +75,7 @@ def get_history_and_prediction():
         return "BIG", datetime.now().strftime("%Y%m%d%H%M%S")
 
 # ───────────────────────────────────────────
-# ৩. লগইন এবং অটো-বেট ফাংশন (Termux এর জন্য প্রস্তুত)
+# ৩. লগইন এবং অটো-বেট ফাংশন
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -93,10 +93,9 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        # 💡 এখানে Termux-এর ব্রাউজার পাথ বসানো আছে
+        # 💡 Ubuntu-তে সরাসরি প্লেরাইটের নিজস্ব ব্রাউজার ব্যবহার হবে
         browser = await p.chromium.launch(
             headless=True, 
-            executable_path="/data/data/com.termux/files/usr/bin/chromium-browser",
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox", 
