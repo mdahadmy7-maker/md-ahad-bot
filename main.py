@@ -1,3 +1,5 @@
+cd ~/mybot
+rm -f main.py
 cat << 'EOF' > main.py
 import os
 import logging
