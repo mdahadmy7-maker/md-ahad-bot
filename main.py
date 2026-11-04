@@ -1,10 +1,11 @@
+cat << 'EOF' > main.py
 import os
 import logging
 import time
 import uuid
 import hashlib
 import requests
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, MessageHandler, ContextTypes, filters
 
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
@@ -89,22 +90,20 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["awaiting"] = None
         
         try:
-            await update.message.delete() # নিরাপত্তার জন্য পাসওয়ার্ড মেসেজ ডিলিট করা
+            await update.message.delete()
         except:
             pass
             
         wait_msg = await update.message.reply_text("🔄 **লগইন হচ্ছে, দয়া করে অপেক্ষা করুন...**", parse_mode="Markdown")
         
-        # এপিআই কল করা
         res = api_login(phone, password)
         
         await ctx.bot.delete_message(chat_id=uid, message_id=wait_msg.message_id)
         
         if "error" in res:
-            await update.message.reply_text(f"❌ **লগইন ব্যর্থ হয়েছে!**\nএকর: `{res['error']}`", parse_mode="Markdown")
+            await update.message.reply_text(f"❌ **লগইন ব্যর্থ হয়েছে!**\nএরর: `{res['error']}`", parse_mode="Markdown")
         else:
-            # সার্ভার থেকে সফল রেসপন্স আসলে
-            await update.message.reply_text(f"✅ **লগইন সফল হয়েছে!**\nরেসপন্স: `{res}`", parse_mode="Markdown")
+            await update.message.reply_text(f"✅ **সার্ভার রেসপন্স পাওয়া গেছে!**\nরেসপন্স: `{res}`", parse_mode="Markdown")
 
 def main():
     if not BOT_TOKEN:
@@ -119,4 +118,4 @@ def main():
 
 if __name__ == "__main__":
     main()
-    
+EOF
