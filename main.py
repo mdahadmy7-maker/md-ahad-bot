@@ -1,36 +1,53 @@
-rm main.py
-cat << 'EOF' > main.py
-import os
-import logging
+import time
+import uuid
+import hashlib
 import requests
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+def generate_signature(random_str, timestamp, pwd):
+    # সাইটের নিয়ম অনুযায়ী সিগনেচার হ্যাশ তৈরি করার লজিক
+    raw_str = f"{random_str}{timestamp}{pwd}"
+    return hashlib.md5(raw_str.encode()).hexdigest().upper()
 
-logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
-logger = logging.getLogger(__name__)
+def dynamic_login(phone, password):
+    url = "https://api.dkwinapi.com/api/webapi/Login"
+    
+    current_timestamp = int(time.time())
+    random_hex = uuid.uuid4().hex
+    signature_val = generate_signature(random_hex, current_timestamp, password)
+    
+    headers = {
+        "authority": "api.dkwinapi.com",
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9",
+        "ar-origin": "https://dkwin8.com",
+        "content-type": "application/json;charset=UTF-8",
+        "origin": "https://dkwin8.com",
+        "referer": "https://dkwin8.com/",
+        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
+        "x-app-type": "H5"
+    }
 
-async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
-    await update.message.reply_text("🧠 **BD WIN GO AUTO BOT**\n\nশুরু করতে নিচের বাটনে ক্লিক করুন:", reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="Markdown")
+    payload = {
+        "username": phone,          # এখানে ইউজারের দেওয়া সঠিক ফোন নম্বর বসবে
+        "pwd": password,            # এখানে ইউজারের দেওয়া সঠিক পাসওয়ার্ড বসবে
+        "phonetype": 1,
+        "logintype": "mobile",
+        "packId": "",
+        "deviceId": "78a31db8d2dc8544556f9d82370be707",
+        "pixelId": "",
+        "fbcId": "",
+        "fbc": "",
+        "fbp": "",
+        "adId": "",
+        "language": 0,
+        "random": random_hex,
+        "signature": signature_val,
+        "timestamp": current_timestamp
+    }
 
-async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    if query.data == "start_login":
-        await ctx.bot.send_message(chat_id=query.from_user.id, text="📱 আপনার ফোন নম্বর দিন:")
-
-def main():
-    if not BOT_TOKEN:
-        print("❌ Error: BOT_TOKEN সেট করা নেই!")
-        return
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CallbackQueryHandler(callback_handler))
-    print("🤖 Bot started successfully...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
-EOF
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        return response.json()
+    except Exception as e:
+        return {"error": str(e)}
+        
