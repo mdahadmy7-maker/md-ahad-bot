@@ -1,5 +1,3 @@
-cd ~/mybot
-rm -f main.py
 cat << 'EOF' > main.py
 import os
 import logging
@@ -105,7 +103,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if "error" in res:
             await update.message.reply_text(f"❌ **লগইন ব্যর্থ হয়েছে!**\nএরর: `{res['error']}`", parse_mode="Markdown")
         else:
-            await update.message.reply_text(f"✅ **সার্ভার রেসপন্স পাওয়া গেছে!**\nরেসপন্স: `{res}`", parse_mode="Markdown")
+            await update.message.reply_text(f"✅ **সার্ভার রেসপন্স পাওয়া গেছে!**\nরেসপন্স: `{res}`", parse_group=False, parse_mode="Markdown")
 
 def main():
     if not BOT_TOKEN:
