@@ -2,7 +2,6 @@ import asyncio
 import logging
 import re
 import os
-import random
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 from playwright.async_api import async_playwright
@@ -39,7 +38,7 @@ async def close_browser(uid):
     state["playwright"] = None
 
 # ───────────────────────────────────────────
-# ২. লগইন ফাংশন (শুধু টেক্সট রেসপন্স, কোনো ছবি নেই)
+# ২. লগইন ফাংশন (শুধু ব্রাউজার ও ক্লিক)
 # ───────────────────────────────────────────
 async def execute_login(uid, ctx, phone, password):
     state = get_state(uid)
@@ -47,16 +46,14 @@ async def execute_login(uid, ctx, phone, password):
     
     try:
         p = await async_playwright().start()
-        # Termux বা Render এর জন্য
+        # Render এর জন্য কোনো আলাদা পাথের দরকার নেই
         browser = await p.chromium.launch(
             headless=True, 
-            # Termux এর জন্য পাথ:
-            executable_path="/data/data/com.termux/files/usr/bin/chromium-browser", 
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"]
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"]
         ) 
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-            viewport={"width": 400, "height": 800}, is_mobile=True, has_touch=True
+            viewport={"width": 400, "height": 800}
         )
         page = await context.new_page()
         
@@ -66,23 +63,27 @@ async def execute_login(uid, ctx, phone, password):
 
         await ctx.bot.send_message(chat_id=uid, text="🔄 **সাইটে ঢোকা হচ্ছে...**")
         await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-        await asyncio.sleep(5)
+        await page.wait_for_timeout(5000)
 
-        # "I have an account" বাটনে ক্লিক
+        # "I have an account" বাটনে ক্লিক (যদি থাকে)
         try:
             acc_btn = page.locator('text="I have an account"').first
             if await acc_btn.count() > 0:
                 await acc_btn.click(force=True, timeout=5000)
-                await asyncio.sleep(3)
+                await page.wait_for_timeout(3000)
         except: pass
 
         # নাম্বার ও পাসওয়ার্ড বসানো
         try:
-            await page.locator('input[type="text"], input[type="tel"]').first.fill(login_phone)
-            await asyncio.sleep(1)
-            await page.locator('input[type="password"]').first.fill(password)
-            await asyncio.sleep(1)
-        except: pass
+            phone_input = page.locator('input[type="text"], input[type="tel"]').first
+            await phone_input.fill(login_phone)
+            await page.wait_for_timeout(1000)
+            
+            pass_input = page.locator('input[type="password"]').first
+            await pass_input.fill(password)
+            await page.wait_for_timeout(1000)
+        except Exception as e:
+            logger.error(f"Input error: {e}")
 
         # Log in বাটনে ক্লিক
         try:
@@ -91,17 +92,17 @@ async def execute_login(uid, ctx, phone, password):
             await page.evaluate("() => { for(let el of document.querySelectorAll('button, div, span, a')) { if((el.innerText||'').toLowerCase()==='log in') el.click(); } }")
         
         await ctx.bot.send_message(chat_id=uid, text="🔄 **লগইন প্রসেস হচ্ছে...**")
-        await asyncio.sleep(6) 
+        await page.wait_for_timeout(6000) 
 
         # পপআপ ক্লোজ
         for _ in range(5):
             await page.evaluate("() => { for(let el of document.querySelectorAll('button, div, span')) { let t=(el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close') el.click(); } }")
-            await asyncio.sleep(0.5)
+            await page.wait_for_timeout(500)
 
         # Account পেজে ক্লিক
         try:
             await page.evaluate("() => { for(let el of document.querySelectorAll('div, span, a, p')) { if((el.innerText||'').trim().toLowerCase()==='account') el.click(); } }")
-            await asyncio.sleep(4) 
+            await page.wait_for_timeout(4000) 
         except: pass
 
         # UID এবং Balance বের করা
@@ -117,12 +118,13 @@ async def execute_login(uid, ctx, phone, password):
                 uid_val = uid_match.group(1)
                 if balance_match: balance = balance_match.group(1)
                 break
-            await asyncio.sleep(0.5)
+            await page.wait_for_timeout(500)
 
         if uid_val != "Unknown":
             state["balance"] = float(balance)
             state["uid_val"] = uid_val
-            # এখানে কোনো ছবি পাঠানো হচ্ছে না, শুধু টেক্সট
+            
+            # সরাসরি টেক্সট মেসেজ, কোনো ছবি নেই
             await ctx.bot.send_message(chat_id=uid, text=f"✅ **LOGIN SUCCESSFUL**\n\n👤 **UID:** `{uid_val}`\n💰 **Balance:** ৳ {balance}")
             reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE")]]
             await ctx.bot.send_message(chat_id=uid, text="👇 এখন আপনার টার্গেট সেট করুন।", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
@@ -130,9 +132,11 @@ async def execute_login(uid, ctx, phone, password):
             await ctx.bot.send_message(chat_id=uid, text="❌ **LOGIN FAILED**\n\nপাসওয়ার্ড ভুল অথবা সাইট বটকে ডিটেক্ট করেছে।")
 
     except Exception as e:
+        logger.error(f"Login Error: {e}")
         await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **সিস্টেম এরর:** `{str(e)[:100]}`")
+    # ব্রাউজার খোলা রাখা হলো যাতে পরের ধাপে বাজি ধরা যায়
     finally:
-        pass # ব্রাউজার খোলা রাখব যাতে বাজি ধরা যায়
+        pass
 
 # ───────────────────────────────────────────
 # ৩. টেলিগ্রাম হ্যান্ডলার
