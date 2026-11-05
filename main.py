@@ -37,20 +37,13 @@ async def close_browser(uid):
     state["page"] = None
     state["playwright"] = None
 
-# ───────────────────────────────────────────
-# ২. লগইন ফাংশন (শুধু ব্রাউজার ও ক্লিক)
-# ───────────────────────────────────────────
 async def execute_login(uid, ctx, phone, password):
     state = get_state(uid)
     login_phone = phone[3:] if phone.startswith("880") else phone
     
     try:
         p = await async_playwright().start()
-        # Render এর জন্য কোনো আলাদা পাথের দরকার নেই
-        browser = await p.chromium.launch(
-            headless=True, 
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"]
-        ) 
+        browser = await p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled", "--no-sandbox"])
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
             viewport={"width": 400, "height": 800}
@@ -65,47 +58,31 @@ async def execute_login(uid, ctx, phone, password):
         await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
         await page.wait_for_timeout(5000)
 
-        # "I have an account" বাটনে ক্লিক (যদি থাকে)
+        # লগইন ফর্ম পূরণ করা
         try:
-            acc_btn = page.locator('text="I have an account"').first
-            if await acc_btn.count() > 0:
-                await acc_btn.click(force=True, timeout=5000)
-                await page.wait_for_timeout(3000)
-        except: pass
-
-        # নাম্বার ও পাসওয়ার্ড বসানো
-        try:
-            phone_input = page.locator('input[type="text"], input[type="tel"]').first
-            await phone_input.fill(login_phone)
+            await page.locator('input[type="text"], input[type="tel"]').first.fill(login_phone)
             await page.wait_for_timeout(1000)
-            
-            pass_input = page.locator('input[type="password"]').first
-            await pass_input.fill(password)
+            await page.locator('input[type="password"]').first.fill(password)
             await page.wait_for_timeout(1000)
+            await page.get_by_text("Log in", exact=False).last.click()
         except Exception as e:
             logger.error(f"Input error: {e}")
 
-        # Log in বাটনে ক্লিক
-        try:
-            await page.get_by_role("button", name=re.compile("log in", re.IGNORECASE)).last.click(timeout=5000)
-        except:
-            await page.evaluate("() => { for(let el of document.querySelectorAll('button, div, span, a')) { if((el.innerText||'').toLowerCase()==='log in') el.click(); } }")
-        
         await ctx.bot.send_message(chat_id=uid, text="🔄 **লগইন প্রসেস হচ্ছে...**")
         await page.wait_for_timeout(6000) 
 
-        # পপআপ ক্লোজ
+        # পপআপ বন্ধ করা
         for _ in range(5):
             await page.evaluate("() => { for(let el of document.querySelectorAll('button, div, span')) { let t=(el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close') el.click(); } }")
             await page.wait_for_timeout(500)
 
-        # Account পেজে ক্লিক
+        # Account পেজে যাওয়া
         try:
             await page.evaluate("() => { for(let el of document.querySelectorAll('div, span, a, p')) { if((el.innerText||'').trim().toLowerCase()==='account') el.click(); } }")
             await page.wait_for_timeout(4000) 
         except: pass
 
-        # UID এবং Balance বের করা
+        # ডেটা বের করা
         uid_val = "Unknown"
         balance = "0.00"
         for _ in range(10): 
@@ -123,10 +100,8 @@ async def execute_login(uid, ctx, phone, password):
         if uid_val != "Unknown":
             state["balance"] = float(balance)
             state["uid_val"] = uid_val
-            
-            # সরাসরি টেক্সট মেসেজ, কোনো ছবি নেই
             await ctx.bot.send_message(chat_id=uid, text=f"✅ **LOGIN SUCCESSFUL**\n\n👤 **UID:** `{uid_val}`\n💰 **Balance:** ৳ {balance}")
-            reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE")]]
+            reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")]]
             await ctx.bot.send_message(chat_id=uid, text="👇 এখন আপনার টার্গেট সেট করুন।", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
         else:
             await ctx.bot.send_message(chat_id=uid, text="❌ **LOGIN FAILED**\n\nপাসওয়ার্ড ভুল অথবা সাইট বটকে ডিটেক্ট করেছে।")
@@ -134,26 +109,13 @@ async def execute_login(uid, ctx, phone, password):
     except Exception as e:
         logger.error(f"Login Error: {e}")
         await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **সিস্টেম এরর:** `{str(e)[:100]}`")
-    # ব্রাউজার খোলা রাখা হলো যাতে পরের ধাপে বাজি ধরা যায়
-    finally:
-        pass
 
-# ───────────────────────────────────────────
-# ৩. টেলিগ্রাম হ্যান্ডলার
-# ───────────────────────────────────────────
+# হ্যান্ডলার
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     await close_browser(uid)
     user_state[uid] = get_state(uid) 
-    
-    welcome_text = (
-        "🧠 **DK WIN AUTO BET 💥**\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🔴 Status  : Not Logged In\n"
-        "👇 Press the button below to LOGIN"
-    )
-    keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
-    await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("🧠 **DK WIN AUTO BET**\n\n👇 Press the button to LOGIN", reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🔐 LOGIN", callback_data="start_login")]]))
 
 async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -163,46 +125,28 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if state.get("awaiting") == "phone":
         state["temp_phone"] = text
         state["awaiting"] = "password"
-        await update.message.reply_text("🔑 **এখন আপনার পাসওয়ার্ড দিন:**")
-        return
-
-    if state.get("awaiting") == "password":
+        await update.message.reply_text("🔑 **পাসওয়ার্ড দিন:**")
+    elif state.get("awaiting") == "password":
         state["temp_password"] = text
         state["awaiting"] = None 
         try: await update.message.delete()
         except: pass
-        
         if state.get("task"): state["task"].cancel()
         state["task"] = asyncio.create_task(execute_login(uid, ctx, state["temp_phone"], state["temp_password"]))
-        return
 
 async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     uid = update.effective_user.id
-    state = get_state(uid)
-    data = query.data
-    
-    if data == "start_login":
-        state["awaiting"] = "phone"
-        await query.edit_message_text("📱 **আপনার DK WIN ফোন নাম্বার দিন:**")
-
-async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    await close_browser(uid)
-    user_state[uid] = get_state(uid) 
-    await update.message.reply_text("🔄 সব ডেটা রিসেট হয়েছে। /start দিন।")
+    if query.data == "start_login":
+        get_state(uid)["awaiting"] = "phone"
+        await query.edit_message_text("📱 **ফোন নাম্বার দিন:**")
 
 def main():
-    if not BOT_TOKEN:
-        print("❌ Error: BOT_TOKEN সেট করা নেই!")
-        return
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    print("🤖 Bot started...")
     app.run_polling()
 
 if __name__ == "__main__":
