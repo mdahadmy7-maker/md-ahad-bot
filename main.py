@@ -9,7 +9,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
-# ১. Flask সার্ভার (Render-এর পোর্ট স্ক্যান পাস করার জন্য)
+# ১. Flask সার্ভার (Render এর জন্য)
 # ═══════════════════════════════════════════
 flask_app = Flask(__name__)
 
@@ -18,7 +18,6 @@ def home():
     return "Bot is running perfectly!"
 
 def run_flask():
-    # Render স্বয়ংক্রিয়ভাবে PORT এনভায়রনমেন্ট ভেরিয়েবল দেয়
     port = int(os.environ.get("PORT", 8080))
     flask_app.run(host="0.0.0.0", port=port)
 
@@ -61,10 +60,13 @@ async def execute_login(uid, ctx, phone, password):
     login_phone = phone[3:] if phone.startswith("880") else phone
     
     try:
+        print(">>> [LOG] Playwright starting...")
         p = await async_playwright().start()
+        
+        print(">>> [LOG] Launching Chromium browser...")
         browser = await p.chromium.launch(
             headless=True, 
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage"]
+            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
         ) 
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
@@ -77,34 +79,42 @@ async def execute_login(uid, ctx, phone, password):
         state["page"] = page
 
         await ctx.bot.send_message(chat_id=uid, text="🔄 **সাইটে ঢোকা হচ্ছে...**")
-        await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
+        print(">>> [LOG] Navigating to URL...")
+        await page.goto(SITE_URL, timeout=90000, wait_until="domcontentloaded")
+        print(">>> [LOG] URL loaded successfully.")
+        
         await page.wait_for_timeout(5000)
 
         # লগইন ফর্ম পূরণ
+        print(">>> [LOG] Filling credentials...")
         try:
             await page.locator('input[type="text"], input[type="tel"]').first.fill(login_phone)
             await page.wait_for_timeout(1000)
             await page.locator('input[type="password"]').first.fill(password)
             await page.wait_for_timeout(1000)
+            print(">>> [LOG] Clicking Login button...")
             await page.get_by_text("Log in", exact=False).last.click()
         except Exception as e:
-            logger.error(f"Input error: {e}")
+            print(f">>> [LOG] Input Error: {e}")
 
         await ctx.bot.send_message(chat_id=uid, text="🔄 **লগইন প্রসেস হচ্ছে...**")
         await page.wait_for_timeout(6000) 
 
         # পপআপ ক্লোজ
+        print(">>> [LOG] Closing popups...")
         for _ in range(5):
             await page.evaluate("() => { for(let el of document.querySelectorAll('button, div, span')) { let t=(el.innerText||'').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close') el.click(); } }")
             await page.wait_for_timeout(500)
 
         # Account পেজ
+        print(">>> [LOG] Navigating to Account page...")
         try:
             await page.evaluate("() => { for(let el of document.querySelectorAll('div, span, a, p')) { if((el.innerText||'').trim().toLowerCase()==='account') el.click(); } }")
             await page.wait_for_timeout(4000) 
         except: pass
 
         # UID ও Balance বের করা
+        print(">>> [LOG] Extracting UID and Balance...")
         uid_val = "Unknown"
         balance = "0.00"
         for _ in range(10): 
@@ -122,15 +132,18 @@ async def execute_login(uid, ctx, phone, password):
         if uid_val != "Unknown":
             state["balance"] = float(balance)
             state["uid_val"] = uid_val
+            print(f">>> [LOG] SUCCESS: UID {uid_val}, Balance {balance}")
             await ctx.bot.send_message(chat_id=uid, text=f"✅ **LOGIN SUCCESSFUL**\n\n👤 **UID:** `{uid_val}`\n💰 **Balance:** ৳ {balance}")
             reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")]]
             await ctx.bot.send_message(chat_id=uid, text="👇 এখন আপনার টার্গেট সেট করুন।", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
         else:
+            print(">>> [LOG] FAILED: UID not found in text.")
             await ctx.bot.send_message(chat_id=uid, text="❌ **LOGIN FAILED**\n\nপাসওয়ার্ড ভুল অথবা সাইট বটকে ডিটেক্ট করেছে।")
 
     except Exception as e:
+        print(f">>> [LOG] CRITICAL ERROR: {e}")
         logger.error(f"Login Error: {e}")
-        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **সিস্টেম এরর:** `{str(e)[:100]}`")
+        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **সিস্টেম এরর:** `{str(e)[:150]}`")
 
 # ───────────────────────────────────────────
 # ৪. টেলিগ্রাম হ্যান্ডলার
@@ -171,7 +184,6 @@ def main():
         print("❌ Error: BOT_TOKEN সেট করা নেই!")
         return
 
-    # 💡 Flask সার্ভারটি আলাদা থ্রেডে চালু করা হলো
     threading.Thread(target=run_flask, daemon=True).start()
 
     app = Application.builder().token(BOT_TOKEN).build()
