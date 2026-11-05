@@ -53,7 +53,7 @@ async def close_browser(uid):
     state["playwright"] = None
 
 # ───────────────────────────────────────────
-# ৩. লগইন ফাংশন
+# ৩. লগইন ফাংশন (লগ ও স্ক্রিনশট সহ)
 # ───────────────────────────────────────────
 async def execute_login(uid, ctx, phone, password):
     state = get_state(uid)
@@ -138,7 +138,19 @@ async def execute_login(uid, ctx, phone, password):
             await ctx.bot.send_message(chat_id=uid, text="👇 এখন আপনার টার্গেট সেট করুন।", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
         else:
             print(">>> [LOG] FAILED: UID not found in text.")
-            await ctx.bot.send_message(chat_id=uid, text="❌ **LOGIN FAILED**\n\nপাসওয়ার্ড ভুল অথবা সাইট বটকে ডিটেক্ট করেছে।")
+            # 💡 লগইন ব্যর্থ হলে স্ক্রিনশট নেওয়া
+            ss_path = f"fail_{uid}.jpg"
+            try:
+                await page.screenshot(path=ss_path, type="jpeg", quality=80)
+                await ctx.bot.send_photo(
+                    chat_id=uid, 
+                    photo=open(ss_path, 'rb'), 
+                    caption="❌ **LOGIN FAILED**\n\nপাসওয়ার্ড ভুল অথবা সাইট বটকে ডিটেক্ট করেছে। নিচের স্ক্রিনশটে দেখুন সাইটে কী অবস্থা।"
+                )
+                os.remove(ss_path)
+            except Exception as e:
+                print(f">>> [LOG] Screenshot failed: {e}")
+                await ctx.bot.send_message(chat_id=uid, text="❌ **LOGIN FAILED**\n\nপাসওয়ার্ড ভুল অথবা সাইট বটকে ডিটেক্ট করেছে।")
 
     except Exception as e:
         print(f">>> [LOG] CRITICAL ERROR: {e}")
