@@ -25,7 +25,7 @@ def run_flask():
 # ২. কনফিগারেশন
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-SITE_URL = "https://dkwin8.com/#/login"
+SITE_URL = "https://dkwwin.com/#/login"  # 💡 নতুন সাইট
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -53,7 +53,7 @@ async def close_browser(uid):
     state["playwright"] = None
 
 # ───────────────────────────────────────────
-# ৩. লগইন ফাংশন (লগ ও স্ক্রিনশট সহ)
+# ৩. লগইন ফাংশন (মেমোরি অপ্টিমাইজড)
 # ───────────────────────────────────────────
 async def execute_login(uid, ctx, phone, password):
     state = get_state(uid)
@@ -63,14 +63,22 @@ async def execute_login(uid, ctx, phone, password):
         print(">>> [LOG] Playwright starting...")
         p = await async_playwright().start()
         
-        print(">>> [LOG] Launching Chromium browser...")
+        print(">>> [LOG] Launching Chromium browser (memory optimized)...")
         browser = await p.chromium.launch(
             headless=True, 
-            args=["--disable-blink-features=AutomationControlled", "--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-gpu",
+                "--single-process",          # 💡 মেমোরি বাঁচাতে
+                "--disable-software-rasterizer"
+            ]
         ) 
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36",
-            viewport={"width": 400, "height": 800}
+            viewport={"width": 400, "height": 800},
+            device_scale_factor=1  # 💡 মেমোরি বাঁচাতে
         )
         page = await context.new_page()
         
@@ -80,6 +88,7 @@ async def execute_login(uid, ctx, phone, password):
 
         await ctx.bot.send_message(chat_id=uid, text="🔄 **সাইটে ঢোকা হচ্ছে...**")
         print(">>> [LOG] Navigating to URL...")
+        # 💡 wait_until="domcontentloaded" ব্যবহার করা হলো যাতে দ্রুত লোড হয়
         await page.goto(SITE_URL, timeout=90000, wait_until="domcontentloaded")
         print(">>> [LOG] URL loaded successfully.")
         
@@ -88,6 +97,7 @@ async def execute_login(uid, ctx, phone, password):
         # লগইন ফর্ম পূরণ
         print(">>> [LOG] Filling credentials...")
         try:
+            # 💡 নতুন সাইটের জন্য জেনেরিক সিলেক্টর
             await page.locator('input[type="text"], input[type="tel"]').first.fill(login_phone)
             await page.wait_for_timeout(1000)
             await page.locator('input[type="password"]').first.fill(password)
@@ -138,7 +148,7 @@ async def execute_login(uid, ctx, phone, password):
             await ctx.bot.send_message(chat_id=uid, text="👇 এখন আপনার টার্গেট সেট করুন।", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
         else:
             print(">>> [LOG] FAILED: UID not found in text.")
-            # 💡 লগইন ব্যর্থ হলে স্ক্রিনশট নেওয়া
+            # লগইন ব্যর্থ হলে স্ক্রিনশট নেওয়া
             ss_path = f"fail_{uid}.jpg"
             try:
                 await page.screenshot(path=ss_path, type="jpeg", quality=80)
