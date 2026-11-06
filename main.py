@@ -75,16 +75,15 @@ def get_history_and_prediction():
         return "BIG", datetime.now().strftime("%Y%m%d%H%M%S")
 
 # ───────────────────────────────────────────
-# 📸 ৩. ডেবাগ স্ক্রিনশট পাঠানোর হেল্পার (ব্ল্যাক স্ক্রিন ফিক্স সহ)
+# 📸 ৩. ডেবাগ স্ক্রিনশট পাঠানোর হেল্পার
 # ───────────────────────────────────────────
 async def send_step_screenshot(ctx, uid, page, step_name, status_text):
     path = f"step_{step_name}_{uid}.png"
     try:
-        # 💡 ব্ল্যাক স্ক্রিন ফিক্স: স্ক্রিনশট নেওয়ার আগে পেজকে স্ক্রল করা এবং অপেক্ষা করা
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
         await asyncio.sleep(0.5)
         await page.evaluate("window.scrollTo(0, 0);")
-        await asyncio.sleep(1.5) # রেন্ডার হওয়ার জন্য সময় দেওয়া
+        await asyncio.sleep(1.5)
 
         await page.screenshot(path=path, full_page=False)
         await ctx.bot.send_photo(
@@ -99,7 +98,7 @@ async def send_step_screenshot(ctx, uid, page, step_name, status_text):
         except: pass
 
 # ───────────────────────────────────────────
-# ৪. লগইন এবং অটো-বেট ফাংশন
+# ৪. লগইন এবং অটো-বেট ফাংশন (ব্রাউজার ওপেন হবে)
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
@@ -117,8 +116,11 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
+        # 💡 এখানে headless=False করা হয়েছে, ফলে সরাসরি ব্রাউজার ওপেন হবে
+        # slow_mo=500 মানে প্রতি ক্লিকে ৫০০ মিলি-সেকেন্ড (আধা সেকেন্ড) দেরি হবে
         browser = await p.chromium.launch(
-            headless=True, 
+            headless=False, 
+            slow_mo=500,
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox", "--disable-setuid-sandbox",
@@ -143,15 +145,16 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         try:
             # ---------------- ধাপ ১: সাইটে প্রবেশ ----------------
             await update_loading(10, "OPENING WEBSITE")
-            await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await asyncio.sleep(5) # সাইট লোড হতে সময় দেওয়া
+            # wait_until="networkidle" দিলে পেজের সব ডেটা লোড হওয়া পর্যন্ত অপেক্ষা করবে
+            await page.goto(SITE_URL, timeout=60000, wait_until="networkidle")
+            await asyncio.sleep(3) 
             await send_step_screenshot(ctx, uid, page, "ধাপ ১: সাইটে প্রবেশ", "সাইট ওপেন হয়েছে।")
 
             # ---------------- ধাপ ২: লাল বাটনে ক্লিক (Dk Win Login Quick) ----------------
             await update_loading(25, "CLICKING RED LOGIN BUTTON")
             red_clicked = False
             try:
-                # স্ক্রিনশটে দেখা যাওয়া লাল বাটনটি খোঁজা
+                # আপনার স্ক্রিনশটের লাল বাটনটি
                 red_btn = page.locator('text="Dk Win Login"').first
                 if await red_btn.count() == 0:
                     red_btn = page.locator('text="Quick Sign-In"').first
@@ -159,7 +162,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 if await red_btn.count() > 0 and await red_btn.is_visible():
                     await red_btn.click(force=True, timeout=5000)
                     red_clicked = True
-                    await asyncio.sleep(4) # পেজ পরিবর্তনের জন্য সময় দেওয়া
+                    await asyncio.sleep(3) # পেজ পরিবর্তন দেখার জন্য
             except Exception as e:
                 logger.warning(f"Red button error: {e}")
             
@@ -168,21 +171,19 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ধাপ ৩: I have an account Login ----------------
             await update_loading(40, "OPENING LOGIN FORM")
             try:
-                # "I have an account" বা নিচের "Login" বাটনটি খোঁজা
                 acc_btn = page.locator('text="I have an account"').first
                 if await acc_btn.count() == 0:
                      acc_btn = page.locator('text="Login"').last
                      
                 if await acc_btn.count() > 0 and await acc_btn.is_visible():
                     await acc_btn.click(force=True, timeout=5000)
-                    await asyncio.sleep(4) # ফর্ম ওপেন হতে সময় দেওয়া
+                    await asyncio.sleep(3) 
             except: pass
             await send_step_screenshot(ctx, uid, page, "ধাপ ৩: 'I have an account' ক্লিক", "লগইন ফর্ম ওপেন হয়েছে।")
 
             # ---------------- ধাপ ৪: ফোন এবং পাসওয়ার্ড বসানো ----------------
             await update_loading(55, "ENTERING CREDENTIALS")
             try:
-                # ফোন নাম্বার বক্স
                 phone_input = page.locator('input[placeholder*="phone" i], input[type="tel"]').first
                 await phone_input.wait_for(state="visible", timeout=10000)
                 await phone_input.click()
@@ -190,7 +191,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await phone_input.type(login_phone, delay=100)
                 await asyncio.sleep(1)
                 
-                # পাসওয়ার্ড বক্স
                 pass_input = page.locator('input[type="password"]').first
                 await pass_input.click()
                 await pass_input.fill("")
@@ -223,7 +223,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             except Exception as e:
                 logger.error(f"Login btn error: {e}")
             
-            await asyncio.sleep(6) # লগইন হতে এবং পেজ লোড হতে সময় দেওয়া
+            await asyncio.sleep(5)
 
             # পপআপ ক্লোজ
             for _ in range(5):
@@ -315,7 +315,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         finally:
             await browser.close()
 
-# হ্যান্ডলারগুলো (আগের মতোই থাকবে)
+# হ্যান্ডলারগুলো (আগের মতোই)
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
@@ -356,8 +356,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["task"] = asyncio.create_task(playwright_login_and_bet(uid, ctx, loading_msg.message_id, state["temp_phone"], state["temp_password"]))
         return
 
-    # বাকি টার্গেট, স্টেপ এবং বেট অ্যামাউন্টের লজিক...
-
 async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -379,7 +377,7 @@ def main():
         return
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CallbackHandler(callback_handler))
+    app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     print("🤖 Bot started...")
     app.run_polling()
