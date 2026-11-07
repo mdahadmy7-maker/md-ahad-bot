@@ -75,18 +75,25 @@ def get_history_and_prediction():
         return "BIG", datetime.now().strftime("%Y%m%d%H%M%S")
 
 # ───────────────────────────────────────────
-# 📸 ৩. ডেবাগ স্ক্রিনশট পাঠানোর হেল্পার (ব্ল্যাক স্ক্রিন ফিক্স)
+# 📸 ৩. ডেবাগ স্ক্রিনশট পাঠানোর হেল্পার (আলটিমেট ব্ল্যাক স্ক্রিন ফিক্স)
 # ───────────────────────────────────────────
 async def send_step_screenshot(ctx, uid, page, step_name, status_text):
     path = f"step_{step_name}_{uid}.png"
     try:
-        # কালো স্ক্রিন ফিক্স: স্ক্রল করে পেজ ফোর্স রেন্ডার করা এবং মাউস মুভ করা
+        # 💡 ১. সব অ্যানিমেশন বন্ধ করা
+        await page.add_style_tag(content="* { animation: none !important; transition: none !important; }")
+        
+        # 💡 ২. পেজের ভেতরের ভিউ পোর্ট ফোর্স রেন্ডার করা
+        await page.set_viewport_size({"width": 400, "height": 800})
+        await asyncio.sleep(2) # রেন্ডার হওয়ার জন্য সময়
+
+        # 💡 ৩. স্ক্রল করা
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-        await asyncio.sleep(1.5)
+        await asyncio.sleep(1)
         await page.evaluate("window.scrollTo(0, 0);")
         await asyncio.sleep(1.5) 
-        await page.mouse.move(200, 400)
 
+        # ৪. স্ক্রিনশট নেওয়া
         await page.screenshot(path=path, full_page=False)
         await ctx.bot.send_photo(
             chat_id=uid, 
@@ -118,16 +125,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         except: pass
 
     async with async_playwright() as p:
-        # 💡 এখানে headless=False দেওয়া হলো। এটি আপনার পিসিতে ব্রাউজার ওপেন করবে।
-        # যদি আপনার পিসিতে গুগল ক্রোম ইনস্টল থাকে, তবে ব্রাউজারটি আরও ভালো কাজ করবে।
         browser = await p.chromium.launch(
-            headless=False, # ব্রাউজার সরাসরি ওপেন হবে
-            slow_mo=500,    # প্রতিটি কাজে আধা সেকেন্ড বিরতি দেবে
+            headless=True, 
             args=[
                 "--disable-blink-features=AutomationControlled",
                 "--no-sandbox", "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage", "--disable-gpu",
-                "--start-maximized" # ব্রাউজার ফুল স্ক্রিনে ওপেন হবে
+                "--window-size=400,800"
             ]
         ) 
         context = await browser.new_context(
@@ -148,31 +152,46 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ধাপ ১: সাইটে প্রবেশ ----------------
             await update_loading(10, "OPENING WEBSITE")
             await page.goto(SITE_URL, timeout=60000, wait_until="networkidle")
-            await asyncio.sleep(5) 
+            await asyncio.sleep(6) 
             await send_step_screenshot(ctx, uid, page, "ধাপ ১: সাইটে প্রবেশ", "সাইট ওপেন হয়েছে।")
 
             # ---------------- ধাপ ২: লাল বাটনে ক্লিক ----------------
             await update_loading(25, "CLICKING RED BUTTON")
             red_clicked = False
             try:
+                # ১ম চেষ্টা: Playwright text locator
                 red_btn = page.locator('text="Dk Win Login"').first
                 if await red_btn.count() > 0:
+                    await red_btn.scroll_into_view_if_needed()
                     await red_btn.click(force=True, timeout=5000)
                     red_clicked = True
                 else:
+                    # ২য় চেষ্টা: Quick Sign-In
+                    quick_btn = page.locator('text="Quick Sign-In"').first
+                    if await quick_btn.count() > 0:
+                        await quick_btn.click(force=True, timeout=5000)
+                        red_clicked = True
+                
+                # ৩য় চেষ্টা: জাভাস্ক্রিপ্ট দিয়ে জোর করে খোঁজা
+                if not red_clicked:
                     red_clicked = await page.evaluate("""
                         (() => {
                             let els = document.querySelectorAll('button, a, div, span');
                             for (let el of els) {
                                 let text = (el.innerText || el.textContent || '').toLowerCase();
                                 if (text.includes('dk win login') || text.includes('quick sign-in')) {
-                                    el.click(); return true;
+                                    el.scrollIntoView(); el.click(); return true;
                                 }
                             }
                             return false;
                         })()
                     """)
-                await asyncio.sleep(7) 
+                
+                if not red_clicked:
+                    await page.mouse.click(200, 650) 
+                    red_clicked = True
+
+                await asyncio.sleep(6) 
             except Exception as e:
                 logger.warning(f"Red button error: {e}")
             
@@ -184,6 +203,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             try:
                 acc_btn = page.locator('text="I have an account"').first
                 if await acc_btn.count() > 0 and await acc_btn.is_visible():
+                    await acc_btn.scroll_into_view_if_needed()
                     await acc_btn.click(force=True, timeout=5000)
                     acc_clicked = True
                 else:
@@ -193,7 +213,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                             for (let el of els) {
                                 let text = (el.innerText || el.textContent || '').toLowerCase();
                                 if (text.includes('i have an account') || text === 'login') {
-                                    el.click(); return true;
+                                    el.scrollIntoView(); el.click(); return true;
                                 }
                             }
                             return false;
@@ -201,10 +221,10 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     """)
                 
                 if not acc_clicked:
-                    await page.mouse.click(200, 750)
+                    await page.mouse.click(200, 750) 
                     acc_clicked = True
 
-                await asyncio.sleep(7) 
+                await asyncio.sleep(6) 
             except Exception as e:
                 logger.warning(f"Acc button error: {e}")
             
@@ -684,13 +704,4 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
         
     if state.get("awaiting") == "target":
-        try:
-            target_amount = float(text)
-            state["target"] = target_amount
-            balance = float(state.get('balance', '0.00'))
-            stop_at = balance + target_amount
-            target_set_msg = (
-                "╔════════════════════════╗\n"
-                "║   🎯 TARGET SET 🎯   ║\n"
-                "╚════════════════════════╝\n\n"
-                f"💰 Balance  : ৳ {balance:.2
+        try
