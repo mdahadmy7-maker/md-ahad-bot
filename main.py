@@ -75,25 +75,19 @@ def get_history_and_prediction():
         return "BIG", datetime.now().strftime("%Y%m%d%H%M%S")
 
 # ───────────────────────────────────────────
-# 📸 ৩. ডেবাগ স্ক্রিনশট পাঠানোর হেল্পার (আলটিমেট ব্ল্যাক স্ক্রিন ফিক্স)
+# 📸 ৩. ডেবাগ স্ক্রিনশট পাঠানোর হেল্পার
 # ───────────────────────────────────────────
 async def send_step_screenshot(ctx, uid, page, step_name, status_text):
     path = f"step_{step_name}_{uid}.png"
     try:
-        # 💡 ১. সব অ্যানিমেশন বন্ধ করা
         await page.add_style_tag(content="* { animation: none !important; transition: none !important; }")
-        
-        # 💡 ২. পেজের ভেতরের ভিউ পোর্ট ফোর্স রেন্ডার করা
         await page.set_viewport_size({"width": 400, "height": 800})
-        await asyncio.sleep(2) # রেন্ডার হওয়ার জন্য সময়
-
-        # 💡 ৩. স্ক্রল করা
+        await asyncio.sleep(1.5)
         await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
         await asyncio.sleep(1)
         await page.evaluate("window.scrollTo(0, 0);")
         await asyncio.sleep(1.5) 
 
-        # ৪. স্ক্রিনশট নেওয়া
         await page.screenshot(path=path, full_page=False)
         await ctx.bot.send_photo(
             chat_id=uid, 
@@ -152,83 +146,34 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ধাপ ১: সাইটে প্রবেশ ----------------
             await update_loading(10, "OPENING WEBSITE")
             await page.goto(SITE_URL, timeout=60000, wait_until="networkidle")
-            await asyncio.sleep(6) 
+            await asyncio.sleep(8) 
             await send_step_screenshot(ctx, uid, page, "ধাপ ১: সাইটে প্রবেশ", "সাইট ওপেন হয়েছে।")
 
-            # ---------------- ধাপ ২: লাল বাটনে ক্লিক ----------------
+            # ---------------- ধাপ ২: লাল বাটনে ক্লিক (হার্ডকোড মাউস পজিশন) ----------------
             await update_loading(25, "CLICKING RED BUTTON")
-            red_clicked = False
             try:
-                # ১ম চেষ্টা: Playwright text locator
-                red_btn = page.locator('text="Dk Win Login"').first
-                if await red_btn.count() > 0:
-                    await red_btn.scroll_into_view_if_needed()
-                    await red_btn.click(force=True, timeout=5000)
-                    red_clicked = True
-                else:
-                    # ২য় চেষ্টা: Quick Sign-In
-                    quick_btn = page.locator('text="Quick Sign-In"').first
-                    if await quick_btn.count() > 0:
-                        await quick_btn.click(force=True, timeout=5000)
-                        red_clicked = True
-                
-                # ৩য় চেষ্টা: জাভাস্ক্রিপ্ট দিয়ে জোর করে খোঁজা
-                if not red_clicked:
-                    red_clicked = await page.evaluate("""
-                        (() => {
-                            let els = document.querySelectorAll('button, a, div, span');
-                            for (let el of els) {
-                                let text = (el.innerText || el.textContent || '').toLowerCase();
-                                if (text.includes('dk win login') || text.includes('quick sign-in')) {
-                                    el.scrollIntoView(); el.click(); return true;
-                                }
-                            }
-                            return false;
-                        })()
-                    """)
-                
-                if not red_clicked:
-                    await page.mouse.click(200, 650) 
-                    red_clicked = True
-
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                await asyncio.sleep(3)
+                # লাল বাটনের আনুমানিক লোকেশন (X: 200, Y: 650)
+                await page.mouse.click(200, 650)
                 await asyncio.sleep(6) 
             except Exception as e:
-                logger.warning(f"Red button error: {e}")
+                logger.warning(f"Red button click error: {e}")
             
-            await send_step_screenshot(ctx, uid, page, "ধাপ ২: লাল বাটনে ক্লিক", f"বাটন ক্লিক: {'সফল' if red_clicked else 'ব্যর্থ'}")
+            await send_step_screenshot(ctx, uid, page, "ধাপ ২: লাল বাটনে ক্লিক", "লাল বাটনে ক্লিক করা হয়েছে।")
 
             # ---------------- ধাপ ৩: I have an account Login ----------------
             await update_loading(40, "OPENING LOGIN FORM")
-            acc_clicked = False
             try:
-                acc_btn = page.locator('text="I have an account"').first
-                if await acc_btn.count() > 0 and await acc_btn.is_visible():
-                    await acc_btn.scroll_into_view_if_needed()
-                    await acc_btn.click(force=True, timeout=5000)
-                    acc_clicked = True
-                else:
-                    acc_clicked = await page.evaluate("""
-                        (() => {
-                            let els = document.querySelectorAll('button, a, div, span');
-                            for (let el of els) {
-                                let text = (el.innerText || el.textContent || '').toLowerCase();
-                                if (text.includes('i have an account') || text === 'login') {
-                                    el.scrollIntoView(); el.click(); return true;
-                                }
-                            }
-                            return false;
-                        })()
-                    """)
-                
-                if not acc_clicked:
-                    await page.mouse.click(200, 750) 
-                    acc_clicked = True
-
+                # সরাসরি নিচের দিকে ক্লিক (রেজিস্ট্রেশন পেজের নিচের বাটন)
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                await asyncio.sleep(2)
+                await page.mouse.click(200, 750)
                 await asyncio.sleep(6) 
             except Exception as e:
                 logger.warning(f"Acc button error: {e}")
             
-            await send_step_screenshot(ctx, uid, page, "ধাপ ৩: 'I have an account' ক্লিক", f"লগইন ফর্মে যাওয়া: {'সফল' if acc_clicked else 'ব্যর্থ'}")
+            await send_step_screenshot(ctx, uid, page, "ধাপ ৩: 'I have an account' ক্লিক", "লগইন ফর্মে যাওয়া হয়েছে।")
 
             # ---------------- ধাপ ৪: ফোন এবং পাসওয়ার্ড বসানো ----------------
             await update_loading(55, "ENTERING CREDENTIALS")
@@ -240,13 +185,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await phone_input.wait_for(state="visible", timeout=10000)
                 await phone_input.click()
                 await phone_input.fill("")
-                await phone_input.type(login_phone, delay=150)
+                await phone_input.type(login_phone, delay=100)
                 await asyncio.sleep(1)
                 
                 pass_input = page.locator('input[type="password"]').first
                 await pass_input.click()
                 await pass_input.fill("")
-                await pass_input.type(password, delay=150)
+                await pass_input.type(password, delay=100)
                 await asyncio.sleep(1)
             except Exception as e:
                 logger.error(f"Input error: {e}")
@@ -256,26 +201,13 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ধাপ ৫: Log in বাটনে ক্লিক ----------------
             await update_loading(70, "LOGGING IN")
             try:
-                login_btn = page.locator('button:has-text("Log in")').last
-                if await login_btn.count() == 0:
-                    login_btn = page.locator('text="Log in"').last
-                
-                if await login_btn.count() > 0 and await login_btn.is_visible():
-                    await login_btn.click(force=True, timeout=5000)
-                else:
-                    await page.evaluate("""
-                        (() => {
-                            for(let el of document.querySelectorAll('button, div, span')) {
-                                if((el.innerText||'').trim().toLowerCase() === 'log in') {
-                                    el.click(); return;
-                                }
-                            }
-                        })()
-                    """)
+                await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
+                await asyncio.sleep(2)
+                await page.mouse.click(200, 650) # লগইন বাটনের আনুমানিক লোকেশন
             except Exception as e:
                 logger.error(f"Login btn error: {e}")
             
-            await asyncio.sleep(6)
+            await asyncio.sleep(7)
 
             # পপআপ ক্লোজ
             for _ in range(5):
@@ -704,4 +636,62 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
         
     if state.get("awaiting") == "target":
-        try
+        try:
+            target_amount = float(text)
+            state["target"] = target_amount
+            balance = float(state.get('balance', '0.00'))
+            stop_at = balance + target_amount
+            target_set_msg = (
+                "╔════════════════════════╗\n"
+                "║   🎯 TARGET SET 🎯   ║\n"
+                "╚════════════════════════╝\n\n"
+                f"💰 Balance  : ৳ {balance:.2f}\n"
+                f"🎯 Target   : ৳ {target_amount:.2f} profit\n"
+                f"🏦 Stop At  : ৳ {stop_at:.2f}\n\n"
+                "🚀 Enter your STEP COUNT:\n(How many steps? e.g. 5, max 50)"
+            )
+            state["awaiting"] = "steps"
+            await update.message.reply_text(target_set_msg)
+        except ValueError:
+            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 50)।")
+        return
+        
+    if state.get("awaiting") == "steps":
+        try:
+            steps = int(text)
+            if steps > 50 or steps < 1: raise ValueError("Steps must be between 1 and 50")
+            state["steps"] = steps
+            state["step_amounts"] = [] 
+            state["current_step"] = 1
+            state["awaiting"] = "step_amount"
+            step_msg = (
+                "╔════════════════════════╗\n"
+                "║   💵 STEP AMOUNTS 💵   ║\n"
+                "╚════════════════════════╝\n\n"
+                f"You chose {steps} steps.\n\n"
+                f"💵 Step {state['current_step']} — bet amount? (in ৳)"
+            )
+            await update.message.reply_text(step_msg)
+        except ValueError:
+            await update.message.reply_text("❌ ভুল ফরম্যাট! ১ থেকে ৫০ এর মধ্যে একটি সংখ্যা দিন (যেমন: 5)।")
+        return
+
+    if state.get("awaiting") == "step_amount":
+        try:
+            amount = float(text)
+            if amount <= 0: raise ValueError("Amount must be greater than 0")
+            state["step_amounts"].append(amount)
+            state["current_step"] += 1
+            if state["current_step"] <= state["steps"]:
+                step_msg = f"💵 Step {state['current_step']} — bet amount? (in ৳)"
+                await update.message.reply_text(step_msg)
+            else:
+                state["awaiting"] = None
+                total_risk = sum(state["step_amounts"])
+                balance = float(state.get('balance', '0.00'))
+                target = float(state.get('target', 0))
+                stop_at = balance + target
+                step_plan_text = ""
+                for i, amt in enumerate(state["step_amounts"]):
+                    step_plan_text += f"Step {i+1:02d} : ৳ {amt:.2f}\n"
+                
