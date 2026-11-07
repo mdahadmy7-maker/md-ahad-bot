@@ -141,17 +141,45 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             await asyncio.sleep(4)
             await send_step_screenshot(ctx, uid, page, "ধাপ ১: সাইটে প্রবেশ", "সাইট ওপেন হয়েছে।")
 
-            # ---------------- ধাপ ২: লাল বাটনে ক্লিক ----------------
+            # ---------------- ধাপ ২: লাল বাটনে ক্লিক (লেখা দিয়ে খোঁজা) ----------------
             await update_loading(25, "CLICKING RED BUTTON")
-            # লাল বাটনের সঠিক পজিশন (X: 200, Y: 650)
-            await page.mouse.click(200, 650)
+            # জাভাস্ক্রিপ্ট দিয়ে 'Dk Win Login' লেখাটি খুঁজে বের করে ক্লিক করা
+            red_clicked = await page.evaluate("""
+                (() => {
+                    let elements = document.querySelectorAll('div, span, button, a');
+                    for (let el of elements) {
+                        let text = (el.innerText || el.textContent || '').toLowerCase();
+                        if (text.includes('dk win login') || text.includes('quick sign-in')) {
+                            el.scrollIntoView({block: "center"}); 
+                            el.click(); 
+                            return true;
+                        }
+                    }
+                    return false;
+                })()
+            """)
+            logger.info(f"Red button clicked: {red_clicked}")
             await asyncio.sleep(4) 
             await send_step_screenshot(ctx, uid, page, "ধাপ ২: লাল বাটনে ক্লিক", "লাল বাটনে ক্লিক করা হয়েছে।")
 
             # ---------------- ধাপ ৩: I have an account Login ----------------
             await update_loading(40, "OPENING LOGIN FORM")
-            # 'I have an account Login' এর সঠিক পজিশন (X: 200, Y: 750)
-            await page.mouse.click(200, 750) 
+            # 'I have an account' লেখাটি খুঁজে বের করে ক্লিক করা
+            acc_clicked = await page.evaluate("""
+                (() => {
+                    let elements = document.querySelectorAll('div, span, button, a, p');
+                    for (let el of elements) {
+                        let text = (el.innerText || el.textContent || '').toLowerCase();
+                        if (text.includes('i have an account') || text === 'login') {
+                            el.scrollIntoView({block: "center"});
+                            el.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                })()
+            """)
+            logger.info(f"Account button clicked: {acc_clicked}")
             await asyncio.sleep(4) 
             await send_step_screenshot(ctx, uid, page, "ধাপ ৩: 'I have an account' ক্লিক", "লগইন ফর্মে যাওয়া হয়েছে।")
 
@@ -178,15 +206,41 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
             # ---------------- ধাপ ৫: Log in বাটনে ক্লিক ----------------
             await update_loading(70, "LOGGING IN")
-            # লগইন বাটনের সঠিক পজিশন (X: 200, Y: 650)
-            await page.mouse.click(200, 650)
+            # 'Log in' লেখাটি খুঁজে বের করে ক্লিক করা
+            login_clicked = await page.evaluate("""
+                (() => {
+                    let elements = document.querySelectorAll('button, div, span');
+                    for (let el of elements) {
+                        let text = (el.innerText || el.textContent || '').trim().toLowerCase();
+                        if (text === 'log in') {
+                            el.scrollIntoView({block: "center"});
+                            el.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                })()
+            """)
+            logger.info(f"Login button clicked: {login_clicked}")
             await asyncio.sleep(5)
             await send_step_screenshot(ctx, uid, page, "ধাপ ৫: লগইন ক্লিকের পর", "লগইন প্রসেস শেষ পর্যায়ে।")
 
             # ---------------- ধাপ ৬: Account পেজে ক্লিক ----------------
             await update_loading(85, "FETCHING ACCOUNT DETAILS")
             try:
-                await page.mouse.click(350, 750)
+                await page.evaluate("""
+                    (() => {
+                        let elements = document.querySelectorAll('div, span, p');
+                        for (let el of elements) {
+                            let text = (el.innerText || el.textContent || '').trim().toLowerCase();
+                            if (text === 'account') {
+                                el.scrollIntoView({block: "center"});
+                                el.click();
+                                return true;
+                            }
+                        }
+                    })()
+                """)
                 await asyncio.sleep(3) 
             except: pass
 
