@@ -9,11 +9,11 @@ from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQu
 from playwright.async_api import async_playwright
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন
+# ১. কনফিগারেশন (লিংক আপডেট করা হয়েছে)
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
-SITE_URL = "https://dkwwin.com/#/login"
-HOME_URL = "https://dkwwin.com/#/"
+SITE_URL = "https://dkwin0.com/#/register?invitationCode=37276100176"
+HOME_URL = "https://dkwin0.com/#/"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -135,33 +135,43 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
         page = await context.new_page()
         
         try:
-            # ---------------- ধাপ ১: সাইটে প্রবেশ ----------------
+            # ---------------- ধাপ ১: সাইটে প্রবেশ (সরাসরি রেজিস্ট্রেশন পেজ) ----------------
             await update_loading(10, "OPENING WEBSITE")
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await asyncio.sleep(3)
-            await send_step_screenshot(ctx, uid, page, "ধাপ ১: সাইটে প্রবেশ", "সাইট ওপেন হয়েছে।")
+            await asyncio.sleep(4)
+            await send_step_screenshot(ctx, uid, page, "ধাপ ১: সাইটে প্রবেশ", "রেজিস্ট্রেশন পেজ ওপেন হয়েছে।")
 
-            # ---------------- ধাপ ২: লাল বাটনে ক্লিক ----------------
-            await update_loading(25, "CLICKING RED BUTTON")
+            # ---------------- ধাপ ২: I have an account Login ক্লিক ----------------
+            await update_loading(30, "CLICKING LOGIN BUTTON")
             
-            # আপনার স্ক্রিনশটে লাল বাটনটি স্ক্রিনের ঠিক এই জায়গায় (X: 200, Y: 680) আছে
-            await page.mouse.click(200, 680)
-            
-            await asyncio.sleep(4) 
-            await send_step_screenshot(ctx, uid, page, "ধাপ ২: লাল বাটনে ক্লিক", "লাল বাটনে ক্লিক করা হয়েছে।")
-
-            # ---------------- ধাপ ৩: I have an account Login ----------------
-            await update_loading(40, "OPENING LOGIN FORM")
-            
-            # 'I have an account Login' একদম নিচে থাকে (X: 200, Y: 750)
+            # পেজের একদম নিচে স্ক্রল করা
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
-            await asyncio.sleep(1)
-            await page.mouse.click(200, 750) 
+            await asyncio.sleep(2)
             
-            await asyncio.sleep(4) 
-            await send_step_screenshot(ctx, uid, page, "ধাপ ৩: 'I have an account' ক্লিক", "লগইন ফর্মে যাওয়া হয়েছে।")
+            # 'I have an account' লেখাটি খুঁজে বের করা
+            acc_clicked = await page.evaluate("""
+                (() => {
+                    let elements = document.querySelectorAll('div, span, button, a, p');
+                    for (let el of elements) {
+                        let text = (el.innerText || el.textContent || '').toLowerCase();
+                        if (text.includes('i have an account') || text === 'login') {
+                            el.scrollIntoView({block: "center"});
+                            el.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                })()
+            """)
+            
+            # যদি জাভাস্ক্রিপ্টে না পাওয়া যায়, তবে সরাসরি নিচের দিকে ক্লিক (X: 200, Y: 760)
+            if not acc_clicked:
+                await page.mouse.click(200, 760)
 
-            # ---------------- ধাপ ৪: ফোন এবং পাসওয়ার্ড বসানো ----------------
+            await asyncio.sleep(4) 
+            await send_step_screenshot(ctx, uid, page, "ধাপ ২: 'I have an account' ক্লিক", "লগইন ফর্মে যাওয়া হয়েছে।")
+
+            # ---------------- ধাপ ৩: ফোন এবং পাসওয়ার্ড বসানো ----------------
             await update_loading(55, "ENTERING CREDENTIALS")
             try:
                 phone_input = page.locator('input[type="tel"], input[placeholder*="phone" i]').first
@@ -178,22 +188,52 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 await asyncio.sleep(1)
             except Exception as e:
                 logger.error(f"Input error: {e}")
-            await send_step_screenshot(ctx, uid, page, "ধাপ ৪: নাম্বার ও পাসওয়ার্ড", "ইনপুট বসানো হয়েছে।")
+            await send_step_screenshot(ctx, uid, page, "ধাপ ৩: নাম্বার ও পাসওয়ার্ড", "ইনপুট বসানো হয়েছে।")
 
-            # ---------------- ধাপ ৫: Log in বাটনে ক্লিক ----------------
+            # ---------------- ধাপ ৪: Log in বাটনে ক্লিক ----------------
             await update_loading(70, "LOGGING IN")
             
-            # লগইন বাটন (X: 200, Y: 650)
-            await page.mouse.click(200, 650)
+            # 'Log in' বাটন খোঁজা
+            login_clicked = await page.evaluate("""
+                (() => {
+                    let elements = document.querySelectorAll('button, div, span');
+                    for (let el of elements) {
+                        let text = (el.innerText || el.textContent || '').trim().toLowerCase();
+                        if (text === 'log in') {
+                            el.scrollIntoView({block: "center"});
+                            el.click();
+                            return true;
+                        }
+                    }
+                    return false;
+                })()
+            """)
             
-            await asyncio.sleep(5)
-            await send_step_screenshot(ctx, uid, page, "ধাপ ৫: লগইন ক্লিকের পর", "লগইন প্রসেস শেষ পর্যায়ে।")
+            if not login_clicked:
+                # ব্যাকআপ মাউস ক্লিক (লগইন বাটনের পজিশন)
+                await page.mouse.click(200, 650)
 
-            # ---------------- ধাপ ৬: Account পেজে ক্লিক ----------------
+            await asyncio.sleep(5)
+            await send_step_screenshot(ctx, uid, page, "ধাপ ৪: লগইন ক্লিকের পর", "লগইন প্রসেস শেষ পর্যায়ে।")
+
+            # ---------------- ধাপ ৫: Account পেজে ক্লিক ----------------
             await update_loading(85, "FETCHING ACCOUNT DETAILS")
             try:
-                # Account ট্যাব সাধারণত নিচের ডানদিকে থাকে (X: 350, Y: 750)
-                await page.mouse.click(350, 750)
+                account_clicked = await page.evaluate("""
+                    (() => {
+                        let elements = document.querySelectorAll('div, span, p');
+                        for (let el of elements) {
+                            let text = (el.innerText || el.textContent || '').trim().toLowerCase();
+                            if (text === 'account') {
+                                el.scrollIntoView({block: "center"});
+                                el.click();
+                                return true;
+                            }
+                        }
+                    })()
+                """)
+                if not account_clicked:
+                    await page.mouse.click(350, 760)
                 await asyncio.sleep(3) 
             except: pass
 
@@ -201,7 +241,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             uid_val = "Unknown"
             balance = "0.00"
 
-            # ---------------- ধাপ ৭: UID এবং Balance বের করা ----------------
+            # ---------------- ধাপ ৬: UID এবং Balance বের করা ----------------
             for _ in range(5): 
                 page_text = await page.inner_text("body")
                 if "Wrong account or password" in page_text or "incorrect" in page_text.lower():
@@ -223,7 +263,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 try: await ctx.bot.delete_message(chat_id=uid, message_id=loading_msg_id)
                 except: pass
 
-            # ---------------- ধাপ ৮: রেজাল্ট পাঠানো ----------------
+            # ---------------- ধাপ ৭: রেজাল্ট পাঠানো ----------------
             if login_status == "failed" or uid_val == "Unknown":
                 await send_step_screenshot(ctx, uid, page, "লগইন ব্যর্থ", "পাসওয়ার্ড ভুল অথবা সাইট বটকে ডিটেক্ট করেছে।")
                 await browser.close()
@@ -254,7 +294,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                     await browser.close()
                     return
 
-            # ---------------- ৯. অটো-বেট লুপ ----------------
+            # ---------------- ৮. অটো-বেট লুপ ----------------
             initial_balance = float(balance)
             target_balance = initial_balance + float(state['target'])
             current_step_idx = 0
@@ -296,7 +336,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                 "🎬 _Bot is monitoring the timer._"
             ), parse_mode="Markdown")
 
-            # ---------------- ১০. মেইন বেটিং লুপ ----------------
+            # ---------------- ৯. মেইন বেটিং লুপ ----------------
             while state["trade_running"]:
                 try:
                     current_bal = state["balance"]
