@@ -2,7 +2,6 @@ import asyncio
 import logging
 import re
 import os
-import random
 import requests
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
@@ -81,8 +80,6 @@ async def send_step_screenshot(ctx, uid, page, step_name, status_text):
     path = f"step_{step_name}_{uid}.png"
     try:
         await page.add_style_tag(content="* { animation: none !important; transition: none !important; }")
-        await asyncio.sleep(0.5) 
-
         await page.screenshot(path=path, full_page=False)
         await ctx.bot.send_photo(
             chat_id=uid, 
@@ -100,7 +97,6 @@ async def send_step_screenshot(ctx, uid, page, step_name, status_text):
 # ───────────────────────────────────────────
 async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
     state = get_state(uid)
-    # 880 বাদ দিয়ে শুধু নাম্বার নেওয়া হচ্ছে
     login_phone = phone[3:] if phone.startswith("880") else phone
     
     async def update_loading(percent, text_status="CONNECTING TO SITE"):
@@ -142,53 +138,56 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             # ---------------- ধাপ ১: সাইটে প্রবেশ ----------------
             await update_loading(10, "OPENING WEBSITE")
             await page.goto(SITE_URL, timeout=60000, wait_until="domcontentloaded")
-            await asyncio.sleep(3)
+            await asyncio.sleep(4)
             await send_step_screenshot(ctx, uid, page, "ধাপ ১: সাইটে প্রবেশ", "সাইট ওপেন হয়েছে।")
 
-            # ---------------- ধাপ ২: লাল বাটনে ক্লিক (সরাসরি পজিশন) ----------------
+            # ---------------- ধাপ ২: লাল বাটনে ক্লিক ----------------
             await update_loading(25, "CLICKING RED BUTTON")
+            # লাল বাটনের সঠিক পজিশন (X: 200, Y: 650)
             await page.mouse.click(200, 650)
-            await asyncio.sleep(3) 
+            await asyncio.sleep(4) 
             await send_step_screenshot(ctx, uid, page, "ধাপ ২: লাল বাটনে ক্লিক", "লাল বাটনে ক্লিক করা হয়েছে।")
 
-            # ---------------- ধাপ ৩: I have an account Login (সরাসরি পজিশন) ----------------
+            # ---------------- ধাপ ৩: I have an account Login ----------------
             await update_loading(40, "OPENING LOGIN FORM")
+            # 'I have an account Login' এর সঠিক পজিশন (X: 200, Y: 750)
             await page.mouse.click(200, 750) 
-            await asyncio.sleep(3) 
+            await asyncio.sleep(4) 
             await send_step_screenshot(ctx, uid, page, "ধাপ ৩: 'I have an account' ক্লিক", "লগইন ফর্মে যাওয়া হয়েছে।")
 
             # ---------------- ধাপ ৪: ফোন এবং পাসওয়ার্ড বসানো ----------------
             await update_loading(55, "ENTERING CREDENTIALS")
             try:
-                # 💡 নাম্বার বসানোর সিলেক্টর (Phone Input)
+                # নাম্বার বসানো
                 phone_input = page.locator('input[type="tel"], input[placeholder*="phone" i]').first
                 await phone_input.wait_for(state="visible", timeout=5000)
                 await phone_input.click()
                 await phone_input.fill("")
-                await phone_input.type(login_phone, delay=100) # নাম্বার টাইপ
-                await asyncio.sleep(0.5)
+                await phone_input.type(login_phone, delay=100)
+                await asyncio.sleep(1)
                 
-                # 💡 পাসওয়ার্ড বসানোর সিলেক্টর (Password Input)
+                # পাসওয়ার্ড বসানো
                 pass_input = page.locator('input[type="password"]').first
                 await pass_input.click()
                 await pass_input.fill("")
-                await pass_input.type(password, delay=100) # পাসওয়ার্ড টাইপ
-                await asyncio.sleep(0.5)
+                await pass_input.type(password, delay=100)
+                await asyncio.sleep(1)
             except Exception as e:
                 logger.error(f"Input error: {e}")
             await send_step_screenshot(ctx, uid, page, "ধাপ ৪: নাম্বার ও পাসওয়ার্ড", "ইনপুট বসানো হয়েছে।")
 
-            # ---------------- ধাপ ৫: Log in বাটনে ক্লিক (সরাসরি পজিশন) ----------------
+            # ---------------- ধাপ ৫: Log in বাটনে ক্লিক ----------------
             await update_loading(70, "LOGGING IN")
+            # লগইন বাটনের সঠিক পজিশন (X: 200, Y: 650)
             await page.mouse.click(200, 650)
-            await asyncio.sleep(4)
+            await asyncio.sleep(5)
             await send_step_screenshot(ctx, uid, page, "ধাপ ৫: লগইন ক্লিকের পর", "লগইন প্রসেস শেষ পর্যায়ে।")
 
             # ---------------- ধাপ ৬: Account পেজে ক্লিক ----------------
             await update_loading(85, "FETCHING ACCOUNT DETAILS")
             try:
-                await page.mouse.click(350, 750) # Account ট্যাব
-                await asyncio.sleep(2) 
+                await page.mouse.click(350, 750)
+                await asyncio.sleep(3) 
             except: pass
 
             login_status = "unknown"
@@ -254,7 +253,7 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
             current_step_idx = 0
             
             await page.goto(HOME_URL, timeout=60000, wait_until="domcontentloaded")
-            await asyncio.sleep(3) 
+            await asyncio.sleep(4) 
             
             nav_success = False
             for attempt in range(5):
@@ -339,7 +338,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
                         except: pass
                         await asyncio.sleep(0.1)
 
-                    # BIG/SMALL ক্লিক (পজিশন দিয়ে)
                     if choice.upper() == "BIG":
                         await page.mouse.click(100, 700)
                     else:
@@ -347,7 +345,6 @@ async def playwright_login_and_bet(uid, ctx, loading_msg_id, phone, password):
 
                     await asyncio.sleep(1)
 
-                    # Confirm Bet
                     await page.evaluate("""
                         (() => {
                             for(let el of document.querySelectorAll('span, div, label')) {
