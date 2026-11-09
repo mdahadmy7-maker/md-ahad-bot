@@ -24,7 +24,14 @@ user_state = {}
 
 def get_state(uid):
     if uid not in user_state:
-        user_state[uid] = {"awaiting": None, "temp_phone": "", "temp_password": "", "balance": "0.00", "user_id": "Unknown", "token": None}
+        user_state[uid] = {
+            "awaiting": None, 
+            "temp_phone": "", 
+            "temp_password": "",
+            "balance": "0.00", 
+            "user_id": "Unknown",
+            "token": None
+        }
     return user_state[uid]
 
 # ═══════════════════════════════════════════
@@ -53,7 +60,7 @@ def decode_jwt_payload(token):
 # ═══════════════════════════════════════════
 def fetch_balance(lottery_token):
     BALANCE_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
-    # ⚠️ এই সিগনেচারটি কিছুক্ষণ পর এক্সপায়ার হতে পারে
+    # ⭐ এই সিগনেচারটি একাধিক একাউন্টে কাজ করছে, তাই এটি ব্যবহার করা হচ্ছে
     RANDOM = "572476389394" 
     SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" 
     TIMESTAMP = "1794239224"
@@ -82,7 +89,7 @@ async def api_login(uid, ctx, phone, password):
     state = get_state(uid)
     login_phone = phone.strip() 
     
-    status_msg = await ctx.bot.send_message(chat_id=uid, text="🔄 **লগইন করা হচ্ছে...**")
+    status_msg = await ctx.bot.send_message(chat_id=uid, text="🔄 **লগইন করা হচ্ছে...**\nঅপেক্ষা করুন।", parse_mode="Markdown")
 
     current_timestamp = int(time.time())
     payload = {
