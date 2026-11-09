@@ -56,11 +56,10 @@ def decode_jwt_payload(token):
         return {}
 
 # ═══════════════════════════════════════════
-# ৩. ব্যালেন্স চেক করার API (আপনার সফল পদ্ধতি)
+# ৩. লটারি ব্যালেন্স চেক (আপনার সফল পদ্ধতি)
 # ═══════════════════════════════════════════
 def fetch_balance(lottery_token):
     BALANCE_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
-    # ⭐ এই সিগনেচারটি একাধিক একাউন্টে কাজ করছে, তাই এটি ব্যবহার করা হচ্ছে
     RANDOM = "572476389394" 
     SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" 
     TIMESTAMP = "1794239224"
@@ -77,9 +76,10 @@ def fetch_balance(lottery_token):
     try:
         res = requests.get(final_url, headers=headers, timeout=15).json()
         if res.get("code") == 0:
-            return res["data"]["balance"]
-        return "0.00" # সিগনেচার এক্সপায়ার হলে 0.00 দেখাবে
-    except:
+            return str(res["data"]["balance"])
+        return "0.00"
+    except Exception as e:
+        logger.error(f"Balance Error: {e}")
         return "0.00"
 
 # ═══════════════════════════════════════════
@@ -89,7 +89,7 @@ async def api_login(uid, ctx, phone, password):
     state = get_state(uid)
     login_phone = phone.strip() 
     
-    status_msg = await ctx.bot.send_message(chat_id=uid, text="🔄 **লগইন করা হচ্ছে...**\nঅপেক্ষা করুন।", parse_mode="Markdown")
+    status_msg = await ctx.bot.send_message(chat_id=uid, text="🔄 **সার্ভারে লগইন করা হচ্ছে...**\nঅপেক্ষা করুন।", parse_mode="Markdown")
 
     current_timestamp = int(time.time())
     payload = {
@@ -110,6 +110,7 @@ async def api_login(uid, ctx, phone, password):
     }
 
     try:
+        # API তে লগইন রিকোয়েস্ট
         response = await asyncio.to_thread(requests.post, LOGIN_URL, json=payload, headers=headers, timeout=15)
         res_data = response.json()
 
@@ -117,6 +118,7 @@ async def api_login(uid, ctx, phone, password):
             token = res_data["data"]["token"]
             lottery_login_url = res_data["data"]["lotteryLoginUrl"]
             
+            # UID বের করা
             jwt_data = decode_jwt_payload(token)
             real_uid = jwt_data.get("UserId", "Unknown")
             
@@ -127,25 +129,27 @@ async def api_login(uid, ctx, phone, password):
             parsed_url = urlparse(lottery_login_url)
             lottery_token = parse_qs(parsed_url.query).get("Token", [""])[0]
 
-            await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **ব্যালেন্স চেক করা হচ্ছে...**")
+            await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **লটারি ওয়ালেট ব্যালেন্স চেক করা হচ্ছে...**", parse_mode="Markdown")
             
-            # API দিয়ে ব্যালেন্স চেক
+            # ব্যালেন্স চেক
             balance = await asyncio.to_thread(fetch_balance, lottery_token)
             state["balance"] = balance
 
             await status_msg.delete()
 
+            # ⭐ সুন্দর ড্যাশবোর্ড
             dashboard_msg = (
-                "╔════════════════════════╗\n"
-                "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
-                "╚════════════════════════╝\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"☎️ Phone : {login_phone}\n\n"
-                f"👤 Real UID : `{real_uid}`\n\n"
-                f"💰 Real Balance : **৳ {balance}**\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "🧠 Engine: ONLINE\n"
-                "🚀 Ready to trade"
+                "╔══════════════════════════════╗\n"
+                "║   ✨ **LOGIN SUCCESSFUL** ✨   ║\n"
+                "╚══════════════════════════════╝\n\n"
+                f"📱 **Account :** `{login_phone}`\n"
+                f"🆔 **User ID :** `{real_uid}`\n"
+                f"💰 **Balance :** **৳ {balance}**\n\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "🟢 **Server Status :** ONLINE\n"
+                "⚡ **Engine Status :** READY\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "👇 নিচের বাটনে ক্লিক করে ট্রেড শুরু করুন।"
             )
             
             reply_keyboard = [
@@ -156,18 +160,23 @@ async def api_login(uid, ctx, phone, password):
 
         else:
             await status_msg.delete()
-            await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED**\nকারণ: {res_data.get('msg')}")
+            await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED**\n\nকারণ: {res_data.get('msg')}")
 
     except Exception as e:
         await status_msg.delete()
-        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **ERROR:** {str(e)[:100]}")
+        logger.error(f"Login Error: {e}")
+        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **নেটওয়ার্ক এরর:** {str(e)[:100]}")
 
 # ═══════════════════════════════════════════
 # ৫. টেলিগ্রাম হ্যান্ডলারস
 # ═══════════════════════════════════════════
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    welcome_text = "🧠 **BD=WIN~GO=AUTO~BET**\n👇 লগইন করতে নিচের বাটনে ক্লিক করুন।"
+    welcome_text = (
+        "🧠 **BD=WIN~GO=AUTO~BET**\n"
+        "━━━━━━━━━━━━━━━━━━━━━\n"
+        "স্বাগতম! লগইন করতে নিচের বাটনে ক্লিক করুন।"
+    )
     reply_keyboard = [[KeyboardButton("🔐 LOGIN")]]
     await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
 
@@ -178,20 +187,23 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     
     if text == "🔐 LOGIN" or text == "/login":
         state["awaiting"] = "phone"
-        await update.message.reply_text("📱 আপনার DKWIN ফোন নাম্বার দিন:\n(যেমন: 8801745701676)")
+        await update.message.reply_text("📱 আপনার **DKWIN ফোন নাম্বার** দিন:\n(যেমন: 8801745701676)", parse_mode="Markdown")
         return
 
     if state.get("awaiting") == "phone":
         state["temp_phone"] = text
         state["awaiting"] = "password"
-        await update.message.reply_text("🔑 এখন আপনার পাসওয়ার্ড দিন:\n\n🔒 _নিরাপত্তার জন্য মেসেজটি ডিলিট হবে।_", parse_mode="Markdown")
+        await update.message.reply_text("🔑 এখন আপনার **পাসওয়ার্ড** দিন:\n\n🔒 _নিরাপত্তার জন্য পাসওয়ার্ড দেওয়ার পর মেসেজটি ডিলিট হয়ে যাবে।_", parse_mode="Markdown")
         return
 
     if state.get("awaiting") == "password":
         state["temp_password"] = text
         state["awaiting"] = None 
+        
+        # পাসওয়ার্ড মেসেজটি ডিলিট করা
         try: await update.message.delete()
         except: pass
+        
         await api_login(uid, ctx, state["temp_phone"], state["temp_password"])
         return
 
