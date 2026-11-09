@@ -18,12 +18,6 @@ from playwright.async_api import async_playwright
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 
-# আপনার আগের সফল GetBalance API-এর ডাটা
-BALANCE_API_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
-BALANCE_SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" # ⚠️ এটি এক্সপায়ার হতে পারে
-BALANCE_RANDOM = "572476389394"
-BALANCE_TIMESTAMP = "1794239224"
-
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -63,59 +57,52 @@ def decode_jwt_payload(token):
         return {}
 
 # ═══════════════════════════════════════════
-# ৩. API ব্যালেন্স বের করা (আপনার সফল কোড)
+# ৩. Playwright দিয়ে ব্যালেন্স বের করা (Debug স্ক্রিনশট সহ)
 # ═══════════════════════════════════════════
-def fetch_balance_via_api(lottery_token):
-    url = f"{BALANCE_API_URL}?language=en&random={BALANCE_RANDOM}&signature={BALANCE_SIGNATURE}&timestamp={BALANCE_TIMESTAMP}"
-    headers = {
-        "accept": "application/json, text/plain, */*",
-        "authorization": f"Bearer {lottery_token}",
-        "origin": "https://dkwin8.com",
-        "referer": "https://dkwin8.com/",
-        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
-    }
-    try:
-        res = requests.get(url, headers=headers, timeout=15)
-        data = res.json()
-        if data.get("code") == 0:
-            return data.get("data", {}).get("balance", "0.00")
-        return "0.00"
-    except:
-        return "0.00"
-
-# ═══════════════════════════════════════════
-# ৪. Playwright ব্যালেন্স (যদি API এক্সপায়ার হয়)
-# ═══════════════════════════════════════════
-async def fetch_balance_via_browser(lottery_login_url):
+async def fetch_balance_via_browser(uid, ctx, lottery_login_url):
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
         context = await browser.new_context(
-            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+            user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
+            viewport={"width": 400, "height": 800}, is_mobile=True
         )
         page = await context.new_page()
         try:
             await page.goto(lottery_login_url, timeout=60000, wait_until="domcontentloaded")
-            await asyncio.sleep(6)
+            await asyncio.sleep(7) # পেজ পুরো লোড হওয়ার অপেক্ষা
+            
+            # ⭐ ডিবাগ স্ক্রিনশট নেওয়া
+            ss_path = f"balance_debug_{uid}.png"
+            await page.screenshot(path=ss_path)
+            await ctx.bot.send_photo(chat_id=uid, photo=open(ss_path, 'rb'), caption="🔍 ব্যালেন্স স্ক্র্যাপ করার সময় সাইটটি এমন দেখাচ্ছে:")
+            try: os.remove(ss_path)
+            except: pass
+
+            # পেজ থেকে ব্যালেন্স খোঁজা
             page_text = await page.inner_text("body")
+            
+            # সম্ভাব্য সব রেজেক্স ট্রাই করা
             match = re.search(r'Total balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
             if not match:
                 match = re.search(r'[৳]\s*([\d.]+)', page_text)
+            if not match:
+                match = re.search(r'([\d.]+)\s*[৳]', page_text)
+                
             return match.group(1) if match else "0.00"
-        except Exception:
+        except Exception as e:
+            logger.error(f"Browser Error: {e}")
             return "0.00"
         finally:
             await browser.close()
 
 # ═══════════════════════════════════════════
-# ৫. মেইন লগইন ফাংশন
+# ৪. মেইন লগইন ফাংশন
 # ═══════════════════════════════════════════
 async def api_login(uid, ctx, phone, password):
     state = get_state(uid)
-    
-    # ⭐ এখানেই ভুলটি ঠিক করা হয়েছে। আর 880 কাটা হবে না।
     login_phone = phone.strip() 
     
-    status_msg = await ctx.bot.send_message(chat_id=uid, text="🔄 **লগইন করা হচ্ছে...**\nঅপেক্ষা করুন।", parse_mode="Markdown")
+    status_msg = await ctx.bot.send_message(chat_id=uid, text="🔄 **লগইন করা হচ্ছে...**", parse_mode="Markdown")
 
     current_timestamp = int(time.time())
     payload = {
@@ -149,24 +136,10 @@ async def api_login(uid, ctx, phone, password):
             state["token"] = token
             state["user_id"] = real_uid
 
-            # ১. প্রথমে আপনার দেওয়া API দিয়ে ব্যালেন্স চেক করা হচ্ছে
-            await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **ব্যালেন্স চেক করা হচ্ছে...**")
+            await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **ব্যালেন্স চেক করা হচ্ছে...**\n(স্ক্রিনশট পাঠানো হচ্ছে, অপেক্ষা করুন)")
             
-            # Lottery Token বের করা
-            from urllib.parse import urlparse, parse_qs
-            parsed_url = urlparse(lottery_login_url)
-            lottery_token = parse_qs(parsed_url.query).get("Token", [""])[0]
-
-            balance = "0.00"
-            if lottery_token:
-                # আপনার আগের সফল API দিয়ে চেষ্টা
-                api_bal = await asyncio.to_thread(fetch_balance_via_api, lottery_token)
-                if api_bal != "0.00":
-                    balance = api_bal
-                else:
-                    # যদি API এক্সপায়ার হয়ে যায়, তবে ব্রাউজার দিয়ে বের করবে
-                    balance = await fetch_balance_via_browser(lottery_login_url)
-
+            # ব্যালেন্স চেক (প্লেরাইট দিয়ে)
+            balance = await fetch_balance_via_browser(uid, ctx, lottery_login_url)
             state["balance"] = balance
 
             await status_msg.delete()
@@ -192,15 +165,14 @@ async def api_login(uid, ctx, phone, password):
 
         else:
             await status_msg.delete()
-            error_msg = res_data.get("msg", "Unknown Error")
-            await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED**\n\nকারণ: {error_msg}")
+            await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED**\nকারণ: {res_data.get('msg')}")
 
     except Exception as e:
         await status_msg.delete()
-        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **NETWORK ERROR:** {str(e)[:100]}")
+        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **ERROR:** {str(e)[:100]}")
 
 # ═══════════════════════════════════════════
-# ৬. টেলিগ্রাম হ্যান্ডলারস
+# ৫. টেলিগ্রাম হ্যান্ডলারস
 # ═══════════════════════════════════════════
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -221,7 +193,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if state.get("awaiting") == "phone":
         state["temp_phone"] = text
         state["awaiting"] = "password"
-        await update.message.reply_text("🔑 এখন আপনার পাসওয়ার্ড দিন:\n\n🔒 _নিরাপত্তার জন্য মেসেজটি ডিলিট হবে।_", parse_mode="Markdown")
+        await update.message.reply_text("🔑 এখন আপনার পাসওয়ার্ড দিন:")
         return
 
     if state.get("awaiting") == "password":
