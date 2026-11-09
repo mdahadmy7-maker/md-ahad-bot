@@ -8,14 +8,20 @@ import json
 import base64
 from urllib.parse import urlparse, parse_qs
 import requests
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
+
+# ⚠️ ব্যালেন্স চেক করার সিগনেচার (এক্সপায়ার হলে আপডেট করতে হবে)
+BALANCE_API_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
+LATEST_RANDOM = "572476389394" 
+LATEST_SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" 
+LATEST_TIMESTAMP = "1794239224"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -28,14 +34,21 @@ def get_state(uid):
             "awaiting": None, 
             "temp_phone": "", 
             "temp_password": "",
-            "balance": "0.00", 
-            "user_id": "Unknown",
-            "token": None
+            "accounts": [], 
+            "balance": 0.0, 
+            "target": 0, 
+            "steps": 0, 
+            "step_amounts": [], 
+            "current_step": 0,
+            "trade_running": False, 
+            "task": None,
+            "wins": 0, "losses": 0, "total_trades": 0,
+            "first_bet": True
         }
     return user_state[uid]
 
 # ═══════════════════════════════════════════
-# ২. সিগনেচার এবং JWT ডিকোডার
+# ২. সিগনেচার, JWT ডিকোডার এবং API ব্যালেন্স
 # ═══════════════════════════════════════════
 def generate_signature(payload_dict):
     if 'signature' in payload_dict: del payload_dict['signature']
@@ -55,17 +68,8 @@ def decode_jwt_payload(token):
     except Exception:
         return {}
 
-# ═══════════════════════════════════════════
-# ৩. লটারি ব্যালেন্স চেক (আপনার সফল পদ্ধতি)
-# ═══════════════════════════════════════════
-def fetch_balance(lottery_token):
-    BALANCE_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
-    RANDOM = "572476389394" 
-    SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" 
-    TIMESTAMP = "1794239224"
-    
-    final_url = f"{BALANCE_URL}?language=en&random={RANDOM}&signature={SIGNATURE}&timestamp={TIMESTAMP}"
-    
+def fetch_game_balance(lottery_token):
+    final_url = f"{BALANCE_API_URL}?language=en&random={LATEST_RANDOM}&signature={LATEST_SIGNATURE}&timestamp={LATEST_TIMESTAMP}"
     headers = {
         "accept": "application/json, text/plain, */*",
         "authorization": f"Bearer {lottery_token}",
@@ -76,20 +80,19 @@ def fetch_balance(lottery_token):
     try:
         res = requests.get(final_url, headers=headers, timeout=15).json()
         if res.get("code") == 0:
-            return str(res["data"]["balance"])
-        return "0.00"
+            return float(res["data"]["balance"])
+        return 0.00
     except Exception as e:
-        logger.error(f"Balance Error: {e}")
-        return "0.00"
+        logger.error(f"Balance API Error: {e}")
+        return 0.00
 
 # ═══════════════════════════════════════════
-# ৪. মেইন লগইন ও ড্যাশবোর্ড ফাংশন
+# ৩. মেইন লগইন এবং ড্যাশবোর্ড
 # ═══════════════════════════════════════════
 async def api_login(uid, ctx, phone, password):
     state = get_state(uid)
     login_phone = phone.strip() 
-    
-    status_msg = await ctx.bot.send_message(chat_id=uid, text="🔄 **সার্ভারে লগইন করা হচ্ছে...**\nঅপেক্ষা করুন।", parse_mode="Markdown")
+    status_msg = await ctx.bot.send_message(chat_id=uid, text="🔄 **CONNECTING TO SITE**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
 
     current_timestamp = int(time.time())
     payload = {
@@ -110,7 +113,7 @@ async def api_login(uid, ctx, phone, password):
     }
 
     try:
-        # API তে লগইন রিকোয়েস্ট
+        await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **LOGGING IN**\n[█████░░░░░] 50%")
         response = await asyncio.to_thread(requests.post, LOGIN_URL, json=payload, headers=headers, timeout=15)
         res_data = response.json()
 
@@ -118,44 +121,37 @@ async def api_login(uid, ctx, phone, password):
             token = res_data["data"]["token"]
             lottery_login_url = res_data["data"]["lotteryLoginUrl"]
             
-            # UID বের করা
             jwt_data = decode_jwt_payload(token)
             real_uid = jwt_data.get("UserId", "Unknown")
             
-            state["token"] = token
             state["user_id"] = real_uid
+            if login_phone not in state["accounts"]:
+                state["accounts"].append(login_phone)
 
-            # Lottery Token বের করা
             parsed_url = urlparse(lottery_login_url)
             lottery_token = parse_qs(parsed_url.query).get("Token", [""])[0]
 
-            await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **লটারি ওয়ালেট ব্যালেন্স চেক করা হচ্ছে...**", parse_mode="Markdown")
-            
-            # ব্যালেন্স চেক
-            balance = await asyncio.to_thread(fetch_balance, lottery_token)
+            await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **FETCHING BALANCE**\n[█████████░] 90%")
+            balance = await asyncio.to_thread(fetch_game_balance, lottery_token)
             state["balance"] = balance
 
             await status_msg.delete()
 
-            # ⭐ সুন্দর ড্যাশবোর্ড
             dashboard_msg = (
-                "╔══════════════════════════════╗\n"
-                "║   ✨ **LOGIN SUCCESSFUL** ✨   ║\n"
-                "╚══════════════════════════════╝\n\n"
-                f"📱 **Account :** `{login_phone}`\n"
-                f"🆔 **User ID :** `{real_uid}`\n"
-                f"💰 **Balance :** **৳ {balance}**\n\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "🟢 **Server Status :** ONLINE\n"
-                "⚡ **Engine Status :** READY\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                "👇 নিচের বাটনে ক্লিক করে ট্রেড শুরু করুন।"
+                "╔════════════════════════╗\n"
+                "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
+                "╚════════════════════════╝\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"☎️ Phone Number\n`{login_phone}`\n\n"
+                f"👤 Account UID\n`{real_uid}`\n\n"
+                f"💰 Account Balance\n**৳ {balance:.2f}**\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                "🧠 Analysis Engine:  READY\n"
+                "🚀 AutoTrade System: READY\n\n"
+                "👇 Press START YOUR TARGET to begin"
             )
             
-            reply_keyboard = [
-                [KeyboardButton("🚀 START YOUR TARGET")], 
-                [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]
-            ]
+            reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]]
             await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, parse_mode="Markdown", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
 
         else:
@@ -164,48 +160,204 @@ async def api_login(uid, ctx, phone, password):
 
     except Exception as e:
         await status_msg.delete()
-        logger.error(f"Login Error: {e}")
-        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **নেটওয়ার্ক এরর:** {str(e)[:100]}")
+        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **NETWORK ERROR:** {str(e)[:100]}")
+
 
 # ═══════════════════════════════════════════
-# ৫. টেলিগ্রাম হ্যান্ডলারস
+# ৪. টেলিগ্রাম হ্যান্ডলারস (আগের লম্বা মেসেজ ও ফ্লো)
 # ═══════════════════════════════════════════
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
+    state = get_state(uid)
+    state["first_bet"] = True 
+    
     welcome_text = (
-        "🧠 **BD=WIN~GO=AUTO~BET**\n"
-        "━━━━━━━━━━━━━━━━━━━━━\n"
-        "স্বাগতম! লগইন করতে নিচের বাটনে ক্লিক করুন।"
+        "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 Mode    : Auto Analyse & bet\n"
+        "🔐 Access  : Private · Authorized Members\n"
+        "🔴 Status  : Not Logged In\n"
+        f"👥 Accounts: {len(state['accounts'])}/6\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🧠 Prediction Engine — 9 Layers\n"
+        "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
+        "🔍 Manipulation · 🎨 Colour · 🔢 Frequency\n"
+        "🔄 Markov · ♻️ Cycle · 💠 Momentum\n"
+        "🔁 Every layer is back-tested live so its vote\n"
+        "weight follows its real hit-rate\n"
+        "🔴 Confidence below 30% → sit out\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
+        "🎬 4-second 🧠 generating prediction animation\n"
+        "🚀 Analysis → auto bet every 30s period\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "👇 Press the button below to LOGIN"
     )
-    reply_keyboard = [[KeyboardButton("🔐 LOGIN")]]
-    await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
+    keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
+    await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
     text = update.message.text.strip()
     
-    if text == "🔐 LOGIN" or text == "/login":
-        state["awaiting"] = "phone"
-        await update.message.reply_text("📱 আপনার **DKWIN ফোন নাম্বার** দিন:\n(যেমন: 8801745701676)", parse_mode="Markdown")
-        return
-
     if state.get("awaiting") == "phone":
         state["temp_phone"] = text
         state["awaiting"] = "password"
-        await update.message.reply_text("🔑 এখন আপনার **পাসওয়ার্ড** দিন:\n\n🔒 _নিরাপত্তার জন্য পাসওয়ার্ড দেওয়ার পর মেসেজটি ডিলিট হয়ে যাবে।_", parse_mode="Markdown")
+        await update.message.reply_text(
+            "╔════════════════════════╗\n"
+            "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
+            "╚════════════════════════╝\n"
+            f"☎️ Number : {text}\n\n"
+            "🔑 Now enter your password:\n"
+            "Your message will be deleted immediately for security."
+        )
         return
 
     if state.get("awaiting") == "password":
         state["temp_password"] = text
         state["awaiting"] = None 
-        
-        # পাসওয়ার্ড মেসেজটি ডিলিট করা
         try: await update.message.delete()
         except: pass
-        
+        state["first_bet"] = True 
         await api_login(uid, ctx, state["temp_phone"], state["temp_password"])
         return
+        
+    if text == "🚀 START YOUR TARGET":
+        state["awaiting"] = "target"
+        target_msg = (
+            "╔════════════════════════╗\n"
+            "║   🚀 START YOUR TARGET 🚀   ║\n"
+            "╚════════════════════════╝\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💰 YOUR BALANCE\n"
+            f"৳ {state.get('balance', 0.00):.2f}\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🎯 Enter your TARGET profit amount:\n"
+            "How much do you want to earn? (in ৳)"
+        )
+        await update.message.reply_text(target_msg)
+        return
+        
+    if state.get("awaiting") == "target":
+        try:
+            target_amount = float(text)
+            state["target"] = target_amount
+            balance = float(state.get('balance', 0.00))
+            stop_at = balance + target_amount
+            target_set_msg = (
+                "╔════════════════════════╗\n"
+                "║   🎯 TARGET SET 🎯   ║\n"
+                "╚════════════════════════╝\n\n"
+                f"💰 Balance  : ৳ {balance:.2f}\n"
+                f"🎯 Target   : ৳ {target_amount:.2f} profit\n"
+                f"🏦 Stop At  : ৳ {stop_at:.2f}\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "🚀 Enter your STEP COUNT:\n"
+                "How many steps? (e.g. 5, max 50)"
+            )
+            state["awaiting"] = "steps"
+            await update.message.reply_text(target_set_msg)
+        except ValueError:
+            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 50)।")
+        return
+        
+    if state.get("awaiting") == "steps":
+        try:
+            steps = int(text)
+            if steps > 50 or steps < 1: raise ValueError("Steps must be between 1 and 50")
+            state["steps"] = steps
+            state["step_amounts"] = [] 
+            state["current_step"] = 1
+            state["awaiting"] = "step_amount"
+            step_msg = (
+                "╔════════════════════════╗\n"
+                "║   💵 STEP AMOUNTS 💵   ║\n"
+                "╚════════════════════════╝\n\n"
+                f"You chose {steps} steps.\n\n"
+                f"💵 Step {state['current_step']} — bet amount? (in ৳)"
+            )
+            await update.message.reply_text(step_msg)
+        except ValueError:
+            await update.message.reply_text("❌ ভুল ফরম্যাট! ১ থেকে ৫০ এর মধ্যে একটি সংখ্যা দিন (যেমন: 5)।")
+        return
+
+    if state.get("awaiting") == "step_amount":
+        try:
+            amount = float(text)
+            if amount <= 0: raise ValueError("Amount must be greater than 0")
+            state["step_amounts"].append(amount)
+            state["current_step"] += 1
+            if state["current_step"] <= state["steps"]:
+                step_msg = f"💵 Step {state['current_step']} — bet amount? (in ৳)"
+                await update.message.reply_text(step_msg)
+            else:
+                state["awaiting"] = None
+                total_risk = sum(state["step_amounts"])
+                balance = float(state.get('balance', 0.00))
+                target = float(state.get('target', 0))
+                stop_at = balance + target
+                step_plan_text = ""
+                for i, amt in enumerate(state["step_amounts"]):
+                    step_plan_text += f"Step {i+1:02d} : ৳ {amt:.2f}\n"
+                
+                combined_msg = (
+                    "⚙️ TRADE CONFIGURATION ⚙️\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"💰 Balance  : ৳ {balance:.2f}\n"
+                    f"🎯 Target   : ৳ {target:.2f} profit\n"
+                    f"🏦 Stop At  : ৳ {stop_at:.2f}\n"
+                    f"📋 Steps    : {state['steps']}\n"
+                    f"⚠️ Total Risk : ৳ {total_risk:.2f}\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "📊 STEP PLAN\n"
+                    f"{step_plan_text}"
+                    "\n"
+                    "👇 Press START TRADE to begin."
+                )
+                inline_kb = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🚀 START TRADE", callback_data="start_trade_btn"), 
+                     InlineKeyboardButton("❌ CANCEL", callback_data="cancel_trade_btn")]
+                ])
+                await update.message.reply_text(combined_msg, reply_markup=inline_kb)
+        except ValueError:
+            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 1)।")
+        return
+
+    if text == "🛑 STOP TRADE":
+        state["trade_running"] = False
+        await update.message.reply_text("🛑 TRADE STOPPED")
+        return
+    if text == "🚪 LOGOUT":
+        state["trade_running"] = False
+        state["temp_phone"] = ""
+        state["temp_password"] = ""
+        await update.message.reply_text("🚪 LOGGED OUT")
+        return
+
+async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    uid = update.effective_user.id
+    state = get_state(uid)
+    data = query.data
+    if data == "start_login":
+        state["awaiting"] = "phone"
+        login_msg = (
+            "╔════════════════════════╗\n"
+            "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
+            "╚════════════════════════╝\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📱 Enter your DKWIN phone number:\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Everyone uses their own account — your session is private."
+        )
+        await ctx.bot.send_message(chat_id=uid, text=login_msg)
+    elif data == "start_trade_btn":
+        state["trade_running"] = True
+        await query.edit_message_text("✅ **TRADE STARTED...**\n\n_(এখানে ব্যালেন্স চেক এবং বেটিং API যুক্ত হবে)_")
+    elif data == "cancel_trade_btn":
+        state["trade_running"] = False
+        await query.edit_message_text("❌ **TRADE CANCELLED**")
 
 def main():
     if not BOT_TOKEN:
@@ -213,7 +365,7 @@ def main():
         return
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("login", cmd_start))
+    app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     print("🤖 Bot started...")
     app.run_polling()
