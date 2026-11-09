@@ -23,7 +23,7 @@ def get_state(uid):
     return user_state[uid]
 
 # ═══════════════════════════════════════════
-# ২. Playwright লগইন ফাংশন (আপনার দেখানো রাস্তা অনুযায়ী)
+# ২. Playwright লগইন ফাংশন 
 # ═══════════════════════════════════════════
 async def playwright_login(uid, ctx, phone, password):
     state = get_state(uid)
@@ -48,52 +48,46 @@ async def playwright_login(uid, ctx, phone, password):
         page = await context.new_page()
         
         try:
-            # ==============================================
             # ধাপ ১: ব্লগ পেজে ঢোকা
-            # ==============================================
             await page.goto(BLOG_URL, timeout=60000, wait_until="domcontentloaded")
             await asyncio.sleep(5) 
 
-            # ==============================================
-            # ধাপ ২: লাল বক্সে ক্লিক করা (ছবি বা লিংক যাই হোক)
-            # ==============================================
+            # ধাপ ২: লাল বাটনে ক্লিক করা (জাভাস্ক্রিপ্ট দিয়ে)
             await ctx.bot.send_message(chat_id=uid, text="🔍 লাল বাটন (Quick Sign-In) খুঁজছি...")
             
-            # লাল বাটনটি লিংক (a ট্যাগ) বা টেক্সট হতে পারে। তাই দুটোই চেক করা হচ্ছে।
-            red_btn = page.locator('a:has-text("Quick Sign-In Link"), a:has-text("Dk Win Login"), text="Quick Sign-In Link"').first
+            clicked = await page.evaluate("""
+                () => { 
+                    let elements = Array.from(document.querySelectorAll('a, div, span, button, p, img'));
+                    for(let el of elements) { 
+                        let t = (el.innerText || el.alt || '').toLowerCase(); 
+                        if(t.includes('quick sign-in') || t.includes('dk win login')) {
+                            el.click(); 
+                            return true; 
+                        }
+                    } 
+                    return false;
+                }
+            """)
             
-            try:
-                await red_btn.wait_for(state="visible", timeout=15000)
-                
-                # নতুন ট্যাব ওপেন হওয়ার জন্য অপেক্ষা করা
-                async with context.expect_page(timeout=10000) as new_page_info:
-                    await red_btn.click(force=True)
-                
-                # নতুন ট্যাবটি ধরা
-                page = await new_page_info.value
-                await page.wait_for_load_state("domcontentloaded")
-                await ctx.bot.send_message(chat_id=uid, text="✅ নতুন ট্যাবে গেম সাইট ওপেন হয়েছে।")
-                await asyncio.sleep(4) 
-                
-            except Exception as e:
-                # যদি নতুন ট্যাব না খোলে, তবে একই ট্যাবে লোড হতে পারে
-                await ctx.bot.send_message(chat_id=uid, text="⚠️ নতুন ট্যাব খোলেনি। একই ট্যাবে চেক করছি...")
+            if clicked:
+                await ctx.bot.send_message(chat_id=uid, text="✅ লাল বাটনে ক্লিক হয়েছে। নতুন পেজ লোড হচ্ছে...")
+                await asyncio.sleep(5) # নতুন পেজ লোড হওয়ার অপেক্ষা
+            else:
+                await ctx.bot.send_message(chat_id=uid, text="⚠️ লাল বাটন খুঁজে পাইনি। সরাসরি গেম সাইটে যাচ্ছি...")
+                await page.goto("https://dkwin0.com/#/", wait_until="domcontentloaded")
                 await asyncio.sleep(4)
-                
-            # ডিবাগ স্ক্রিনশট ১: গেম সাইটে ঢোকার পর কেমন দেখাচ্ছে
+
+            # ডিবাগ স্ক্রিনশট (গেম সাইটে ঢোকার পর)
             ss1 = f"step1_{uid}.png"
             await page.screenshot(path=ss1)
             await ctx.bot.send_photo(chat_id=uid, photo=open(ss1, 'rb'), caption="১. গেম সাইটে ঢুকেছি। এখন নিচে স্ক্রল করে Login খুঁজব।")
             os.remove(ss1)
 
-            # ==============================================
-            # ধাপ ৩: নিচে স্ক্রল করে 'Login' এ ক্লিক করা
-            # ==============================================
+            # ধাপ ৩: নিচে স্ক্রল করে Login এ ক্লিক
             await page.evaluate("window.scrollTo(0, document.body.scrollHeight);")
             await asyncio.sleep(2)
             
             try:
-                # নিচের Login লেখাটি খোঁজা
                 login_link = page.locator('text="Login"').last
                 if await login_link.count() > 0:
                     await login_link.click(force=True, timeout=5000)
@@ -104,16 +98,16 @@ async def playwright_login(uid, ctx, phone, password):
             except:
                 await ctx.bot.send_message(chat_id=uid, text="⚠️ Login লেখায় ক্লিক করা যায়নি!")
 
-            # ==============================================
-            # ধাপ ৪: নাম্বার ও পাসওয়ার্ড বসানো
-            # ==============================================
+            # ধাপ ৪: ফোন নাম্বার ও পাসওয়ার্ড বসানো
             await ctx.bot.send_message(chat_id=uid, text="✍️ নাম্বার ও পাসওয়ার্ড বসাচ্ছি...")
             try:
+                # পেজের প্রথম দৃশ্যমান ইনপুট বক্স (যেটা ফোন নাম্বারের ঘর)
                 phone_input = page.locator('input:visible').first
                 await phone_input.wait_for(state="visible", timeout=10000)
                 await phone_input.fill(clean_phone)
                 await asyncio.sleep(1)
 
+                # পাসওয়ার্ড ঘর
                 pass_input = page.locator('input[type="password"]').first
                 await pass_input.fill(password)
                 await asyncio.sleep(1)
@@ -122,9 +116,7 @@ async def playwright_login(uid, ctx, phone, password):
                 await browser.close()
                 return
 
-            # ==============================================
-            # ধাপ ৫: Log in বাটনে ক্লিক করা
-            # ==============================================
+            # ধাপ ৫: হলুদ রঙের 'Log in' বাটনে ক্লিক
             await ctx.bot.send_message(chat_id=uid, text="🔘 Log in বাটনে ক্লিক করছি...")
             try:
                 login_btn = page.get_by_role("button", name=re.compile("Log in", re.IGNORECASE)).last
@@ -137,15 +129,13 @@ async def playwright_login(uid, ctx, phone, password):
             
             await asyncio.sleep(7)
 
-            # ডিবাগ স্ক্রিনশট ২: লগইন করার পর কেমন দেখাচ্ছে
+            # ডিবাগ স্ক্রিনশট (লগইন করার পর)
             ss2 = f"step2_{uid}.png"
             await page.screenshot(path=ss2)
             await ctx.bot.send_photo(chat_id=uid, photo=open(ss2, 'rb'), caption="২. লগইন করার পর সাইট কেমন দেখাচ্ছে।")
             os.remove(ss2)
 
-            # ==============================================
-            # ধাপ ৬: পপআপ সরানো এবং Account এ যাওয়া
-            # ==============================================
+            # ধাপ ৬: পপআপ সরানো এবং 'Account' পেজে যাওয়া
             for _ in range(5):
                 await page.evaluate("() => { for(let el of document.querySelectorAll('button, div, span, i')) { let t = (el.innerText || el.className || '').toLowerCase(); if(t==='confirm'||t==='receive'||t==='close'||t==='ok'||t.includes('van-icon-cross')) el.click(); } }")
                 await asyncio.sleep(1)
@@ -160,9 +150,7 @@ async def playwright_login(uid, ctx, phone, password):
             except:
                 pass
 
-            # ==============================================
             # ধাপ ৭: আসল UID এবং Balance বের করা
-            # ==============================================
             page_text = await page.inner_text("body")
             uid_match = re.search(r'UID\s*\|?\s*(\d+)', page_text, re.IGNORECASE)
             balance_match = re.search(r'Total balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
