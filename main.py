@@ -13,7 +13,10 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন
 # ═══════════════════════════════════════════
-BOT_TOKEN = os.environ.get("BOT_TOKEN") # আপনার টেলিগ্রাম বটের টোকেন
+BOT_TOKEN = os.environ.get("BOT_TOKEN") 
+
+# 💡 যদি api.dkwinapi.com কাজ না করে, তবে নিচের লিংকটি ট্রাই করে দেখতে পারেন:
+# "https://api.dkwin0.com/api/webapi/Login"
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -37,11 +40,9 @@ def get_state(uid):
 # ২. সিগনেচার এবং JWT ডিকোডার
 # ═══════════════════════════════════════════
 def generate_signature(payload_data):
-    # সিগনেচার এবং টাইমস্ট্যাম্প বাদ দেওয়া
     if 'signature' in payload_data: del payload_data['signature']
     if 'timestamp' in payload_data: del payload_data['timestamp']
     
-    # খালি ভ্যালু বাদ দিয়ে A-Z অনুযায়ী সাজানো
     sorted_dict = {}
     for key in sorted(payload_data.keys()):
         if payload_data[key] != "" and payload_data[key] is not None:
@@ -104,8 +105,7 @@ async def api_login(uid, ctx, phone, password):
     }
 
     try:
-        # API কল করা (সিঙ্ক্রোনাস রিকোয়েস্ট, তবে টেলিগ্রাম ব্লক না করার জন্য asyncio ব্যবহার)
-        response = await asyncio.to_thread(requests.post, LOGIN_URL, json=payload, headers=headers)
+        response = await asyncio.to_thread(requests.post, LOGIN_URL, json=payload, headers=headers, timeout=15)
         res_data = response.json()
 
         if res_data.get("code") == 0:
@@ -135,25 +135,27 @@ async def api_login(uid, ctx, phone, password):
                 "🚀 Ready to trade"
             )
             
-            reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE"), [KeyboardButton("🚪 LOGOUT")]]
+            # ⭐ এখানে বন্ধনীর ভুলটি ঠিক করা হয়েছে
+            reply_keyboard = [
+                [KeyboardButton("🚀 START YOUR TARGET")], 
+                [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]
+            ]
             await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, parse_mode="Markdown", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
 
         else:
             await status_msg.delete()
             error_msg = res_data.get("msg", "Unknown Error")
-            await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED**\n\nকারণ: {error_msg}\n\nসম্ভাব্য কারণ:\n১. পাসওয়ার্ড ভুল।\n২. অ্যাকাউন্ট ব্লকড।")
+            await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED**\n\nকারণ: {error_msg}")
 
     except Exception as e:
         await status_msg.delete()
-        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **NETWORK ERROR:** {str(e)[:100]}")
+        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **NETWORK ERROR:** {str(e)[:150]}")
 
 # ═══════════════════════════════════════════
 # ৪. টেলিগ্রাম হ্যান্ডলারস
 # ═══════════════════════════════════════════
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    state = get_state(uid)
-    
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET (API MODE)**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -169,13 +171,13 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     
     if text == "🔐 LOGIN" or text == "/login":
         state["awaiting"] = "phone"
-        await update.message.reply_text("📱 আপনার DKWIN ফোন নাম্বার দিন:\n(যেমন: 017XXXXXXXX অথবা 88017XXXXXXXX)")
+        await update.message.reply_text("📱 আপনার ফোন নাম্বার দিন:\n(যেমন: 017XXXXXXXX)")
         return
 
     if state.get("awaiting") == "phone":
         state["temp_phone"] = text
         state["awaiting"] = "password"
-        await update.message.reply_text("🔑 এখন আপনার পাসওয়ার্ড দিন:\n\n🔒 _নিরাপত্তার জন্য পাসওয়ার্ড দেওয়ার পর আপনার মেসেজটি ডিলিট হয়ে যাবে।_", parse_mode="Markdown")
+        await update.message.reply_text("🔑 এখন আপনার পাসওয়ার্ড দিন:\n\n🔒 _পাসওয়ার্ড দেওয়ার পর মেসেজটি ডিলিট হয়ে যাবে।_", parse_mode="Markdown")
         return
 
     if state.get("awaiting") == "password":
@@ -188,11 +190,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await api_login(uid, ctx, state["temp_phone"], state["temp_password"])
         return
 
-async def cmd_reset(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    user_state[uid] = {"awaiting": None, "temp_phone": "", "temp_password": "", "balance": "0.00", "user_id": "Unknown", "token": None}
-    await update.message.reply_text("🔄 সব ডাটা রিসেট হয়েছে। /start দিন।")
-
 def main():
     if not BOT_TOKEN:
         print("❌ Error: BOT_TOKEN সেট করা নেই!")
@@ -201,7 +198,6 @@ def main():
     
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("login", cmd_start))
-    app.add_handler(CommandHandler("reset", cmd_reset))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     
     print("🤖 API Bot started...")
