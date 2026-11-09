@@ -8,6 +8,7 @@ import json
 import base64
 import re
 import requests
+from urllib.parse import urlparse, parse_qs
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters
 from playwright.async_api import async_playwright
@@ -18,6 +19,12 @@ from playwright.async_api import async_playwright
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 
+# আপনার আগের সফল API (এটি কিছুক্ষণ পর এক্সপায়ার হতে পারে)
+BALANCE_API_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
+BALANCE_SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" 
+BALANCE_RANDOM = "572476389394"
+BALANCE_TIMESTAMP = "1794239224"
+
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -25,14 +32,7 @@ user_state = {}
 
 def get_state(uid):
     if uid not in user_state:
-        user_state[uid] = {
-            "awaiting": None, 
-            "temp_phone": "", 
-            "temp_password": "",
-            "balance": "0.00", 
-            "user_id": "Unknown",
-            "token": None
-        }
+        user_state[uid] = {"awaiting": None, "temp_phone": "", "temp_password": "", "balance": "0.00", "user_id": "Unknown", "token": None}
     return user_state[uid]
 
 # ═══════════════════════════════════════════
@@ -57,31 +57,78 @@ def decode_jwt_payload(token):
         return {}
 
 # ═══════════════════════════════════════════
-# ৩. Playwright দিয়ে ব্যালেন্স বের করা (Debug স্ক্রিনশট সহ)
+# ৩. API ব্যালেন্স (আপনার সফল পদ্ধতি)
+# ═══════════════════════════════════════════
+def fetch_balance_via_api(lottery_token):
+    url = f"{BALANCE_API_URL}?language=en&random={BALANCE_RANDOM}&signature={BALANCE_SIGNATURE}&timestamp={BALANCE_TIMESTAMP}"
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "authorization": f"Bearer {lottery_token}",
+        "origin": "https://dkwin8.com",
+        "referer": "https://dkwin8.com/",
+        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+    }
+    try:
+        res = requests.get(url, headers=headers, timeout=10)
+        data = res.json()
+        if data.get("code") == 0 and float(data.get("data", {}).get("balance", 0)) > 0:
+            return str(data.get("data", {}).get("balance"))
+        return None # ফেইল করলে None দেবে
+    except:
+        return None
+
+# ═══════════════════════════════════════════
+# ৪. Playwright ব্যালেন্স (403 বাইপাস করার জন্য স্টিলথ মোড)
 # ═══════════════════════════════════════════
 async def fetch_balance_via_browser(uid, ctx, lottery_login_url):
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
+        # স্টিলথ আর্গুমেন্ট (বট ডিটেকশন এড়াতে)
+        browser = await p.chromium.launch(
+            headless=True, 
+            args=[
+                "--disable-blink-features=AutomationControlled",
+                "--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage"
+            ]
+        )
         context = await browser.new_context(
             user_agent="Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
-            viewport={"width": 400, "height": 800}, is_mobile=True
+            viewport={"width": 400, "height": 800}, 
+            is_mobile=True,
+            has_touch=True,
+            locale="en-US",
+            timezone_id="Asia/Dhaka",
+            extra_http_headers={
+                "Referer": "https://dkwin8.com/",
+                "Origin": "https://dkwin8.com"
+            }
         )
+        
+        # ⭐ ব্রাউজারকে আসল মানুষের মতো সাজানোর স্ক্রিপ্ট
+        await context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            window.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+        """)
+        
         page = await context.new_page()
         try:
             await page.goto(lottery_login_url, timeout=60000, wait_until="domcontentloaded")
-            await asyncio.sleep(7) # পেজ পুরো লোড হওয়ার অপেক্ষা
+            await asyncio.sleep(8) # পেজ পুরো লোড হওয়ার অপেক্ষা
             
-            # ⭐ ডিবাগ স্ক্রিনশট নেওয়া
+            # ডিবাগ স্ক্রিনশট
             ss_path = f"balance_debug_{uid}.png"
             await page.screenshot(path=ss_path)
-            await ctx.bot.send_photo(chat_id=uid, photo=open(ss_path, 'rb'), caption="🔍 ব্যালেন্স স্ক্র্যাপ করার সময় সাইটটি এমন দেখাচ্ছে:")
+            await ctx.bot.send_photo(chat_id=uid, photo=open(ss_path, 'rb'), caption="🔍 স্টিলথ মোডে সাইটটি এমন দেখাচ্ছে:")
             try: os.remove(ss_path)
             except: pass
 
-            # পেজ থেকে ব্যালেন্স খোঁজা
             page_text = await page.inner_text("body")
             
-            # সম্ভাব্য সব রেজেক্স ট্রাই করা
+            # 403 Forbidden চেক
+            if "403" in page_text and "Forbidden" in page_text:
+                return "BLOCKED"
+
+            # ব্যালেন্স খোঁজা
             match = re.search(r'Total balance\s*[৳:]?\s*([\d.]+)', page_text, re.IGNORECASE)
             if not match:
                 match = re.search(r'[৳]\s*([\d.]+)', page_text)
@@ -96,7 +143,7 @@ async def fetch_balance_via_browser(uid, ctx, lottery_login_url):
             await browser.close()
 
 # ═══════════════════════════════════════════
-# ৪. মেইন লগইন ফাংশন
+# ৫. মেইন লগইন ফাংশন
 # ═══════════════════════════════════════════
 async def api_login(uid, ctx, phone, password):
     state = get_state(uid)
@@ -132,16 +179,37 @@ async def api_login(uid, ctx, phone, password):
             
             jwt_data = decode_jwt_payload(token)
             real_uid = jwt_data.get("UserId", "Unknown")
-            
             state["token"] = token
             state["user_id"] = real_uid
 
-            await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **ব্যালেন্স চেক করা হচ্ছে...**\n(স্ক্রিনশট পাঠানো হচ্ছে, অপেক্ষা করুন)")
-            
-            # ব্যালেন্স চেক (প্লেরাইট দিয়ে)
-            balance = await fetch_balance_via_browser(uid, ctx, lottery_login_url)
-            state["balance"] = balance
+            # Lottery Token বের করা
+            parsed_url = urlparse(lottery_login_url)
+            lottery_token = parse_qs(parsed_url.query).get("Token", [""])[0]
 
+            await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **ব্যালেন্স চেক করা হচ্ছে...**\n(প্রথমে API, পরে ব্রাউজার চেক করা হবে)")
+            
+            balance = "0.00"
+            
+            # ১. প্রথমে আপনার সফল API দিয়ে চেষ্টা
+            if lottery_token:
+                api_balance = await asyncio.to_thread(fetch_balance_via_api, lottery_token)
+                if api_balance:
+                    balance = api_balance
+                    logger.info("API method success!")
+
+            # ২. যদি API ফেইল করে (সিগনেচার এক্সপায়ার), তবে স্টিলথ ব্রাউজার দিয়ে চেষ্টা
+            if balance == "0.00":
+                logger.info("API failed, trying stealth browser...")
+                browser_balance = await fetch_balance_via_browser(uid, ctx, lottery_login_url)
+                
+                if browser_balance == "BLOCKED":
+                    await status_msg.delete()
+                    await ctx.bot.send_message(chat_id=uid, text="❌ **সার্ভার ব্লকড (403 Forbidden)**\n\nলটারি সাইটটি আমাদের সার্ভারের আইপি ব্লক করেছে। দয়া করে ব্যালেন্স ম্যানুয়ালি চেক করুন বা ভিন্ন কোনো সার্ভার ব্যবহার করুন।")
+                    # আমরা লগইন সফল হলেও এখানেই থামব
+                else:
+                    balance = browser_balance
+
+            state["balance"] = balance
             await status_msg.delete()
 
             dashboard_msg = (
@@ -170,50 +238,3 @@ async def api_login(uid, ctx, phone, password):
     except Exception as e:
         await status_msg.delete()
         await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **ERROR:** {str(e)[:100]}")
-
-# ═══════════════════════════════════════════
-# ৫. টেলিগ্রাম হ্যান্ডলারস
-# ═══════════════════════════════════════════
-async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    welcome_text = "🧠 **BD=WIN~GO=AUTO~BET**\n👇 লগইন করতে নিচের বাটনে ক্লিক করুন।"
-    reply_keyboard = [[KeyboardButton("🔐 LOGIN")]]
-    await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
-
-async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    state = get_state(uid)
-    text = update.message.text.strip()
-    
-    if text == "🔐 LOGIN" or text == "/login":
-        state["awaiting"] = "phone"
-        await update.message.reply_text("📱 আপনার DKWIN ফোন নাম্বার দিন:\n(যেমন: 8801745701676)")
-        return
-
-    if state.get("awaiting") == "phone":
-        state["temp_phone"] = text
-        state["awaiting"] = "password"
-        await update.message.reply_text("🔑 এখন আপনার পাসওয়ার্ড দিন:")
-        return
-
-    if state.get("awaiting") == "password":
-        state["temp_password"] = text
-        state["awaiting"] = None 
-        try: await update.message.delete()
-        except: pass
-        await api_login(uid, ctx, state["temp_phone"], state["temp_password"])
-        return
-
-def main():
-    if not BOT_TOKEN:
-        print("❌ Error: BOT_TOKEN সেট করা নেই!")
-        return
-    app = Application.builder().token(BOT_TOKEN).build()
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("login", cmd_start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    print("🤖 Bot started...")
-    app.run_polling()
-
-if __name__ == "__main__":
-    main()
