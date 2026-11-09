@@ -17,7 +17,8 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 
-# ⚠️ ব্যালেন্স চেক করার সিগনেচার (এক্সপায়ার হলে আপডেট করতে হবে)
+# ⚠️ এই সিগনেচারটি কিছুক্ষণ পর এক্সপায়ার হয়ে যায়। 
+# নতুন সিগনেচার পেতে ব্রাউজারের Network Tab থেকে GetBalance এর cURL কপি করুন।
 BALANCE_API_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
 LATEST_RANDOM = "572476389394" 
 LATEST_SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" 
@@ -43,7 +44,8 @@ def get_state(uid):
             "trade_running": False, 
             "task": None,
             "wins": 0, "losses": 0, "total_trades": 0,
-            "first_bet": True
+            "first_bet": True,
+            "balance_status": "Unknown" # ⭐ ডিবাগিং স্ট্যাটাস
         }
     return user_state[uid]
 
@@ -80,11 +82,13 @@ def fetch_game_balance(lottery_token):
     try:
         res = requests.get(final_url, headers=headers, timeout=15).json()
         if res.get("code") == 0:
-            return float(res["data"]["balance"])
-        return 0.00
+            return float(res["data"]["balance"]), "Success"
+        else:
+            # সার্ভার যদি এরর দেয় (যেমন: Wrong signature), সেটা রিটার্ন করবে
+            return 0.00, res.get('msg', 'Failed')
     except Exception as e:
         logger.error(f"Balance API Error: {e}")
-        return 0.00
+        return 0.00, "Network Error"
 
 # ═══════════════════════════════════════════
 # ৩. মেইন লগইন এবং ড্যাশবোর্ড
@@ -132,8 +136,11 @@ async def api_login(uid, ctx, phone, password):
             lottery_token = parse_qs(parsed_url.query).get("Token", [""])[0]
 
             await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **FETCHING BALANCE**\n[█████████░] 90%")
-            balance = await asyncio.to_thread(fetch_game_balance, lottery_token)
+            
+            # ব্যালেন্স এবং স্ট্যাটাস নেওয়া
+            balance, b_status = await asyncio.to_thread(fetch_game_balance, lottery_token)
             state["balance"] = balance
+            state["balance_status"] = b_status
 
             await status_msg.delete()
 
@@ -145,6 +152,7 @@ async def api_login(uid, ctx, phone, password):
                 f"☎️ Phone Number\n`{login_phone}`\n\n"
                 f"👤 Account UID\n`{real_uid}`\n\n"
                 f"💰 Account Balance\n**৳ {balance:.2f}**\n"
+                f"📡 API Status: `{b_status}`\n" # ⭐ এখানে স্ট্যাটাস দেখাবে
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "🧠 Analysis Engine:  READY\n"
                 "🚀 AutoTrade System: READY\n\n"
