@@ -134,7 +134,7 @@ def place_bet(lottery_token, issue_number, amount, prediction):
 async def api_login(uid, ctx, phone, password):
     state = get_state(uid)
     login_phone = phone.strip() 
-    status_msg = await ctx.bot.send_message(chat_id=uid, text="🔄 **CONNECTING TO SITE**\n[░░░░░░░░░░] 0%", parse_mode="Markdown")
+    status_msg = await ctx.bot.send_message(chat_id=uid, text="🔄 CONNECTING TO SITE...\n[░░░░░░░░░░] 0%")
 
     current_timestamp = int(time.time())
     payload = {
@@ -155,7 +155,7 @@ async def api_login(uid, ctx, phone, password):
     }
 
     try:
-        await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **LOGGING IN**\n[█████░░░░░] 50%")
+        await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 LOGGING IN...\n[█████░░░░░] 50%")
         response = await asyncio.to_thread(requests.post, LOGIN_URL, json=payload, headers=headers, timeout=15)
         res_data = response.json()
 
@@ -174,7 +174,7 @@ async def api_login(uid, ctx, phone, password):
             lottery_token = parse_qs(parsed_url.query).get("Token", [""])[0]
             state["lottery_token"] = lottery_token 
 
-            await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **FETCHING BALANCE**\n[█████████░] 90%")
+            await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 FETCHING BALANCE...\n[█████████░] 90%")
             balance = await asyncio.to_thread(fetch_game_balance, lottery_token)
             state["balance"] = balance
             
@@ -189,10 +189,10 @@ async def api_login(uid, ctx, phone, password):
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
                 "╚════════════════════════╝\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🆔 UID: `{real_uid}`\n"
-                f"📱 Phone: `{masked_phone}`\n"
-                f"💰 Balance: **৳ {balance:.2f}**\n"
-                f"🔄 Period: `{next_period}`\n" 
+                f"🆔 UID: {real_uid}\n"
+                f"📱 Phone: {masked_phone}\n"
+                f"💰 Balance: ৳ {balance:.2f}\n"
+                f"🔄 Period: {next_period}\n" 
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "🧠 Analysis Engine:  READY\n"
                 "🚀 AutoTrade System: READY\n\n"
@@ -200,27 +200,27 @@ async def api_login(uid, ctx, phone, password):
             )
             
             reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]]
-            await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, parse_mode="Markdown", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
+            await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
 
         else:
             await status_msg.delete()
-            await ctx.bot.send_message(chat_id=uid, text=f"❌ **LOGIN FAILED**\nকারণ: {res_data.get('msg')}")
+            await ctx.bot.send_message(chat_id=uid, text=f"❌ LOGIN FAILED\nকারণ: {res_data.get('msg')}")
 
     except Exception as e:
         await status_msg.delete()
-        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **NETWORK ERROR:** {str(e)[:100]}")
+        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ NETWORK ERROR: {str(e)[:100]}")
 
 # ═══════════════════════════════════════════
-# ৪. টেলিগ্রাম হ্যান্ডলারস (আপনার অরিজিনাল মেসেজ ও ফ্লো)
+# ৪. টেলিগ্রাম হ্যান্ডলারস (আপনার দেওয়া হুবহু টেক্সট)
 # ═══════════════════════════════════════════
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
     state["first_bet"] = True 
     
-    # ⭐ আপনার অরিজিনাল লম্বা ওয়েলকাম মেসেজ
+    # ⭐ আপনার দেওয়া হুবহু ওয়েলকাম মেসেজ
     welcome_text = (
-        "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
+        "🧠 BD=WIN~GO=AUTO~BET 💥\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🧠 Mode    : Auto Analyse & bet\n"
         "🔐 Access  : Private · Authorized Members\n"
@@ -237,11 +237,11 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "🎬 4-second 🧠 generating prediction animation\n"
         "🚀 Analysis → auto bet every 30s period\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "━━━━━━━━━━━━━━━━━━━━━━━\n"
         "👇 Press the button below to LOGIN"
     )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
-    await update.message.reply_text(welcome_text, parse_mode="Markdown", reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -403,7 +403,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         
     elif data == "start_trade_btn":
         state["trade_running"] = True
-        await query.edit_message_text("✅ **TRADE STARTED...**\n\nবট এখন অটোমেটিক বাজি ধরবে।")
+        await query.edit_message_text("✅ TRADE STARTED...\n\nবট এখন অটোমেটিক বাজি ধরবে।")
         
         step_idx = 0
         while state["trade_running"] and step_idx < len(state["step_amounts"]):
@@ -417,31 +417,31 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 
             current_bal = await asyncio.to_thread(fetch_game_balance, state["lottery_token"])
             if current_bal < amount:
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **পর্যাপ্ত ব্যালেন্স নেই!**\nপ্রয়োজন: ৳{amount}, আছে: ৳{current_bal:.2f}। ট্রেড বন্ধ হচ্ছে।")
+                await ctx.bot.send_message(chat_id=uid, text=f"❌ পর্যাপ্ত ব্যালেন্স নেই!\nপ্রয়োজন: ৳{amount}, আছে: ৳{current_bal:.2f}। ট্রেড বন্ধ হচ্ছে।")
                 state["trade_running"] = False
                 break
 
-            await ctx.bot.send_message(chat_id=uid, text=f"🎯 **PLACING BET...**\n🆔 Period: `{issue_number}`\n💰 Amount: ৳{amount}\n📊 Prediction: `BigSmall_Big`", parse_mode="Markdown")
+            await ctx.bot.send_message(chat_id=uid, text=f"🎯 PLACING BET...\n🆔 Period: {issue_number}\n💰 Amount: ৳{amount}\n📊 Prediction: BigSmall_Big")
             
             status_code, res_text = await asyncio.to_thread(place_bet, state["lottery_token"], issue_number, amount, "BigSmall_Big")
             
             if status_code == 200 and '"code":0' in res_text:
-                await ctx.bot.send_message(chat_id=uid, text=f"✅ **BET SUCCESSFUL!**\nসার্ভার রেসপন্স: `{res_text[:50]}...`", parse_mode="Markdown")
+                await ctx.bot.send_message(chat_id=uid, text=f"✅ BET SUCCESSFUL!\nসার্ভার রেসপন্স: {res_text[:50]}...")
                 step_idx += 1 
             else:
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ **BET FAILED! (Status: {status_code})**\nসার্ভার রেসপন্স: `{res_text[:100]}`", parse_mode="Markdown")
+                await ctx.bot.send_message(chat_id=uid, text=f"❌ BET FAILED! (Status: {status_code})\nসার্ভার রেসপন্স: {res_text[:100]}")
                 state["trade_running"] = False
                 break
                 
             await asyncio.sleep(30)
             
         if step_idx >= len(state["step_amounts"]):
-            await ctx.bot.send_message(chat_id=uid, text="🏁 **সব স্টেপ শেষ হয়েছে!**")
+            await ctx.bot.send_message(chat_id=uid, text="🏁 সব স্টেপ শেষ হয়েছে!")
             state["trade_running"] = False
 
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
-        await query.edit_message_text("❌ **TRADE CANCELLED**")
+        await query.edit_message_text("❌ TRADE CANCELLED")
 
 def main():
     if not BOT_TOKEN:
