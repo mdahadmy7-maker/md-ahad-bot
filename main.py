@@ -17,6 +17,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 
+# ⭐ আপনার সফল API
 BALANCE_API_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
 LATEST_RANDOM = "572476389394" 
 LATEST_SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" 
@@ -44,12 +45,10 @@ def get_state(uid):
 def generate_signature(payload_dict):
     if 'signature' in payload_dict: del payload_dict['signature']
     if 'timestamp' in payload_dict: del payload_dict['timestamp']
-    
     sorted_dict = {}
     for key in sorted(payload_dict.keys()):
         if payload_dict[key] != "" and payload_dict[key] is not None:
             sorted_dict[key] = payload_dict[key]
-            
     json_string = json.dumps(sorted_dict, separators=(',', ':'))
     return hashlib.md5(json_string.encode('utf-8')).hexdigest().upper()
 
@@ -63,7 +62,6 @@ def decode_jwt_payload(token):
 
 def fetch_game_balance(lottery_token):
     final_url = f"{BALANCE_API_URL}?language=en&random={LATEST_RANDOM}&signature={LATEST_SIGNATURE}&timestamp={LATEST_TIMESTAMP}"
-    
     headers = {
         "accept": "application/json, text/plain, */*",
         "authorization": f"Bearer {lottery_token}",
@@ -71,21 +69,11 @@ def fetch_game_balance(lottery_token):
         "referer": "https://dkwin8.com/",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
-    
     try:
-        # ⭐ Render-এর IP ব্লক এড়াতে একটি ফ্রি প্রক্সি ব্যবহারের চেষ্টা (এটি কাজ না করলে অন্য প্রক্সি লাগবে)
-        proxies = {
-            # "http": "http://your_proxy_here:port",
-            # "https": "http://your_proxy_here:port"
-        }
-        
-        res = requests.get(final_url, headers=headers, proxies=proxies if proxies else None, timeout=15).json()
-        
+        res = requests.get(final_url, headers=headers, timeout=15).json()
         if res.get("code") == 0:
             return float(res["data"]["balance"])
-        else:
-            logger.error(f"API Error: {res.get('msg')}")
-            return 0.00
+        return 0.00
     except Exception as e:
         logger.error(f"Network Error: {e}")
         return 0.00
