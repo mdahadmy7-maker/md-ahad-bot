@@ -6,6 +6,7 @@ import uuid
 import hashlib
 import json
 import base64
+import random
 from urllib.parse import urlparse, parse_qs
 import requests
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
@@ -17,11 +18,14 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 
-# আপনার সফল API
 BALANCE_API_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
 LATEST_RANDOM = "572476389394" 
 LATEST_SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" 
 LATEST_TIMESTAMP = "1794239224"
+
+# ⭐ বাজি ধরার API এবং পিরিয়ড চেক করার API
+BET_API_URL = "https://api.ar-lottery01.com/api/Lottery/WinGoBet"
+HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,7 +39,8 @@ def get_state(uid):
             "accounts": [], "balance": 0.0, "target": 0, "steps": 0, 
             "step_amounts": [], "current_step": 0, "trade_running": False, 
             "task": None, "wins": 0, "losses": 0, "total_trades": 0,
-            "first_bet": True, "real_uid": "Unknown", "balance_status": "Unknown"
+            "first_bet": True, "real_uid": "Unknown", "balance_status": "Unknown",
+            "lottery_token": None # ⭐ টোকেনটি সেভ করে রাখা হবে
         }
     return user_state[uid]
 
@@ -64,7 +69,6 @@ def decode_jwt_payload(token):
 
 def fetch_game_balance(lottery_token):
     final_url = f"{BALANCE_API_URL}?language=en&random={LATEST_RANDOM}&signature={LATEST_SIGNATURE}&timestamp={LATEST_TIMESTAMP}"
-    
     headers = {
         "accept": "application/json, text/plain, */*",
         "authorization": f"Bearer {lottery_token}",
@@ -72,15 +76,73 @@ def fetch_game_balance(lottery_token):
         "referer": "https://dkwin8.com/",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
-    
     try:
         res = requests.get(final_url, headers=headers, timeout=15).json()
         if res.get("code") == 0:
             return float(res["data"]["balance"]), "Success"
         return 0.00, res.get('msg', 'Failed')
     except Exception as e:
-        logger.error(f"Network Error: {e}")
         return 0.00, "Network Error"
+
+# ⭐ পিরিয়ড নাম্বার (PDF) এবং প্রেডিকশন বের করার ফাংশন
+def get_next_period_and_prediction():
+    try:
+        res = requests.get(HISTORY_API, headers={"User-Agent": "Mozilla/5.0"}, timeout=10).json()
+        list_data = res.get("data", {}).get("list", [])
+        if not list_data:
+            return None, "BIG"
+            
+        latest_period = str(list_data[0].get("issueNumber", ""))
+        
+        # পরবর্তী পিরিয়ড বের করা (যেমন: 51130 -> 51131)
+        try:
+            next_period = str(int(latest_period) + 1)
+        except:
+            next_period = latest_period
+
+        # সিম্পল প্রেডিকশন লজিক (আপনি চাইলে পরিবর্তন করতে পারেন)
+        last_num = int(list_data[0].get("number", 0))
+        prediction = "BigSmall_Small" if last_num >= 5 else "BigSmall_Big"
+        
+        return next_period, prediction
+    except Exception as e:
+        logger.error(f"Period Error: {e}")
+        return None, "BigSmall_Big"
+
+# ⭐ বাজি ধরার ফাংশন (WinGoBet)
+def place_bet(lottery_token, issue_number, amount, prediction):
+    current_timestamp = int(time.time())
+    random_str = random.randint(100000000000, 999999999999)
+    
+    payload = {
+        "gameCode": "WinGo_30S",
+        "issueNumber": str(issue_number),
+        "amount": int(amount),
+        "betMultiple": 1,
+        "betContent": prediction,
+        "language": "en",
+        "random": random_str,
+        "timestamp": current_timestamp
+    }
+    
+    # সিগনেচার তৈরি করা
+    payload["signature"] = generate_signature(payload.copy())
+
+    headers = {
+        "authority": "api.ar-lottery01.com",
+        "accept": "application/json, text/plain, */*",
+        "authorization": f"Bearer {lottery_token}",
+        "content-type": "application/json",
+        "origin": "https://dkwin8.com",
+        "referer": "https://dkwin8.com/",
+        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+    }
+
+    try:
+        res = requests.post(BET_API_URL, json=payload, headers=headers, timeout=15).json()
+        return res
+    except Exception as e:
+        return {"code": 500, "msg": str(e)}
 
 # ═══════════════════════════════════════════
 # ৩. মেইন লগইন এবং ড্যাশবোর্ড
@@ -126,6 +188,7 @@ async def api_login(uid, ctx, phone, password):
 
             parsed_url = urlparse(lottery_login_url)
             lottery_token = parse_qs(parsed_url.query).get("Token", [""])[0]
+            state["lottery_token"] = lottery_token # ⭐ টোকেন সেভ করা হলো
 
             await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **FETCHING BALANCE**\n[█████████░] 90%")
             
@@ -135,10 +198,8 @@ async def api_login(uid, ctx, phone, password):
 
             await status_msg.delete()
 
-            # ⭐ নাম্বারের লাস্ট ৪ ডিজিট বের করা হচ্ছে
             masked_phone = "****" + login_phone[-4:] if len(login_phone) >= 4 else login_phone
 
-            # ⭐ এখানে ফোন নাম্বারটি মাস্ক করা হয়েছে
             dashboard_msg = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
@@ -167,7 +228,7 @@ async def api_login(uid, ctx, phone, password):
 
 
 # ═══════════════════════════════════════════
-# ৪. টেলিগ্রাম হ্যান্ডলারস (আপনার ওয়েলকাম মেসেজ ও ফ্লো)
+# ৪. টেলিগ্রাম হ্যান্ডলারস 
 # ═══════════════════════════════════════════
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -343,6 +404,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
     data = query.data
+    
     if data == "start_login":
         state["awaiting"] = "phone"
         login_msg = (
@@ -355,9 +417,39 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "Everyone uses their own account — your session is private."
         )
         await ctx.bot.send_message(chat_id=uid, text=login_msg)
+        
     elif data == "start_trade_btn":
         state["trade_running"] = True
-        await query.edit_message_text("✅ **TRADE STARTED...**\n\n_(এখানে ব্যালেন্স চেক এবং বেটিং API যুক্ত হবে)_")
+        await query.edit_message_text("✅ **TRADE STARTED...**\n\nবট এখন ৩০ সেকেন্ডের পিরিয়ড চেক করে অটোমেটিক বাজি ধরবে।")
+        
+        # ⭐ এখানে ৩০ সেকেন্ডের লুপটি শুরু হবে
+        step_idx = 0
+        while state["trade_running"] and step_idx < len(state["step_amounts"]):
+            amount = state["step_amounts"][step_idx]
+            issue_number, prediction = get_next_period_and_prediction()
+            
+            if not issue_number:
+                await ctx.bot.send_message(chat_id=uid, text="⚠️ পিরিয়ড নাম্বার পাওয়া যায়নি! বন্ধ করা হচ্ছে।")
+                state["trade_running"] = False
+                break
+                
+            await ctx.bot.send_message(chat_id=uid, text=f"🎯 **NEW TRADE PLACED**\n🆔 Period: `{issue_number}`\n💰 Amount: ৳{amount}\n📊 Prediction: `{prediction}`", parse_mode="Markdown")
+            
+            # বাজি ধরার API কল
+            bet_res = place_bet(state["lottery_token"], issue_number, amount, prediction)
+            
+            if bet_res.get("code") == 0:
+                await ctx.bot.send_message(chat_id=uid, text=f"✅ **BET SUCCESSFUL!**\nসার্ভার রেসপন্স: `{bet_res.get('msg')}`", parse_mode="Markdown")
+                state["wins"] += 1 # ডেমো হিসেবে উইন ধরছি
+            else:
+                await ctx.bot.send_message(chat_id=uid, text=f"❌ **BET FAILED!**\nকারণ: {bet_res.get('msg')}")
+                state["trade_running"] = False
+                break
+                
+            # ⭐ ৩০ সেকেন্ড অপেক্ষা করা
+            await asyncio.sleep(30)
+            step_idx += 1
+
     elif data == "cancel_trade_btn":
         state["trade_running"] = False
         await query.edit_message_text("❌ **TRADE CANCELLED**")
