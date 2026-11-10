@@ -17,7 +17,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 
-# ⭐ আপনার সফল পাইড্রয়েড টেস্টের API
+# ⭐ শুধুমাত্র আপনার সফল API (পাইড্রয়েডে যা কাজ করেছিল)
 BALANCE_API_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
 LATEST_RANDOM = "572476389394" 
 LATEST_SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" 
@@ -62,11 +62,11 @@ def decode_jwt_payload(token):
     except Exception:
         return {}
 
-# ⭐ শুধুমাত্র আপনার সফল GetBalance API
+# ⭐ আপনার সফল GetBalance API (কোনো বাড়তি API নেই)
 def fetch_game_balance(lottery_token):
     final_url = f"{BALANCE_API_URL}?language=en&random={LATEST_RANDOM}&signature={LATEST_SIGNATURE}&timestamp={LATEST_TIMESTAMP}"
     
-    # আপনার দেওয়া cURL এর হেডার
+    # আপনার cURL এর হেডার হুবহু কপি করা হয়েছে
     headers = {
         "accept": "application/json, text/plain, */*",
         "authorization": f"Bearer {lottery_token}",
@@ -131,7 +131,7 @@ async def api_login(uid, ctx, phone, password):
 
             await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **FETCHING BALANCE**\n[█████████░] 90%")
             
-            # ব্যালেন্স চেক
+            # শুধুমাত্র আপনার সফল API দিয়ে ব্যালেন্স চেক
             balance, b_status = await asyncio.to_thread(fetch_game_balance, lottery_token)
             state["balance"] = balance
             state["balance_status"] = b_status
