@@ -6,6 +6,7 @@ import uuid
 import hashlib
 import json
 import base64
+from urllib.parse import urlparse, parse_qs
 import requests
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
@@ -16,6 +17,12 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 USER_INFO_URL = "https://api.dkwinapi.com/api/webapi/GetUserInfo" 
+
+# আপনার সফল পাইড্রয়েড টেস্টের ডাটা
+BALANCE_API_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
+LATEST_RANDOM = "572476389394" 
+LATEST_SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" 
+LATEST_TIMESTAMP = "1794239224"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -29,7 +36,7 @@ def get_state(uid):
             "accounts": [], "balance": 0.0, "target": 0, "steps": 0, 
             "step_amounts": [], "current_step": 0, "trade_running": False, 
             "task": None, "wins": 0, "losses": 0, "total_trades": 0,
-            "first_bet": True, "nickname": "Unknown", "vip_level": 0, "real_uid": "Unknown"
+            "first_bet": True, "nickname": "Unknown", "vip_level": 0, "real_uid": "Unknown", "balance_status": "Unknown"
         }
     return user_state[uid]
 
@@ -42,7 +49,6 @@ def generate_signature(payload_dict):
     
     sorted_dict = {}
     for key in sorted(payload_dict.keys()):
-        # 0 বা False বাদ দেওয়া যাবে না, শুধু খালি স্ট্রিং বাদ যাবে
         if payload_dict[key] != "" and payload_dict[key] is not None:
             sorted_dict[key] = payload_dict[key]
             
@@ -57,9 +63,8 @@ def decode_jwt_payload(token):
     except Exception:
         return {}
 
-# ⭐ নতুন ঠিক করা GetUserInfo ফাংশন (নাম, VIP এবং মেইন ব্যালেন্স)
-def fetch_user_dashboard_info(token):
-    # GetUserInfo-এর সিগনেচার তৈরি করা
+# ⭐ ১. GetUserInfo API (নাম এবং VIP লেভেল বের করার জন্য)
+def fetch_user_profile(token):
     payload = {
         "language": 0,
         "random": uuid.uuid4().hex,
@@ -75,19 +80,44 @@ def fetch_user_dashboard_info(token):
         "referer": "https://dkwin0.com/",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36"
     }
-    
     try:
         res = requests.post(USER_INFO_URL, json=payload, headers=headers, timeout=10).json()
         if res.get("code") == 0:
             data = res.get("data", {})
-            nickname = data.get("nickName", "Unknown")
-            vip_level = data.get("vipLevel", 0)
-            balance = float(data.get("amount", 0.00))
-            return nickname, vip_level, balance
+            return data.get("nickName", "Unknown"), data.get("vipLevel", 0)
     except Exception as e:
-        logger.error(f"GetUserInfo Error: {e}")
-        
-    return "Unknown", 0, 0.00
+        logger.error(f"Profile Error: {e}")
+    return "Unknown", 0
+
+# ⭐ ২. GetBalance API (আসল গেম ব্যালেন্স বের করার জন্য, ব্রাউজার হেডার সহ)
+def fetch_game_balance(lottery_token):
+    final_url = f"{BALANCE_API_URL}?language=en&random={LATEST_RANDOM}&signature={LATEST_SIGNATURE}&timestamp={LATEST_TIMESTAMP}"
+    
+    # ব্রাউজারের সব হেডার হুবহু দেওয়া হলো যাতে Render থেকে ব্লক না খায়
+    headers = {
+        "authority": "api.ar-lottery01.com",
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9",
+        "authorization": f"Bearer {lottery_token}",
+        "origin": "https://dkwin8.com",
+        "referer": "https://dkwin8.com/",
+        "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
+        "sec-ch-ua-mobile": "?1",
+        "sec-ch-ua-platform": '"Android"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "cross-site",
+        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+    }
+    
+    try:
+        res = requests.get(final_url, headers=headers, timeout=15).json()
+        if res.get("code") == 0:
+            return float(res["data"]["balance"]), "Success"
+        return 0.00, res.get('msg', 'Failed')
+    except Exception as e:
+        logger.error(f"Balance Error: {e}")
+        return 0.00, "Network Error"
 
 # ═══════════════════════════════════════════
 # ৩. মেইন লগইন এবং ড্যাশবোর্ড
@@ -122,6 +152,7 @@ async def api_login(uid, ctx, phone, password):
 
         if res_data.get("code") == 0:
             token = res_data["data"]["token"]
+            lottery_login_url = res_data["data"]["lotteryLoginUrl"]
             
             jwt_data = decode_jwt_payload(token)
             real_uid = jwt_data.get("UserId", "Unknown")
@@ -130,14 +161,20 @@ async def api_login(uid, ctx, phone, password):
             if login_phone not in state["accounts"]:
                 state["accounts"].append(login_phone)
 
-            await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **FETCHING DASHBOARD DATA**\n[█████████░] 90%")
-            
-            # ⭐ এখন শুধু GetUserInfo API থেকেই সব ডাটা নেওয়া হচ্ছে
-            nickname, vip_level, balance = await asyncio.to_thread(fetch_user_dashboard_info, token)
-            
+            # ১. প্রোফাইল (নাম ও VIP) নেওয়া
+            await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **FETCHING PROFILE**\n[███████░░░] 70%")
+            nickname, vip_level = await asyncio.to_thread(fetch_user_profile, token)
             state["nickname"] = nickname
             state["vip_level"] = vip_level
+
+            # ২. গেমের আসল ব্যালেন্স নেওয়া
+            parsed_url = urlparse(lottery_login_url)
+            lottery_token = parse_qs(parsed_url.query).get("Token", [""])[0]
+
+            await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **FETCHING BALANCE**\n[█████████░] 90%")
+            balance, b_status = await asyncio.to_thread(fetch_game_balance, lottery_token)
             state["balance"] = balance
+            state["balance_status"] = b_status
 
             await status_msg.delete()
 
@@ -150,7 +187,8 @@ async def api_login(uid, ctx, phone, password):
                 f"⭐ VIP Level: {vip_level}\n"
                 f"🆔 UID: `{real_uid}`\n\n"
                 f"📱 Phone: `{login_phone}`\n"
-                f"💰 Main Balance: **৳ {balance:.2f}**\n"
+                f"💰 Balance: **৳ {balance:.2f}**\n"
+                f"📡 Status: `{b_status}`\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "🧠 Analysis Engine:  READY\n"
                 "🚀 AutoTrade System: READY\n\n"
