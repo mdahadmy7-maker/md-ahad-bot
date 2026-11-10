@@ -16,9 +16,9 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
+USER_INFO_URL = "https://api.dkwinapi.com/api/webapi/GetUserInfo" 
 
-# ⚠️ এই সিগনেচারটি কিছুক্ষণ পর এক্সপায়ার হয়ে যায়। 
-# নতুন সিগনেচার পেতে ব্রাউজারের Network Tab থেকে GetBalance এর cURL কপি করুন।
+# ⚠️ ব্যালেন্স চেক করার সিগনেচার (সময় সময় আপডেট লাগতে পারে)
 BALANCE_API_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
 LATEST_RANDOM = "572476389394" 
 LATEST_SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" 
@@ -32,25 +32,17 @@ user_state = {}
 def get_state(uid):
     if uid not in user_state:
         user_state[uid] = {
-            "awaiting": None, 
-            "temp_phone": "", 
-            "temp_password": "",
-            "accounts": [], 
-            "balance": 0.0, 
-            "target": 0, 
-            "steps": 0, 
-            "step_amounts": [], 
-            "current_step": 0,
-            "trade_running": False, 
-            "task": None,
-            "wins": 0, "losses": 0, "total_trades": 0,
-            "first_bet": True,
-            "balance_status": "Unknown" # ⭐ ডিবাগিং স্ট্যাটাস
+            "awaiting": None, "temp_phone": "", "temp_password": "",
+            "accounts": [], "balance": 0.0, "target": 0, "steps": 0, 
+            "step_amounts": [], "current_step": 0, "trade_running": False, 
+            "task": None, "wins": 0, "losses": 0, "total_trades": 0,
+            "first_bet": True, "balance_status": "Unknown",
+            "nickname": "Unknown", "vip_level": 0, "real_uid": "Unknown"
         }
     return user_state[uid]
 
 # ═══════════════════════════════════════════
-# ২. সিগনেচার, JWT ডিকোডার এবং API ব্যালেন্স
+# ২. সিগনেচার এবং API হেল্পার ফাংশন
 # ═══════════════════════════════════════════
 def generate_signature(payload_dict):
     if 'signature' in payload_dict: del payload_dict['signature']
@@ -70,6 +62,24 @@ def decode_jwt_payload(token):
     except Exception:
         return {}
 
+def fetch_user_profile(token):
+    headers = {
+        "accept": "application/json, text/plain, */*",
+        "content-type": "application/json;charset=UTF-8",
+        "authorization": f"Bearer {token}",
+        "origin": "https://dkwin0.com",
+        "referer": "https://dkwin0.com/",
+        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36"
+    }
+    try:
+        res = requests.post(USER_INFO_URL, json={}, headers=headers, timeout=10).json()
+        if res.get("code") == 0:
+            data = res.get("data", {})
+            return data.get("nickName", "Unknown"), data.get("vipLevel", 0)
+    except:
+        pass
+    return "Unknown", 0
+
 def fetch_game_balance(lottery_token):
     final_url = f"{BALANCE_API_URL}?language=en&random={LATEST_RANDOM}&signature={LATEST_SIGNATURE}&timestamp={LATEST_TIMESTAMP}"
     headers = {
@@ -83,11 +93,8 @@ def fetch_game_balance(lottery_token):
         res = requests.get(final_url, headers=headers, timeout=15).json()
         if res.get("code") == 0:
             return float(res["data"]["balance"]), "Success"
-        else:
-            # সার্ভার যদি এরর দেয় (যেমন: Wrong signature), সেটা রিটার্ন করবে
-            return 0.00, res.get('msg', 'Failed')
+        return 0.00, res.get('msg', 'Failed')
     except Exception as e:
-        logger.error(f"Balance API Error: {e}")
         return 0.00, "Network Error"
 
 # ═══════════════════════════════════════════
@@ -132,12 +139,16 @@ async def api_login(uid, ctx, phone, password):
             if login_phone not in state["accounts"]:
                 state["accounts"].append(login_phone)
 
+            await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **FETCHING PROFILE**\n[███████░░░] 70%")
+            nickname, vip_level = await asyncio.to_thread(fetch_user_profile, token)
+            state["nickname"] = nickname
+            state["vip_level"] = vip_level
+
             parsed_url = urlparse(lottery_login_url)
             lottery_token = parse_qs(parsed_url.query).get("Token", [""])[0]
 
             await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **FETCHING BALANCE**\n[█████████░] 90%")
             
-            # ব্যালেন্স এবং স্ট্যাটাস নেওয়া
             balance, b_status = await asyncio.to_thread(fetch_game_balance, lottery_token)
             state["balance"] = balance
             state["balance_status"] = b_status
@@ -149,10 +160,12 @@ async def api_login(uid, ctx, phone, password):
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
                 "╚════════════════════════╝\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"☎️ Phone Number\n`{login_phone}`\n\n"
-                f"👤 Account UID\n`{real_uid}`\n\n"
-                f"💰 Account Balance\n**৳ {balance:.2f}**\n"
-                f"📡 API Status: `{b_status}`\n" # ⭐ এখানে স্ট্যাটাস দেখাবে
+                f"👤 Name: {nickname}\n"
+                f"⭐ VIP Level: {vip_level}\n"
+                f"🆔 UID: `{real_uid}`\n\n"
+                f"📱 Phone: `{login_phone}`\n"
+                f"💰 Balance: **৳ {balance:.2f}**\n"
+                f"📡 Status: `{b_status}`\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "🧠 Analysis Engine:  READY\n"
                 "🚀 AutoTrade System: READY\n\n"
@@ -172,7 +185,7 @@ async def api_login(uid, ctx, phone, password):
 
 
 # ═══════════════════════════════════════════
-# ৪. টেলিগ্রাম হ্যান্ডলারস (আগের লম্বা মেসেজ ও ফ্লো)
+# ৪. টেলিগ্রাম হ্যান্ডলারস 
 # ═══════════════════════════════════════════
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
