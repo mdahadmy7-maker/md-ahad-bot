@@ -17,7 +17,6 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 
-# ⭐ আপনার পাইড্রয়েডে সফল হওয়া API-এর ডাটা
 BALANCE_API_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
 LATEST_RANDOM = "572476389394" 
 LATEST_SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" 
@@ -62,11 +61,9 @@ def decode_jwt_payload(token):
     except Exception:
         return {}
 
-# ⭐ আপনার সফল GetBalance API (একদম হুবহু)
 def fetch_game_balance(lottery_token):
     final_url = f"{BALANCE_API_URL}?language=en&random={LATEST_RANDOM}&signature={LATEST_SIGNATURE}&timestamp={LATEST_TIMESTAMP}"
     
-    # আপনার cURL-এর হেডার হুবহু কপি করা
     headers = {
         "accept": "application/json, text/plain, */*",
         "authorization": f"Bearer {lottery_token}",
@@ -76,7 +73,14 @@ def fetch_game_balance(lottery_token):
     }
     
     try:
-        res = requests.get(final_url, headers=headers, timeout=15).json()
+        # ⭐ Render-এর IP ব্লক এড়াতে একটি ফ্রি প্রক্সি ব্যবহারের চেষ্টা (এটি কাজ না করলে অন্য প্রক্সি লাগবে)
+        proxies = {
+            # "http": "http://your_proxy_here:port",
+            # "https": "http://your_proxy_here:port"
+        }
+        
+        res = requests.get(final_url, headers=headers, proxies=proxies if proxies else None, timeout=15).json()
+        
         if res.get("code") == 0:
             return float(res["data"]["balance"])
         else:
@@ -133,7 +137,6 @@ async def api_login(uid, ctx, phone, password):
 
             await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **FETCHING BALANCE**\n[█████████░] 90%")
             
-            # আপনার সফল API কল
             balance = await asyncio.to_thread(fetch_game_balance, lottery_token)
             state["balance"] = balance
 
