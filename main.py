@@ -17,7 +17,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 
-# ⭐ আপনার সফল API
+# আপনার সফল API
 BALANCE_API_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
 LATEST_RANDOM = "572476389394" 
 LATEST_SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" 
@@ -35,7 +35,7 @@ def get_state(uid):
             "accounts": [], "balance": 0.0, "target": 0, "steps": 0, 
             "step_amounts": [], "current_step": 0, "trade_running": False, 
             "task": None, "wins": 0, "losses": 0, "total_trades": 0,
-            "first_bet": True, "real_uid": "Unknown"
+            "first_bet": True, "real_uid": "Unknown", "balance_status": "Unknown"
         }
     return user_state[uid]
 
@@ -45,10 +45,12 @@ def get_state(uid):
 def generate_signature(payload_dict):
     if 'signature' in payload_dict: del payload_dict['signature']
     if 'timestamp' in payload_dict: del payload_dict['timestamp']
+    
     sorted_dict = {}
     for key in sorted(payload_dict.keys()):
         if payload_dict[key] != "" and payload_dict[key] is not None:
             sorted_dict[key] = payload_dict[key]
+            
     json_string = json.dumps(sorted_dict, separators=(',', ':'))
     return hashlib.md5(json_string.encode('utf-8')).hexdigest().upper()
 
@@ -62,6 +64,7 @@ def decode_jwt_payload(token):
 
 def fetch_game_balance(lottery_token):
     final_url = f"{BALANCE_API_URL}?language=en&random={LATEST_RANDOM}&signature={LATEST_SIGNATURE}&timestamp={LATEST_TIMESTAMP}"
+    
     headers = {
         "accept": "application/json, text/plain, */*",
         "authorization": f"Bearer {lottery_token}",
@@ -69,14 +72,15 @@ def fetch_game_balance(lottery_token):
         "referer": "https://dkwin8.com/",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
+    
     try:
         res = requests.get(final_url, headers=headers, timeout=15).json()
         if res.get("code") == 0:
-            return float(res["data"]["balance"])
-        return 0.00
+            return float(res["data"]["balance"]), "Success"
+        return 0.00, res.get('msg', 'Failed')
     except Exception as e:
         logger.error(f"Network Error: {e}")
-        return 0.00
+        return 0.00, "Network Error"
 
 # ═══════════════════════════════════════════
 # ৩. মেইন লগইন এবং ড্যাশবোর্ড
@@ -125,19 +129,25 @@ async def api_login(uid, ctx, phone, password):
 
             await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 **FETCHING BALANCE**\n[█████████░] 90%")
             
-            balance = await asyncio.to_thread(fetch_game_balance, lottery_token)
+            balance, b_status = await asyncio.to_thread(fetch_game_balance, lottery_token)
             state["balance"] = balance
+            state["balance_status"] = b_status
 
             await status_msg.delete()
 
+            # ⭐ নাম্বারের লাস্ট ৪ ডিজিট বের করা হচ্ছে
+            masked_phone = "****" + login_phone[-4:] if len(login_phone) >= 4 else login_phone
+
+            # ⭐ এখানে ফোন নাম্বারটি মাস্ক করা হয়েছে
             dashboard_msg = (
                 "╔════════════════════════╗\n"
                 "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
                 "╚════════════════════════╝\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                f"🆔 UID: `{real_uid}`\n\n"
-                f"📱 Phone: `{login_phone}`\n"
-                f"💰 Balance: **৳ {balance:.2f}**\n"
+                f"🆔 Account UID\n`{real_uid}`\n\n"
+                f"📱 Phone: `{masked_phone}`\n"
+                f"💰 Account Balance\n**৳ {balance:.2f}**\n"
+                f"📡 API Status: `{b_status}`\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "🧠 Analysis Engine:  READY\n"
                 "🚀 AutoTrade System: READY\n\n"
@@ -157,7 +167,7 @@ async def api_login(uid, ctx, phone, password):
 
 
 # ═══════════════════════════════════════════
-# ৪. টেলিগ্রাম হ্যান্ডলারস 
+# ৪. টেলিগ্রাম হ্যান্ডলারস (আপনার ওয়েলকাম মেসেজ ও ফ্লো)
 # ═══════════════════════════════════════════
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
