@@ -40,7 +40,7 @@ def get_state(uid):
             "accounts": [], "balance": 0.0, "target": 0, "steps": 0, 
             "step_amounts": [], "current_step": 0, "trade_running": False, 
             "task": None, "wins": 0, "losses": 0, "total_trades": 0,
-            "first_bet": True, "real_uid": "Unknown", "lottery_token": None
+            "first_bet": True, "real_uid": "Unknown", "lottery_token": None, "next_period": "----"
         }
     return user_state[uid]
 
@@ -84,23 +84,17 @@ def fetch_game_balance(lottery_token):
     except:
         return 0.00
 
-# ⭐ পিরিয়ড নাম্বার বের করার ফাংশন (পুরো নাম্বার)
-def get_next_period_and_prediction():
+def fetch_next_period():
     try:
         res = requests.get(HISTORY_API, headers={"User-Agent": "Mozilla/5.0"}, timeout=10).json()
         list_data = res.get("data", {}).get("list", [])
-        if not list_data: return None, "BigSmall_Big"
+        if not list_data: return "----"
         
         latest_period = str(list_data[0].get("issueNumber", ""))
-        next_period = str(int(latest_period) + 1) # পরবর্তী পিরিয়ড
-        
-        # ডামি প্রেডিকশন লজিক
-        last_num = int(list_data[0].get("number", 0))
-        prediction = "BigSmall_Small" if last_num >= 5 else "BigSmall_Big"
-        
-        return next_period, prediction
+        next_period = str(int(latest_period) + 1) 
+        return next_period
     except:
-        return None, "BigSmall_Big"
+        return "----"
 
 def place_bet(lottery_token, issue_number, amount, prediction):
     current_timestamp = int(time.time())
@@ -184,6 +178,9 @@ async def api_login(uid, ctx, phone, password):
             balance = await asyncio.to_thread(fetch_game_balance, lottery_token)
             state["balance"] = balance
             
+            next_period = await asyncio.to_thread(fetch_next_period)
+            state["next_period"] = next_period
+
             await status_msg.delete()
             masked_phone = "****" + login_phone[-4:]
 
@@ -195,6 +192,7 @@ async def api_login(uid, ctx, phone, password):
                 f"🆔 UID: `{real_uid}`\n"
                 f"📱 Phone: `{masked_phone}`\n"
                 f"💰 Balance: **৳ {balance:.2f}**\n"
+                f"🔄 Period: `{next_period}`\n" 
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "🧠 Analysis Engine:  READY\n"
                 "🚀 AutoTrade System: READY\n\n"
@@ -213,14 +211,14 @@ async def api_login(uid, ctx, phone, password):
         await ctx.bot.send_message(chat_id=uid, text=f"⚠️ **NETWORK ERROR:** {str(e)[:100]}")
 
 # ═══════════════════════════════════════════
-# ৪. টেলিগ্রাম হ্যান্ডলারস (ওয়েলকাম মেসেজ ও ফ্লো)
+# ৪. টেলিগ্রাম হ্যান্ডলারস (আপনার অরিজিনাল মেসেজ ও ফ্লো)
 # ═══════════════════════════════════════════
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
     state["first_bet"] = True 
     
-    # ⭐ আপনার হুবহু ওয়েলকাম মেসেজ
+    # ⭐ আপনার অরিজিনাল লম্বা ওয়েলকাম মেসেজ
     welcome_text = (
         "🧠 **BD=WIN~GO=AUTO~BET 💥**\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -253,7 +251,14 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if state.get("awaiting") == "phone":
         state["temp_phone"] = text
         state["awaiting"] = "password"
-        await update.message.reply_text(f"╔════════════════════════╗\n║  🔐 ACCOUNT LOGIN 🔐  ║\n╚════════════════════════╝\n☎️ Number : {text}\n\n🔑 Now enter your password:\nYour message will be deleted immediately for security.")
+        await update.message.reply_text(
+            "╔════════════════════════╗\n"
+            "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
+            "╚════════════════════════╝\n"
+            f"☎️ Number : {text}\n\n"
+            "🔑 Now enter your password:\n"
+            "Your message will be deleted immediately for security."
+        )
         return
 
     if state.get("awaiting") == "password":
@@ -266,46 +271,103 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         
     if text == "🚀 START YOUR TARGET":
         state["awaiting"] = "target"
-        await update.message.reply_text(f"╔════════════════════════╗\n║   🚀 START YOUR TARGET 🚀   ║\n╚════════════════════════╝\n💰 YOUR BALANCE\n৳ {state.get('balance', 0.00):.2f}\n\n🎯 Enter your TARGET profit amount:")
+        target_msg = (
+            "╔════════════════════════╗\n"
+            "║   🚀 START YOUR TARGET 🚀   ║\n"
+            "╚════════════════════════╝\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "💰 YOUR BALANCE\n"
+            f"৳ {state.get('balance', 0.00):.2f}\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "🎯 Enter your TARGET profit amount:\n"
+            "How much do you want to earn? (in ৳)"
+        )
+        await update.message.reply_text(target_msg)
         return
         
     if state.get("awaiting") == "target":
         try:
             target_amount = float(text)
             state["target"] = target_amount
+            balance = float(state.get('balance', 0.00))
+            stop_at = balance + target_amount
+            target_set_msg = (
+                "╔════════════════════════╗\n"
+                "║   🎯 TARGET SET 🎯   ║\n"
+                "╚════════════════════════╝\n\n"
+                f"💰 Balance  : ৳ {balance:.2f}\n"
+                f"🎯 Target   : ৳ {target_amount:.2f} profit\n"
+                f"🏦 Stop At  : ৳ {stop_at:.2f}\n"
+                "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                "🚀 Enter your STEP COUNT:\n"
+                "How many steps? (e.g. 5, max 50)"
+            )
             state["awaiting"] = "steps"
-            await update.message.reply_text(f"🎯 Target: ৳ {target_amount:.2f}\n\n🚀 Enter your STEP COUNT (e.g. 5):")
-        except: await update.message.reply_text("❌ ভুল ফরম্যাট!")
+            await update.message.reply_text(target_set_msg)
+        except ValueError:
+            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 50)।")
         return
         
     if state.get("awaiting") == "steps":
         try:
             steps = int(text)
-            if steps > 50 or steps < 1: raise ValueError()
+            if steps > 50 or steps < 1: raise ValueError("Steps must be between 1 and 50")
             state["steps"] = steps
             state["step_amounts"] = [] 
             state["current_step"] = 1
             state["awaiting"] = "step_amount"
-            await update.message.reply_text(f"💵 Step {state['current_step']} — bet amount? (in ৳)")
-        except: await update.message.reply_text("❌ ভুল ফরম্যাট! ১ থেকে ৫০ এর মধ্যে দিন।")
+            step_msg = (
+                "╔════════════════════════╗\n"
+                "║   💵 STEP AMOUNTS 💵   ║\n"
+                "╚════════════════════════╝\n\n"
+                f"You chose {steps} steps.\n\n"
+                f"💵 Step {state['current_step']} — bet amount? (in ৳)"
+            )
+            await update.message.reply_text(step_msg)
+        except ValueError:
+            await update.message.reply_text("❌ ভুল ফরম্যাট! ১ থেকে ৫০ এর মধ্যে একটি সংখ্যা দিন (যেমন: 5)।")
         return
 
     if state.get("awaiting") == "step_amount":
         try:
             amount = float(text)
-            if amount <= 0: raise ValueError()
+            if amount <= 0: raise ValueError("Amount must be greater than 0")
             state["step_amounts"].append(amount)
             state["current_step"] += 1
             if state["current_step"] <= state["steps"]:
-                await update.message.reply_text(f"💵 Step {state['current_step']} — bet amount? (in ৳)")
+                step_msg = f"💵 Step {state['current_step']} — bet amount? (in ৳)"
+                await update.message.reply_text(step_msg)
             else:
                 state["awaiting"] = None
+                total_risk = sum(state["step_amounts"])
+                balance = float(state.get('balance', 0.00))
+                target = float(state.get('target', 0))
+                stop_at = balance + target
+                step_plan_text = ""
+                for i, amt in enumerate(state["step_amounts"]):
+                    step_plan_text += f"Step {i+1:02d} : ৳ {amt:.2f}\n"
+                
+                combined_msg = (
+                    "⚙️ TRADE CONFIGURATION ⚙️\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"💰 Balance  : ৳ {balance:.2f}\n"
+                    f"🎯 Target   : ৳ {target:.2f} profit\n"
+                    f"🏦 Stop At  : ৳ {stop_at:.2f}\n"
+                    f"📋 Steps    : {state['steps']}\n"
+                    f"⚠️ Total Risk : ৳ {total_risk:.2f}\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "📊 STEP PLAN\n"
+                    f"{step_plan_text}"
+                    "\n"
+                    "👇 Press START TRADE to begin."
+                )
                 inline_kb = InlineKeyboardMarkup([
                     [InlineKeyboardButton("🚀 START TRADE", callback_data="start_trade_btn"), 
                      InlineKeyboardButton("❌ CANCEL", callback_data="cancel_trade_btn")]
                 ])
-                await update.message.reply_text("⚙️ Configuration Done! Press START TRADE to begin.", reply_markup=inline_kb)
-        except: await update.message.reply_text("❌ ভুল ফরম্যাট!")
+                await update.message.reply_text(combined_msg, reply_markup=inline_kb)
+        except ValueError:
+            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 1)।")
         return
 
     if text == "🛑 STOP TRADE":
@@ -328,7 +390,16 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     
     if data == "start_login":
         state["awaiting"] = "phone"
-        await ctx.bot.send_message(chat_id=uid, text="📱 Enter your DKWIN phone number:")
+        login_msg = (
+            "╔════════════════════════╗\n"
+            "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
+            "╚════════════════════════╝\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "📱 Enter your DKWIN phone number:\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "Everyone uses their own account — your session is private."
+        )
+        await ctx.bot.send_message(chat_id=uid, text=login_msg)
         
     elif data == "start_trade_btn":
         state["trade_running"] = True
@@ -338,25 +409,21 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         while state["trade_running"] and step_idx < len(state["step_amounts"]):
             amount = state["step_amounts"][step_idx]
             
-            # ⭐ পুরো পিরিয়ড নাম্বার বের করা (কোনো ৪ ডিজিটে কাটা নেই)
-            issue_number, prediction = get_next_period_and_prediction()
-            if not issue_number:
+            issue_number = await asyncio.to_thread(fetch_next_period)
+            if issue_number == "----":
                 await ctx.bot.send_message(chat_id=uid, text="⚠️ পিরিয়ড পাওয়া যায়নি!")
                 state["trade_running"] = False
                 break
                 
-            # ব্যালেন্স চেক
-            current_bal = fetch_game_balance(state["lottery_token"])
+            current_bal = await asyncio.to_thread(fetch_game_balance, state["lottery_token"])
             if current_bal < amount:
                 await ctx.bot.send_message(chat_id=uid, text=f"❌ **পর্যাপ্ত ব্যালেন্স নেই!**\nপ্রয়োজন: ৳{amount}, আছে: ৳{current_bal:.2f}। ট্রেড বন্ধ হচ্ছে।")
                 state["trade_running"] = False
                 break
 
-            # ⭐ এখানে পুরো পিরিয়ড নাম্বারটি মেসেজে দেখানো হচ্ছে
-            await ctx.bot.send_message(chat_id=uid, text=f"🎯 **PLACING BET...**\n🆔 Period: `{issue_number}`\n💰 Amount: ৳{amount}\n📊 Prediction: `{prediction}`", parse_mode="Markdown")
+            await ctx.bot.send_message(chat_id=uid, text=f"🎯 **PLACING BET...**\n🆔 Period: `{issue_number}`\n💰 Amount: ৳{amount}\n📊 Prediction: `BigSmall_Big`", parse_mode="Markdown")
             
-            # API-তে সম্পূর্ণ পিরিয়ড নাম্বার পাঠানো হচ্ছে
-            status_code, res_text = place_bet(state["lottery_token"], issue_number, amount, prediction)
+            status_code, res_text = await asyncio.to_thread(place_bet, state["lottery_token"], issue_number, amount, "BigSmall_Big")
             
             if status_code == 200 and '"code":0' in res_text:
                 await ctx.bot.send_message(chat_id=uid, text=f"✅ **BET SUCCESSFUL!**\nসার্ভার রেসপন্স: `{res_text[:50]}...`", parse_mode="Markdown")
