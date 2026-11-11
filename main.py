@@ -15,7 +15,7 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন
 # ═══════════════════════════════════════════
-BOT_TOKEN = os.environ.get("BOT_TOKEN") 
+BOT_TOKEN = os.environ.get("9032921988:AAHAUaTKEB26sJ3_ZNqW0uWdDKFtaWngEbE") 
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 
 # আপনার সফল ব্যালেন্স API
