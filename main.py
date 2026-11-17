@@ -35,11 +35,13 @@ def get_state(uid):
             "accounts": [], "balance": 0.0, "target": 0, "steps": 0, 
             "step_amounts": [], "current_step": 0, "trade_running": False, 
             "task": None, "wins": 0, "losses": 0, "total_trades": 0,
-            "first_bet": True, "real_uid": "Unknown", "lottery_token": None, "next_period": "----"
+            "first_bet": True, "real_uid": "Unknown", "lottery_token": None, "next_period": "----",
+            "origin_domain": "https://dkwin0.com"  # ডিফল্ট ডোমেইন
         }
     return user_state[uid]
 
 def generate_signature(payload_dict):
+    # সিগনেচার তৈরি করার সময় timestamp বাদ দেওয়া হয়
     if 'signature' in payload_dict: del payload_dict['signature']
     if 'timestamp' in payload_dict: del payload_dict['timestamp']
     
@@ -59,11 +61,12 @@ def decode_jwt_payload(token):
     except Exception:
         return {}
 
-def fetch_game_balance(lottery_token):
-    # ✅ ডাইনামিক সিগনেচার জেনারেশন (হার্ডকোড বাদ দেওয়া হয়েছে)
+def fetch_game_balance(lottery_token, origin_domain):
+    # ✅ ডাইনামিক সিগনেচার (হার্ডকোড বাদ)
     random_val = random.randint(100000000000, 999999999999)
     timestamp_val = int(time.time())
     
+    # ব্যালেন্স সিগনেচারের জন্য পেলোড (শুধু language এবং random)
     payload = {"language": "en", "random": int(random_val)}
     sorted_dict = {k: payload[k] for k in sorted(payload.keys())}
     json_string = json.dumps(sorted_dict, separators=(',', ':'))
@@ -73,35 +76,45 @@ def fetch_game_balance(lottery_token):
     headers = {
         "accept": "application/json, text/plain, */*",
         "authorization": f"Bearer {lottery_token}",
-        "origin": "https://dkwin8.com",
-        "referer": "https://dkwin8.com/",
+        "origin": origin_domain,      # ✅ লগইন ডোমেইন ব্যবহার
+        "referer": origin_domain + "/",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
-        res = requests.get(final_url, headers=headers, timeout=15).json()
-        if res.get("code") == 0:
-            return float(res["data"]["balance"])
-        return 0.00
+        res = requests.get(final_url, headers=headers, timeout=15)
+        data = res.json()
+        if data.get("code") == 0:
+            return float(data["data"]["balance"])
+        else:
+            logger.error(f"Balance API Error: {data}")  # লগে রাখা হলো
+            return 0.00
     except Exception as e:
-        logger.error(f"Balance Fetch Error: {e}")
+        logger.error(f"Balance Fetch Exception: {e}")
         return 0.00
 
-def fetch_next_period():
+def fetch_next_period(origin_domain):
     try:
-        # ক্যাশ এড়ানোর জন্য টাইমস্ট্যাম্প যোগ করা হলো
-        url = f"{HISTORY_API}?t={int(time.time())}"
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10).json()
+        # ✅ সঠিক প্যারামিটার: pageSize, pageNo, _t
+        url = f"{HISTORY_API}?pageSize=100&pageNo=1&_t={int(time.time()*1000)}"
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
+            "Origin": origin_domain,
+            "Referer": origin_domain + "/"
+        }
+        res = requests.get(url, headers=headers, timeout=10).json()
         list_data = res.get("data", {}).get("list", [])
-        if not list_data: return "----"
+        if not list_data: 
+            logger.error(f"History API returned empty list: {res}")
+            return "----"
         
         latest_period = str(list_data[0].get("issueNumber", ""))
         next_period = str(int(latest_period) + 1) 
         return next_period
     except Exception as e:
-        logger.error(f"Period Fetch Error: {e}")
+        logger.error(f"Period Fetch Exception: {e}")
         return "----"
 
-def place_bet(lottery_token, issue_number, amount, prediction):
+def place_bet(lottery_token, issue_number, amount, prediction, origin_domain):
     current_timestamp = int(time.time())
     random_str = random.randint(100000000000, 999999999999)
     
@@ -125,8 +138,8 @@ def place_bet(lottery_token, issue_number, amount, prediction):
         "-H", "accept-language: en-US,en;q=0.9",
         "-H", f"authorization: Bearer {lottery_token}",
         "-H", "content-type: application/json",
-        "-H", "origin: https://dkwin8.com",
-        "-H", "referer: https://dkwin8.com/",
+        "-H", f"origin: {origin_domain}",      # ✅ ডাইনামিক অরিজিন
+        "-H", f"referer: {origin_domain}/",
         "-H", 'sec-ch-ua: "Chromium";v="139", "Not;A=Brand";v="99"',
         "-H", "sec-ch-ua-mobile: ?1",
         "-H", 'sec-ch-ua-platform: "Android"',
@@ -178,6 +191,12 @@ async def api_login(uid, ctx, phone, password):
             token = res_data["data"]["token"]
             lottery_login_url = res_data["data"]["lotteryLoginUrl"]
             
+            # ✅ lotteryLoginUrl থেকে ডোমেইন বের করা
+            parsed_lottery = urlparse(lottery_login_url)
+            origin_domain = f"{parsed_lottery.scheme}://{parsed_lottery.netloc}"
+            state["origin_domain"] = origin_domain
+            logger.info(f"Lottery Origin Domain: {origin_domain}")
+
             jwt_data = decode_jwt_payload(token)
             real_uid = jwt_data.get("UserId", "Unknown")
             state["real_uid"] = real_uid
@@ -190,10 +209,10 @@ async def api_login(uid, ctx, phone, password):
             state["lottery_token"] = lottery_token 
 
             await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 FETCHING BALANCE...\n[█████████░] 90%")
-            balance = await asyncio.to_thread(fetch_game_balance, lottery_token)
+            balance = await asyncio.to_thread(fetch_game_balance, lottery_token, origin_domain)
             state["balance"] = balance
             
-            next_period = await asyncio.to_thread(fetch_next_period)
+            next_period = await asyncio.to_thread(fetch_next_period, origin_domain)
             state["next_period"] = next_period
 
             await status_msg.delete()
@@ -420,14 +439,13 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         while state["trade_running"] and step_idx < len(state["step_amounts"]):
             amount = state["step_amounts"][step_idx]
             
-            issue_number = await asyncio.to_thread(fetch_next_period)
+            issue_number = await asyncio.to_thread(fetch_next_period, state["origin_domain"])
             if issue_number == "----":
                 await ctx.bot.send_message(chat_id=uid, text="⚠️ পিরিয়ড পাওয়া যায়নি!")
                 state["trade_running"] = False
                 break
                 
-            # প্রতিবার বেট করার আগে রিয়েল-টাইম ব্যালেন্স চেক
-            current_bal = await asyncio.to_thread(fetch_game_balance, state["lottery_token"])
+            current_bal = await asyncio.to_thread(fetch_game_balance, state["lottery_token"], state["origin_domain"])
             if current_bal < amount:
                 await ctx.bot.send_message(chat_id=uid, text=f"❌ পর্যাপ্ত ব্যালেন্স নেই!\nপ্রয়োজন: ৳{amount}, আছে: ৳{current_bal:.2f}। ট্রেড বন্ধ হচ্ছে।")
                 state["trade_running"] = False
@@ -435,9 +453,8 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             await ctx.bot.send_message(chat_id=uid, text=f"🎯 PLACING BET...\n🆔 Period: {issue_number}\n💰 Amount: ৳{amount}\n📊 Prediction: BigSmall_Big")
             
-            status_code, res_text = await asyncio.to_thread(place_bet, state["lottery_token"], issue_number, amount, "BigSmall_Big")
+            status_code, res_text = await asyncio.to_thread(place_bet, state["lottery_token"], issue_number, amount, "BigSmall_Big", state["origin_domain"])
             
-            # ✅ JSON রেসপন্স চেক করা হচ্ছে (স্ট্রিং ম্যাচিং এর বদলে)
             is_success = False
             if status_code == 200:
                 try:
