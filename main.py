@@ -78,7 +78,7 @@ def decode_jwt(token):
         return {}
 
 # ───────────────────────────────────────
-# ৩. API কল (সব curl দিয়ে করা হলো Render IP ব্লক বাইপাসের জন্য)
+# ৩. API কল (Debug যুক্ত করা হয়েছে)
 # ───────────────────────────────────────
 def fetch_game_balance(lottery_token):
     bal_rnd = random.randint(100000000000, 999999999999)
@@ -98,15 +98,17 @@ def fetch_game_balance(lottery_token):
     
     try:
         result = subprocess.run(curl_command, capture_output=True, text=True, timeout=15)
+        logger.info(f"BALANCE RAW RESPONSE: {result.stdout}")
+        
         if result.returncode == 0 and result.stdout.strip():
             data = json.loads(result.stdout)
-            logger.info(f"Balance Response: {data}")
             if data.get("code") == 0:
-                return float(data['data']['balance'])
-        return 0.00
+                return float(data['data']['balance']), "OK"
+            else:
+                return 0.00, str(data) # এরর মেসেজ রিটার্ন করবে
+        return 0.00, f"Curl Error: {result.stderr}"
     except Exception as e:
-        logger.error(f"Balance Error: {e}")
-        return 0.00
+        return 0.00, str(e)
 
 def fetch_next_period():
     curl_command = [
@@ -120,8 +122,7 @@ def fetch_next_period():
             latest_period = int(data['data']['list'][0]['issueNumber'])
             return str(latest_period + 1)
         return "----"
-    except Exception as e:
-        logger.error(f"Period Error: {e}")
+    except:
         return "----"
 
 def place_bet(lottery_token, issue_number, amount, choice):
@@ -212,7 +213,7 @@ async def api_login(uid, ctx, phone, password):
 
             await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 FETCHING BALANCE...\n[█████████░] 90%")
             
-            balance = await asyncio.to_thread(fetch_game_balance, lottery_token)
+            balance, debug_info = await asyncio.to_thread(fetch_game_balance, lottery_token)
             state["balance"] = balance
             
             next_period = await asyncio.to_thread(fetch_next_period)
@@ -220,6 +221,9 @@ async def api_login(uid, ctx, phone, password):
 
             await status_msg.delete()
             masked_phone = "****" + login_phone[-4:]
+
+            # ✅ Debug Info যুক্ত করা হলো
+            debug_text = f"\n🐞 Debug: {debug_info[:50]}" if balance == 0.00 else ""
 
             dashboard_msg = (
                 "╔════════════════════════╗\n"
@@ -231,7 +235,7 @@ async def api_login(uid, ctx, phone, password):
                 "👤 Account UID\n"
                 f"{real_uid}\n\n"
                 "💰 Account Balance\n"
-                f"৳ {balance:.2f}\n"
+                f"৳ {balance:.2f}{debug_text}\n"
                 "━━━━━━━━━━━━━━━━━━━━━━━\n"
                 "🧠 Analysis Engine:  READY\n"
                 "🚀 AutoTrade System: READY\n\n"
@@ -451,7 +455,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 state["trade_running"] = False
                 break
                 
-            current_bal = await asyncio.to_thread(fetch_game_balance, state["lottery_token"])
+            current_bal, _ = await asyncio.to_thread(fetch_game_balance, state["lottery_token"])
             if current_bal < amount:
                 await ctx.bot.send_message(chat_id=uid, text=f"❌ পর্যাপ্ত ব্যালেন্স নেই!\nপ্রয়োজন: ৳{amount}, আছে: ৳{current_bal:.2f}। ট্রেড বন্ধ হচ্ছে।")
                 state["trade_running"] = False
@@ -519,7 +523,6 @@ def main():
     
     print("🤖 Bot started successfully...")
     
-    # 409 Conflict এড়ানোর জন্য drop_pending_updates
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
