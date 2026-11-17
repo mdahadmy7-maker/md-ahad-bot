@@ -10,7 +10,7 @@ import random
 import threading
 from urllib.parse import urlparse, parse_qs
 from flask import Flask
-from curl_cffi import requests  # ✅ WAF বাইপাস করার ম্যাজিক লাইব্রেরি
+import cloudscraper # ✅ ক্লাউডফ্লেয়ার বাইপাস লাইব্রেরি
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 
@@ -28,6 +28,11 @@ logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=lo
 logger = logging.getLogger(__name__)
 
 user_state = {}
+
+# ✅ cloudscraper সেশন তৈরি
+scraper = cloudscraper.create_scraper(
+    browser={'browser': 'chrome', 'platform': 'android', 'mobile': True}
+)
 
 def get_state(uid):
     if uid not in user_state:
@@ -77,7 +82,7 @@ def decode_jwt(token):
         return {}
 
 # ───────────────────────────────────────
-# ৩. API কল (curl_cffi দিয়ে WAF বাইপাস)
+# ৩. API কল (cloudscraper দিয়ে)
 # ───────────────────────────────────────
 def fetch_game_balance(lottery_token):
     bal_rnd = random.randint(100000000000, 999999999999)
@@ -95,10 +100,16 @@ def fetch_game_balance(lottery_token):
     }
     
     try:
-        # ✅ impersonate="chrome110" সার্ভারকে বোকা বানাবে যে এটি আসল ক্রোম ব্রাউজার
-        res = requests.get(bal_url, headers=bal_headers, impersonate="chrome110", timeout=15)
-        data = res.json()
+        # ✅ cloudscraper দিয়ে রিকোয়েস্ট
+        res = scraper.get(bal_url, headers=bal_headers, timeout=15)
         
+        if not res.text.strip():
+            return 0.00, "Empty Response"
+            
+        if not res.text.strip().startswith("{"):
+            return 0.00, f"WAF Block: {res.text[:40]}"
+            
+        data = res.json()
         if data.get("code") == 0:
             return float(data['data']['balance']), "OK"
         else:
@@ -108,7 +119,7 @@ def fetch_game_balance(lottery_token):
 
 def fetch_next_period():
     try:
-        res = requests.get(HISTORY_URL, impersonate="chrome110", timeout=10)
+        res = scraper.get(HISTORY_URL, timeout=10)
         data = res.json()
         latest_period = int(data['data']['list'][0]['issueNumber'])
         return str(latest_period + 1)
@@ -146,7 +157,7 @@ def place_bet(lottery_token, issue_number, amount, choice):
             "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
         }
 
-        res = requests.post(BET_URL, json=bet_payload, headers=bet_headers, impersonate="chrome110", timeout=15)
+        res = scraper.post(BET_URL, json=bet_payload, headers=bet_headers, timeout=15)
         return res.status_code, res.text
     except Exception as e:
         return 500, str(e)
@@ -179,8 +190,7 @@ async def api_login(uid, ctx, phone, password):
     try:
         await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 LOGGING IN...\n[█████░░░░░] 50%")
         
-        # ✅ লগইনেও curl_cffi
-        response = await asyncio.to_thread(requests.post, LOGIN_URL, json=payload, headers=headers, impersonate="chrome110", timeout=15)
+        response = await asyncio.to_thread(scraper.post, LOGIN_URL, json=payload, headers=headers, timeout=15)
         res_data = response.json()
 
         if res_data.get("code") == 0:
