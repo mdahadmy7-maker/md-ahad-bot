@@ -7,11 +7,10 @@ import hashlib
 import json
 import base64
 import random
-import subprocess
 import threading
 from urllib.parse import urlparse, parse_qs
 from flask import Flask
-import requests
+from curl_cffi import requests  # ✅ WAF বাইপাস করার ম্যাজিক লাইব্রেরি
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 
@@ -78,7 +77,7 @@ def decode_jwt(token):
         return {}
 
 # ───────────────────────────────────────
-# ৩. API কল (curl দিয়ে ফায়ারওয়াল বাইপাস)
+# ৩. API কল (curl_cffi দিয়ে WAF বাইপাস)
 # ───────────────────────────────────────
 def fetch_game_balance(lottery_token):
     bal_rnd = random.randint(100000000000, 999999999999)
@@ -87,47 +86,32 @@ def fetch_game_balance(lottery_token):
     
     bal_url = f"https://api.ar-lottery01.com/api/Lottery/GetBalance?language=en&random={bal_rnd}&signature={bal_sig}&timestamp={bal_ts}"
     
-    curl_command = [
-        "curl", "-s", "-L", "--compressed", "--http1.1", "-X", "GET", bal_url,
-        "-H", "accept: application/json, text/plain, */*",
-        "-H", f"authorization: Bearer {lottery_token.strip()}",
-        "-H", "origin: https://dkwin8.com",
-        "-H", "referer: https://dkwin8.com/",
-        "-H", "user-agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
-    ]
+    bal_headers = {
+        "accept": "application/json, text/plain, */*",
+        "authorization": f"Bearer {lottery_token.strip()}",
+        "origin": "https://dkwin8.com",
+        "referer": "https://dkwin8.com/",
+        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+    }
     
     try:
-        result = subprocess.run(curl_command, capture_output=True, text=True, timeout=15)
-        raw_out = result.stdout.strip()
-        logger.info(f"RAW BALANCE RESPONSE: {raw_out}") # Render লগে দেখা যাবে
+        # ✅ impersonate="chrome110" সার্ভারকে বোকা বানাবে যে এটি আসল ক্রোম ব্রাউজার
+        res = requests.get(bal_url, headers=bal_headers, impersonate="chrome110", timeout=15)
+        data = res.json()
         
-        if not raw_out:
-            return 0.00, "Empty API Response"
-            
-        if not raw_out.startswith("{"):
-            return 0.00, f"WAF Block: {raw_out[:40]}" 
-            
-        data = json.loads(raw_out)
         if data.get("code") == 0:
             return float(data['data']['balance']), "OK"
         else:
             return 0.00, f"API Error: {data.get('msg', 'Unknown')}"
-            
     except Exception as e:
         return 0.00, f"Parse Fail: {str(e)[:40]}"
 
 def fetch_next_period():
-    curl_command = [
-        "curl", "-s", "-X", "GET", HISTORY_URL,
-        "-H", "user-agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
-    ]
     try:
-        result = subprocess.run(curl_command, capture_output=True, text=True, timeout=10)
-        if result.returncode == 0 and result.stdout.strip():
-            data = json.loads(result.stdout)
-            latest_period = int(data['data']['list'][0]['issueNumber'])
-            return str(latest_period + 1)
-        return "----"
+        res = requests.get(HISTORY_URL, impersonate="chrome110", timeout=10)
+        data = res.json()
+        latest_period = int(data['data']['list'][0]['issueNumber'])
+        return str(latest_period + 1)
     except:
         return "----"
 
@@ -144,33 +128,26 @@ def place_bet(lottery_token, issue_number, amount, choice):
             "betMultiple": 1, "betContent": bet_content, "language": "en",
             "random": c_rnd, "signature": sig, "timestamp": c_ts
         }
-        json_string = json.dumps(bet_payload, separators=(',', ':'))
+        
+        bet_headers = {
+            "authority": "api.ar-lottery01.com",
+            "accept": "application/json, text/plain, */*",
+            "accept-language": "en-US,en;q=0.9",
+            "authorization": f"Bearer {lottery_token.strip()}",
+            "content-type": "application/json",
+            "origin": "https://dkwin8.com",
+            "referer": "https://dkwin8.com/",
+            "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
+            "sec-ch-ua-mobile": "?1",
+            "sec-ch-ua-platform": '"Android"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
+            "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+        }
 
-        curl_command = [
-            "curl", "-s", "-X", "POST", BET_URL,
-            "-H", "authority: api.ar-lottery01.com",
-            "-H", "accept: application/json, text/plain, */*",
-            "-H", "accept-language: en-US,en;q=0.9",
-            "-H", f"authorization: Bearer {lottery_token.strip()}",
-            "-H", "content-type: application/json",
-            "-H", "origin: https://dkwin8.com",
-            "-H", "referer: https://dkwin8.com/",
-            "-H", 'sec-ch-ua: "Chromium";v="139", "Not;A=Brand";v="99"',
-            "-H", "sec-ch-ua-mobile: ?1",
-            "-H", 'sec-ch-ua-platform: "Android"',
-            "-H", "sec-fetch-dest: empty",
-            "-H", "sec-fetch-mode: cors",
-            "-H", "sec-fetch-site: cross-site",
-            "-H", "user-agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
-            "--data-raw", json_string,
-            "--compressed"
-        ]
-
-        result = subprocess.run(curl_command, capture_output=True, text=True, timeout=15)
-        if result.returncode == 0 and result.stdout.strip():
-            return 200, result.stdout
-        else:
-            return 500, result.stderr if result.stderr else "Empty Response"
+        res = requests.post(BET_URL, json=bet_payload, headers=bet_headers, impersonate="chrome110", timeout=15)
+        return res.status_code, res.text
     except Exception as e:
         return 500, str(e)
 
@@ -201,7 +178,9 @@ async def api_login(uid, ctx, phone, password):
 
     try:
         await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 LOGGING IN...\n[█████░░░░░] 50%")
-        response = await asyncio.to_thread(requests.post, LOGIN_URL, json=payload, headers=headers, timeout=15)
+        
+        # ✅ লগইনেও curl_cffi
+        response = await asyncio.to_thread(requests.post, LOGIN_URL, json=payload, headers=headers, impersonate="chrome110", timeout=15)
         res_data = response.json()
 
         if res_data.get("code") == 0:
