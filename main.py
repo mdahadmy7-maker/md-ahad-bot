@@ -7,6 +7,7 @@ import hashlib
 import json
 import base64
 import random
+import subprocess
 from urllib.parse import urlparse, parse_qs
 import requests
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
@@ -15,18 +16,18 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন
 # ═══════════════════════════════════════════
-BOT_TOKEN = os.environ.get("9032921988:AAHAUaTKEB26sJ3_ZNqW0uWdDKFtaWngEbE") 
-LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
+# Render এর Environment Variables এ BOT_TOKEN না দিলে নিচের টোকেনটি ব্যবহার হবে
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "9032921988:AAHAUaTKEB26sJ3_ZNqW0uWdDKFtaWngEbE") 
 
-# আপনার সফল ব্যালেন্স API
+LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 BALANCE_API_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
+BET_API_URL = "https://api.ar-lottery01.com/api/Lottery/WinGoBet"
+HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
+
+# ব্যালেন্স চেকের জন্য ডামি ডেটা (পরে চাইলে ডাইনামিক করতে পারেন)
 LATEST_RANDOM = "572476389394" 
 LATEST_SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" 
 LATEST_TIMESTAMP = "1794239224"
-
-# বাজি ধরার API এবং পিরিয়ড API
-BET_API_URL = "https://api.ar-lottery01.com/api/Lottery/WinGoBet"
-HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -96,6 +97,7 @@ def fetch_next_period():
     except:
         return "----"
 
+# ✅ cURL দিয়ে বেট প্লেস করার ফাংশন
 def place_bet(lottery_token, issue_number, amount, prediction):
     current_timestamp = int(time.time())
     random_str = random.randint(100000000000, 999999999999)
@@ -111,20 +113,35 @@ def place_bet(lottery_token, issue_number, amount, prediction):
         "timestamp": current_timestamp
     }
     payload["signature"] = generate_signature(payload.copy())
+    json_string = json.dumps(payload, separators=(',', ':'))
 
-    headers = {
-        "authority": "api.ar-lottery01.com",
-        "accept": "application/json, text/plain, */*",
-        "authorization": f"Bearer {lottery_token}",
-        "content-type": "application/json",
-        "origin": "https://dkwin8.com",
-        "referer": "https://dkwin8.com/",
-        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36"
-    }
+    # আপনার সফল cURL কমান্ড
+    curl_command = [
+        "curl", "-s", "-X", "POST", BET_API_URL,
+        "-H", "authority: api.ar-lottery01.com",
+        "-H", "accept: application/json, text/plain, */*",
+        "-H", "accept-language: en-US,en;q=0.9",
+        "-H", f"authorization: Bearer {lottery_token}",
+        "-H", "content-type: application/json",
+        "-H", "origin: https://dkwin8.com",
+        "-H", "referer: https://dkwin8.com/",
+        "-H", 'sec-ch-ua: "Chromium";v="139", "Not;A=Brand";v="99"',
+        "-H", "sec-ch-ua-mobile: ?1",
+        "-H", 'sec-ch-ua-platform: "Android"',
+        "-H", "sec-fetch-dest: empty",
+        "-H", "sec-fetch-mode: cors",
+        "-H", "sec-fetch-site: cross-site",
+        "-H", "user-agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
+        "--data-raw", json_string
+    ]
 
     try:
-        res = requests.post(BET_API_URL, json=payload, headers=headers, timeout=15)
-        return res.status_code, res.text
+        # Render-এর লিনাক্স সার্ভারে curl কাজ করবে
+        result = subprocess.run(curl_command, capture_output=True, text=True, timeout=15)
+        if result.returncode == 0 and result.stdout.strip():
+            return 200, result.stdout
+        else:
+            return 500, result.stderr if result.stderr else "Empty Response from cURL"
     except Exception as e:
         return 500, str(e)
 
@@ -211,14 +228,13 @@ async def api_login(uid, ctx, phone, password):
         await ctx.bot.send_message(chat_id=uid, text=f"⚠️ NETWORK ERROR: {str(e)[:100]}")
 
 # ═══════════════════════════════════════════
-# ৪. টেলিগ্রাম হ্যান্ডলারস (আপনার দেওয়া হুবহু টেক্সট)
+# ৪. টেলিগ্রাম হ্যান্ডলারস
 # ═══════════════════════════════════════════
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
     state["first_bet"] = True 
     
-    # ⭐ আপনার দেওয়া হুবহু ওয়েলকাম মেসেজ
     welcome_text = (
         "🧠 BD=WIN~GO=AUTO~BET 💥\n"
         "━━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -423,9 +439,10 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             await ctx.bot.send_message(chat_id=uid, text=f"🎯 PLACING BET...\n🆔 Period: {issue_number}\n💰 Amount: ৳{amount}\n📊 Prediction: BigSmall_Big")
             
+            # এখানে cURL ফাংশনটি কল করা হচ্ছে
             status_code, res_text = await asyncio.to_thread(place_bet, state["lottery_token"], issue_number, amount, "BigSmall_Big")
             
-            if status_code == 200 and '"code":0' in res_text:
+            if status_code == 200 and ('"code":0' in res_text.replace(" ", "") or 'Succeed' in res_text):
                 await ctx.bot.send_message(chat_id=uid, text=f"✅ BET SUCCESSFUL!\nসার্ভার রেসপন্স: {res_text[:50]}...")
                 step_idx += 1 
             else:
@@ -444,14 +461,15 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ TRADE CANCELLED")
 
 def main():
-    if not BOT_TOKEN:
-        print("❌ Error: BOT_TOKEN সেট করা নেই!")
+    if not BOT_TOKEN or ":" not in BOT_TOKEN:
+        print("❌ Error: সঠিক BOT_TOKEN সেট করা নেই!")
         return
+        
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    print("🤖 Bot started...")
+    print("🤖 Bot started successfully...")
     app.run_polling()
 
 if __name__ == "__main__":
