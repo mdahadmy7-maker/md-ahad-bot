@@ -16,7 +16,6 @@ from telegram.ext import Application, CommandHandler, MessageHandler, ContextTyp
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন
 # ═══════════════════════════════════════════
-# Render এর Environment Variables এ BOT_TOKEN না দিলে নিচের টোকেনটি ব্যবহার হবে
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9032921988:AAHAUaTKEB26sJ3_ZNqW0uWdDKFtaWngEbE") 
 
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
@@ -24,7 +23,6 @@ BALANCE_API_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
 BET_API_URL = "https://api.ar-lottery01.com/api/Lottery/WinGoBet"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
-# ব্যালেন্স চেকের জন্য ডামি ডেটা (পরে চাইলে ডাইনামিক করতে পারেন)
 LATEST_RANDOM = "572476389394" 
 LATEST_SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" 
 LATEST_TIMESTAMP = "1794239224"
@@ -45,9 +43,6 @@ def get_state(uid):
         }
     return user_state[uid]
 
-# ═══════════════════════════════════════════
-# ২. হেল্পার ফাংশন
-# ═══════════════════════════════════════════
 def generate_signature(payload_dict):
     if 'signature' in payload_dict: del payload_dict['signature']
     if 'timestamp' in payload_dict: del payload_dict['timestamp']
@@ -97,7 +92,6 @@ def fetch_next_period():
     except:
         return "----"
 
-# ✅ cURL দিয়ে বেট প্লেস করার ফাংশন
 def place_bet(lottery_token, issue_number, amount, prediction):
     current_timestamp = int(time.time())
     random_str = random.randint(100000000000, 999999999999)
@@ -115,7 +109,6 @@ def place_bet(lottery_token, issue_number, amount, prediction):
     payload["signature"] = generate_signature(payload.copy())
     json_string = json.dumps(payload, separators=(',', ':'))
 
-    # আপনার সফল cURL কমান্ড
     curl_command = [
         "curl", "-s", "-X", "POST", BET_API_URL,
         "-H", "authority: api.ar-lottery01.com",
@@ -136,7 +129,6 @@ def place_bet(lottery_token, issue_number, amount, prediction):
     ]
 
     try:
-        # Render-এর লিনাক্স সার্ভারে curl কাজ করবে
         result = subprocess.run(curl_command, capture_output=True, text=True, timeout=15)
         if result.returncode == 0 and result.stdout.strip():
             return 200, result.stdout
@@ -145,9 +137,6 @@ def place_bet(lottery_token, issue_number, amount, prediction):
     except Exception as e:
         return 500, str(e)
 
-# ═══════════════════════════════════════════
-# ৩. লগইন এবং ড্যাশবোর্ড
-# ═══════════════════════════════════════════
 async def api_login(uid, ctx, phone, password):
     state = get_state(uid)
     login_phone = phone.strip() 
@@ -227,9 +216,6 @@ async def api_login(uid, ctx, phone, password):
         await status_msg.delete()
         await ctx.bot.send_message(chat_id=uid, text=f"⚠️ NETWORK ERROR: {str(e)[:100]}")
 
-# ═══════════════════════════════════════════
-# ৪. টেলিগ্রাম হ্যান্ডলারস
-# ═══════════════════════════════════════════
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
@@ -439,7 +425,6 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             await ctx.bot.send_message(chat_id=uid, text=f"🎯 PLACING BET...\n🆔 Period: {issue_number}\n💰 Amount: ৳{amount}\n📊 Prediction: BigSmall_Big")
             
-            # এখানে cURL ফাংশনটি কল করা হচ্ছে
             status_code, res_text = await asyncio.to_thread(place_bet, state["lottery_token"], issue_number, amount, "BigSmall_Big")
             
             if status_code == 200 and ('"code":0' in res_text.replace(" ", "") or 'Succeed' in res_text):
