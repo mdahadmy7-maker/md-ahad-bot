@@ -23,10 +23,6 @@ BALANCE_API_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
 BET_API_URL = "https://api.ar-lottery01.com/api/Lottery/WinGoBet"
 HISTORY_API = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 
-LATEST_RANDOM = "572476389394" 
-LATEST_SIGNATURE = "5D81D38ACC8FAEBA9F1F1675F946ADC5" 
-LATEST_TIMESTAMP = "1794239224"
-
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -64,32 +60,45 @@ def decode_jwt_payload(token):
         return {}
 
 def fetch_game_balance(lottery_token):
-    final_url = f"{BALANCE_API_URL}?language=en&random={LATEST_RANDOM}&signature={LATEST_SIGNATURE}&timestamp={LATEST_TIMESTAMP}"
+    # ✅ ডাইনামিক সিগনেচার জেনারেশন (হার্ডকোড বাদ দেওয়া হয়েছে)
+    random_val = random.randint(100000000000, 999999999999)
+    timestamp_val = int(time.time())
+    
+    payload = {"language": "en", "random": int(random_val)}
+    sorted_dict = {k: payload[k] for k in sorted(payload.keys())}
+    json_string = json.dumps(sorted_dict, separators=(',', ':'))
+    signature = hashlib.md5(json_string.encode('utf-8')).hexdigest().upper()
+    
+    final_url = f"{BALANCE_API_URL}?language=en&random={random_val}&signature={signature}&timestamp={timestamp_val}"
     headers = {
         "accept": "application/json, text/plain, */*",
         "authorization": f"Bearer {lottery_token}",
         "origin": "https://dkwin8.com",
         "referer": "https://dkwin8.com/",
-        "user-agent": "Mozilla/5.0"
+        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
         res = requests.get(final_url, headers=headers, timeout=15).json()
         if res.get("code") == 0:
             return float(res["data"]["balance"])
         return 0.00
-    except:
+    except Exception as e:
+        logger.error(f"Balance Fetch Error: {e}")
         return 0.00
 
 def fetch_next_period():
     try:
-        res = requests.get(HISTORY_API, headers={"User-Agent": "Mozilla/5.0"}, timeout=10).json()
+        # ক্যাশ এড়ানোর জন্য টাইমস্ট্যাম্প যোগ করা হলো
+        url = f"{HISTORY_API}?t={int(time.time())}"
+        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10).json()
         list_data = res.get("data", {}).get("list", [])
         if not list_data: return "----"
         
         latest_period = str(list_data[0].get("issueNumber", ""))
         next_period = str(int(latest_period) + 1) 
         return next_period
-    except:
+    except Exception as e:
+        logger.error(f"Period Fetch Error: {e}")
         return "----"
 
 def place_bet(lottery_token, issue_number, amount, prediction):
@@ -417,6 +426,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 state["trade_running"] = False
                 break
                 
+            # প্রতিবার বেট করার আগে রিয়েল-টাইম ব্যালেন্স চেক
             current_bal = await asyncio.to_thread(fetch_game_balance, state["lottery_token"])
             if current_bal < amount:
                 await ctx.bot.send_message(chat_id=uid, text=f"❌ পর্যাপ্ত ব্যালেন্স নেই!\nপ্রয়োজন: ৳{amount}, আছে: ৳{current_bal:.2f}। ট্রেড বন্ধ হচ্ছে।")
@@ -427,11 +437,24 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             
             status_code, res_text = await asyncio.to_thread(place_bet, state["lottery_token"], issue_number, amount, "BigSmall_Big")
             
-            if status_code == 200 and ('"code":0' in res_text.replace(" ", "") or 'Succeed' in res_text):
-                await ctx.bot.send_message(chat_id=uid, text=f"✅ BET SUCCESSFUL!\nসার্ভার রেসপন্স: {res_text[:50]}...")
-                step_idx += 1 
+            # ✅ JSON রেসপন্স চেক করা হচ্ছে (স্ট্রিং ম্যাচিং এর বদলে)
+            is_success = False
+            if status_code == 200:
+                try:
+                    res_json = json.loads(res_text)
+                    if res_json.get("code") == 0:
+                        is_success = True
+                    else:
+                        await ctx.bot.send_message(chat_id=uid, text=f"❌ BET FAILED!\nসার্ভার মেসেজ: {res_json.get('msg')}\nকোড: {res_json.get('code')}")
+                except Exception as e:
+                    await ctx.bot.send_message(chat_id=uid, text=f"❌ রেসপন্স পার্স এরর: {e}\nরেসপন্স: {res_text[:100]}")
             else:
                 await ctx.bot.send_message(chat_id=uid, text=f"❌ BET FAILED! (Status: {status_code})\nসার্ভার রেসপন্স: {res_text[:100]}")
+
+            if is_success:
+                await ctx.bot.send_message(chat_id=uid, text=f"✅ BET SUCCESSFUL!\nPeriod: {issue_number}\nAmount: ৳{amount}")
+                step_idx += 1 
+            else:
                 state["trade_running"] = False
                 break
                 
