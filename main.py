@@ -7,7 +7,6 @@ import hashlib
 import json
 import base64
 import random
-import subprocess
 from urllib.parse import urlparse, parse_qs
 import requests
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
@@ -35,13 +34,11 @@ def get_state(uid):
             "accounts": [], "balance": 0.0, "target": 0, "steps": 0, 
             "step_amounts": [], "current_step": 0, "trade_running": False, 
             "task": None, "wins": 0, "losses": 0, "total_trades": 0,
-            "first_bet": True, "real_uid": "Unknown", "lottery_token": None, "next_period": "----",
-            "origin_domain": "https://dkwin0.com"  # ডিফল্ট ডোমেইন
+            "first_bet": True, "real_uid": "Unknown", "lottery_token": None, "next_period": "----"
         }
     return user_state[uid]
 
 def generate_signature(payload_dict):
-    # সিগনেচার তৈরি করার সময় timestamp বাদ দেওয়া হয়
     if 'signature' in payload_dict: del payload_dict['signature']
     if 'timestamp' in payload_dict: del payload_dict['timestamp']
     
@@ -61,101 +58,85 @@ def decode_jwt_payload(token):
     except Exception:
         return {}
 
-def fetch_game_balance(lottery_token, origin_domain):
-    # ✅ ডাইনামিক সিগনেচার (হার্ডকোড বাদ)
-    random_val = random.randint(100000000000, 999999999999)
-    timestamp_val = int(time.time())
+def fetch_game_balance(lottery_token):
+    # ✅ আপনার প্রথম কোডের হুবহু ব্যালেন্স সিগনেচার লজিক
+    bal_rnd = random.randint(100000000000, 999999999999)
+    bal_ts = int(time.time())
     
-    # ব্যালেন্স সিগনেচারের জন্য পেলোড (শুধু language এবং random)
-    payload = {"language": "en", "random": int(random_val)}
+    payload = {"language": "en", "random": int(bal_rnd)}
     sorted_dict = {k: payload[k] for k in sorted(payload.keys())}
     json_string = json.dumps(sorted_dict, separators=(',', ':'))
-    signature = hashlib.md5(json_string.encode('utf-8')).hexdigest().upper()
+    bal_sig = hashlib.md5(json_string.encode('utf-8')).hexdigest().upper()
     
-    final_url = f"{BALANCE_API_URL}?language=en&random={random_val}&signature={signature}&timestamp={timestamp_val}"
-    headers = {
+    bal_url = f"{BALANCE_API_URL}?language=en&random={bal_rnd}&signature={bal_sig}&timestamp={bal_ts}"
+    
+    # ✅ আপনার প্রথম কোডের হুবহু হেডার (origin: dkwin8.com)
+    bal_headers = {
         "accept": "application/json, text/plain, */*",
         "authorization": f"Bearer {lottery_token}",
-        "origin": origin_domain,      # ✅ লগইন ডোমেইন ব্যবহার
-        "referer": origin_domain + "/",
+        "origin": "https://dkwin8.com",
+        "referer": "https://dkwin8.com/",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
-        res = requests.get(final_url, headers=headers, timeout=15)
-        data = res.json()
-        if data.get("code") == 0:
-            return float(data["data"]["balance"])
-        else:
-            logger.error(f"Balance API Error: {data}")  # লগে রাখা হলো
-            return 0.00
+        res = requests.get(bal_url, headers=bal_headers, timeout=15).json()
+        if res.get("code") == 0:
+            return float(res["data"]["balance"])
+        return 0.00
     except Exception as e:
-        logger.error(f"Balance Fetch Exception: {e}")
+        logger.error(f"Balance Error: {e}")
         return 0.00
 
-def fetch_next_period(origin_domain):
+def fetch_next_period():
+    # ✅ আপনার প্রথম কোডের হুবহু পিরিয়ড বের করার লজিক
     try:
-        # ✅ সঠিক প্যারামিটার: pageSize, pageNo, _t
-        url = f"{HISTORY_API}?pageSize=100&pageNo=1&_t={int(time.time()*1000)}"
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
-            "Origin": origin_domain,
-            "Referer": origin_domain + "/"
-        }
-        res = requests.get(url, headers=headers, timeout=10).json()
-        list_data = res.get("data", {}).get("list", [])
-        if not list_data: 
-            logger.error(f"History API returned empty list: {res}")
-            return "----"
-        
-        latest_period = str(list_data[0].get("issueNumber", ""))
-        next_period = str(int(latest_period) + 1) 
-        return next_period
+        hist_res = requests.get(HISTORY_API, timeout=10)
+        hist_data = hist_res.json()
+        latest_period = int(hist_data['data']['list'][0]['issueNumber'])
+        return str(latest_period + 1)
     except Exception as e:
-        logger.error(f"Period Fetch Exception: {e}")
+        logger.error(f"Period Error: {e}")
         return "----"
 
-def place_bet(lottery_token, issue_number, amount, prediction, origin_domain):
-    current_timestamp = int(time.time())
-    random_str = random.randint(100000000000, 999999999999)
+def place_bet(lottery_token, issue_number, amount, prediction):
+    # ✅ আপনার প্রথম কোডের হুবহু বেট প্লেসিং লজিক
+    amount = int(amount)
+    c_ts = int(time.time())
+    c_rnd = random.randint(100000000000, 999999999999)
     
-    payload = {
-        "gameCode": "WinGo_30S",
-        "issueNumber": str(issue_number),
-        "amount": int(amount),
-        "betMultiple": 1,
-        "betContent": prediction,
-        "language": "en",
-        "random": random_str,
-        "timestamp": current_timestamp
+    payload_to_sign = {
+        "gameCode": "WinGo_30S", "issueNumber": str(issue_number), "amount": amount,
+        "betMultiple": 1, "betContent": prediction, "language": "en", "random": int(c_rnd)
     }
-    payload["signature"] = generate_signature(payload.copy())
-    json_string = json.dumps(payload, separators=(',', ':'))
-
-    curl_command = [
-        "curl", "-s", "-X", "POST", BET_API_URL,
-        "-H", "authority: api.ar-lottery01.com",
-        "-H", "accept: application/json, text/plain, */*",
-        "-H", "accept-language: en-US,en;q=0.9",
-        "-H", f"authorization: Bearer {lottery_token}",
-        "-H", "content-type: application/json",
-        "-H", f"origin: {origin_domain}",      # ✅ ডাইনামিক অরিজিন
-        "-H", f"referer: {origin_domain}/",
-        "-H", 'sec-ch-ua: "Chromium";v="139", "Not;A=Brand";v="99"',
-        "-H", "sec-ch-ua-mobile: ?1",
-        "-H", 'sec-ch-ua-platform: "Android"',
-        "-H", "sec-fetch-dest: empty",
-        "-H", "sec-fetch-mode: cors",
-        "-H", "sec-fetch-site: cross-site",
-        "-H", "user-agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
-        "--data-raw", json_string
-    ]
-
+    sorted_dict = {k: payload_to_sign[k] for k in sorted(payload_to_sign.keys())}
+    json_string = json.dumps(sorted_dict, separators=(',', ':'))
+    sig = hashlib.md5(json_string.encode('utf-8')).hexdigest().upper()
+    
+    bet_payload = {
+        "gameCode": "WinGo_30S", "issueNumber": str(issue_number), "amount": amount,
+        "betMultiple": 1, "betContent": prediction, "language": "en",
+        "random": c_rnd, "signature": sig, "timestamp": c_ts
+    }
+    
+    bet_headers = {
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9",
+        "authorization": f"Bearer {lottery_token}",
+        "content-type": "application/json",
+        "origin": "https://dkwin8.com",
+        "referer": "https://dkwin8.com/",
+        "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
+        "sec-ch-ua-mobile": "?1",
+        "sec-ch-ua-platform": '"Android"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "cross-site",
+        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+    }
+    
     try:
-        result = subprocess.run(curl_command, capture_output=True, text=True, timeout=15)
-        if result.returncode == 0 and result.stdout.strip():
-            return 200, result.stdout
-        else:
-            return 500, result.stderr if result.stderr else "Empty Response from cURL"
+        bet_res = requests.post(BET_API_URL, json=bet_payload, headers=bet_headers, timeout=15)
+        return bet_res.status_code, bet_res.text
     except Exception as e:
         return 500, str(e)
 
@@ -191,12 +172,6 @@ async def api_login(uid, ctx, phone, password):
             token = res_data["data"]["token"]
             lottery_login_url = res_data["data"]["lotteryLoginUrl"]
             
-            # ✅ lotteryLoginUrl থেকে ডোমেইন বের করা
-            parsed_lottery = urlparse(lottery_login_url)
-            origin_domain = f"{parsed_lottery.scheme}://{parsed_lottery.netloc}"
-            state["origin_domain"] = origin_domain
-            logger.info(f"Lottery Origin Domain: {origin_domain}")
-
             jwt_data = decode_jwt_payload(token)
             real_uid = jwt_data.get("UserId", "Unknown")
             state["real_uid"] = real_uid
@@ -209,10 +184,12 @@ async def api_login(uid, ctx, phone, password):
             state["lottery_token"] = lottery_token 
 
             await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 FETCHING BALANCE...\n[█████████░] 90%")
-            balance = await asyncio.to_thread(fetch_game_balance, lottery_token, origin_domain)
+            
+            # ডাইনামিক ফাংশন কল
+            balance = await asyncio.to_thread(fetch_game_balance, lottery_token)
             state["balance"] = balance
             
-            next_period = await asyncio.to_thread(fetch_next_period, origin_domain)
+            next_period = await asyncio.to_thread(fetch_next_period)
             state["next_period"] = next_period
 
             await status_msg.delete()
@@ -439,13 +416,13 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         while state["trade_running"] and step_idx < len(state["step_amounts"]):
             amount = state["step_amounts"][step_idx]
             
-            issue_number = await asyncio.to_thread(fetch_next_period, state["origin_domain"])
+            issue_number = await asyncio.to_thread(fetch_next_period)
             if issue_number == "----":
                 await ctx.bot.send_message(chat_id=uid, text="⚠️ পিরিয়ড পাওয়া যায়নি!")
                 state["trade_running"] = False
                 break
                 
-            current_bal = await asyncio.to_thread(fetch_game_balance, state["lottery_token"], state["origin_domain"])
+            current_bal = await asyncio.to_thread(fetch_game_balance, state["lottery_token"])
             if current_bal < amount:
                 await ctx.bot.send_message(chat_id=uid, text=f"❌ পর্যাপ্ত ব্যালেন্স নেই!\nপ্রয়োজন: ৳{amount}, আছে: ৳{current_bal:.2f}। ট্রেড বন্ধ হচ্ছে।")
                 state["trade_running"] = False
@@ -453,7 +430,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
             await ctx.bot.send_message(chat_id=uid, text=f"🎯 PLACING BET...\n🆔 Period: {issue_number}\n💰 Amount: ৳{amount}\n📊 Prediction: BigSmall_Big")
             
-            status_code, res_text = await asyncio.to_thread(place_bet, state["lottery_token"], issue_number, amount, "BigSmall_Big", state["origin_domain"])
+            status_code, res_text = await asyncio.to_thread(place_bet, state["lottery_token"], issue_number, amount, "BigSmall_Big")
             
             is_success = False
             if status_code == 200:
