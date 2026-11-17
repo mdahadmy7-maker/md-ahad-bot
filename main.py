@@ -78,7 +78,7 @@ def decode_jwt(token):
         return {}
 
 # ───────────────────────────────────────
-# ৩. API কল (Debug যুক্ত করা হয়েছে)
+# ৩. API কল (curl দিয়ে ফায়ারওয়াল বাইপাস)
 # ───────────────────────────────────────
 def fetch_game_balance(lottery_token):
     bal_rnd = random.randint(100000000000, 999999999999)
@@ -88,7 +88,7 @@ def fetch_game_balance(lottery_token):
     bal_url = f"https://api.ar-lottery01.com/api/Lottery/GetBalance?language=en&random={bal_rnd}&signature={bal_sig}&timestamp={bal_ts}"
     
     curl_command = [
-        "curl", "-s", "-X", "GET", bal_url,
+        "curl", "-s", "-L", "--compressed", "--http1.1", "-X", "GET", bal_url,
         "-H", "accept: application/json, text/plain, */*",
         "-H", f"authorization: Bearer {lottery_token.strip()}",
         "-H", "origin: https://dkwin8.com",
@@ -98,17 +98,23 @@ def fetch_game_balance(lottery_token):
     
     try:
         result = subprocess.run(curl_command, capture_output=True, text=True, timeout=15)
-        logger.info(f"BALANCE RAW RESPONSE: {result.stdout}")
+        raw_out = result.stdout.strip()
+        logger.info(f"RAW BALANCE RESPONSE: {raw_out}") # Render লগে দেখা যাবে
         
-        if result.returncode == 0 and result.stdout.strip():
-            data = json.loads(result.stdout)
-            if data.get("code") == 0:
-                return float(data['data']['balance']), "OK"
-            else:
-                return 0.00, str(data) # এরর মেসেজ রিটার্ন করবে
-        return 0.00, f"Curl Error: {result.stderr}"
+        if not raw_out:
+            return 0.00, "Empty API Response"
+            
+        if not raw_out.startswith("{"):
+            return 0.00, f"WAF Block: {raw_out[:40]}" 
+            
+        data = json.loads(raw_out)
+        if data.get("code") == 0:
+            return float(data['data']['balance']), "OK"
+        else:
+            return 0.00, f"API Error: {data.get('msg', 'Unknown')}"
+            
     except Exception as e:
-        return 0.00, str(e)
+        return 0.00, f"Parse Fail: {str(e)[:40]}"
 
 def fetch_next_period():
     curl_command = [
@@ -222,7 +228,6 @@ async def api_login(uid, ctx, phone, password):
             await status_msg.delete()
             masked_phone = "****" + login_phone[-4:]
 
-            # ✅ Debug Info যুক্ত করা হলো
             debug_text = f"\n🐞 Debug: {debug_info[:50]}" if balance == 0.00 else ""
 
             dashboard_msg = (
