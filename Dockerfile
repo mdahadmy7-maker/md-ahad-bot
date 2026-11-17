@@ -1,2 +1,2 @@
-python-telegram-bot
-requests
+RUN playwright install chromium
+RUN playwright install-deps chromium
