@@ -13,13 +13,14 @@ from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboard
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 
 # ═══════════════════════════════════════════
-# ১. কনফিগারেশন
+# ১. কনফিগারেশন (আপনার CLI কোডের হুবহু)
 # ═══════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9032921988:AAHAUaTKEB26sJ3_ZNqW0uWdDKFtaWngEbE") 
 
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 HISTORY_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 BET_URL = "https://api.ar-lottery01.com/api/Lottery/WinGoBet"
+DEVICE_ID = "4aa593880f5c671907b460252b022635" # ✅ আপনার আসল ডিভাইস আইডি
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,12 +35,12 @@ def get_state(uid):
             "step_amounts": [], "current_step": 0, "trade_running": False, 
             "task": None, "wins": 0, "losses": 0, "total_trades": 0,
             "first_bet": True, "real_uid": "Unknown", "lottery_token": None, "next_period": "----",
-            "session": requests.Session() # ✅ আপনার CLI কোডের মতো সেশন তৈরি
+            "session": requests.Session() # ✅ CLI কোডের মতো সেশন
         }
     return user_state[uid]
 
 # ───────────────────────────────────────
-# ২. সিগনেচার জেনারেশন ফাংশন (আপনার CLI কোড থেকে হুবহু কপি)
+# ২. সিগনেচার জেনারেশন (আপনার CLI কোডের হুবহু)
 # ───────────────────────────────────────
 def generate_login_sig(payload_dict):
     if 'signature' in payload_dict: del payload_dict['signature']
@@ -75,30 +76,29 @@ def decode_jwt(token):
         return {}
 
 # ───────────────────────────────────────
-# ৩. এপিআই কল ফাংশন (আপনার CLI কোডের হুবহু সেশন ও হেডার ব্যবহার করে)
+# ৩. API কল (আপনার CLI কোডের হুবহু)
 # ───────────────────────────────────────
 def fetch_game_balance(session, lottery_token):
+    bal_rnd = random.randint(100000000000, 999999999999)
+    bal_ts = int(time.time())
+    bal_sig = generate_balance_sig(bal_rnd)
+    
+    bal_url = f"https://api.ar-lottery01.com/api/Lottery/GetBalance?language=en&random={bal_rnd}&signature={bal_sig}&timestamp={bal_ts}"
+    
+    bal_headers = {
+        "accept": "application/json, text/plain, */*",
+        "authorization": f"Bearer {lottery_token}",
+        "origin": "https://dkwin8.com",
+        "referer": "https://dkwin8.com/",
+        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+    }
     try:
-        bal_rnd = random.randint(100000000000, 999999999999)
-        bal_ts = int(time.time())
-        bal_sig = generate_balance_sig(bal_rnd)
-        
-        bal_url = f"https://api.ar-lottery01.com/api/Lottery/GetBalance?language=en&random={bal_rnd}&signature={bal_sig}&timestamp={bal_ts}"
-        
-        bal_headers = {
-            "accept": "application/json, text/plain, */*",
-            "authorization": f"Bearer {lottery_token}",
-            "origin": "https://dkwin8.com",
-            "referer": "https://dkwin8.com/",
-            "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
-        }
         bal_res = session.get(bal_url, headers=bal_headers, timeout=15)
         bal_data = bal_res.json()
         if bal_data.get("code") == 0:
             return float(bal_data['data']['balance'])
         return 0.00
-    except Exception as e:
-        logger.error(f"Balance Error: {e}")
+    except:
         return 0.00
 
 def fetch_next_period(session):
@@ -107,47 +107,46 @@ def fetch_next_period(session):
         hist_data = hist_res.json()
         latest_period = int(hist_data['data']['list'][0]['issueNumber'])
         return str(latest_period + 1)
-    except Exception as e:
-        logger.error(f"Period Error: {e}")
+    except:
         return "----"
 
 def place_bet(session, lottery_token, issue_number, amount, choice):
+    bet_content = f"BigSmall_{choice}"
+    c_ts = int(time.time())
+    c_rnd = random.randint(100000000000, 999999999999)
+    
+    sig = generate_bet_sig("WinGo_30S", issue_number, amount, 1, bet_content, "en", c_rnd)
+    
+    bet_payload = {
+        "gameCode": "WinGo_30S", "issueNumber": str(issue_number), "amount": int(amount),
+        "betMultiple": 1, "betContent": bet_content, "language": "en",
+        "random": c_rnd, "signature": sig, "timestamp": c_ts
+    }
+
+    bet_headers = {
+        "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9",
+        "authorization": f"Bearer {lottery_token}",
+        "content-type": "application/json",
+        "origin": "https://dkwin8.com",
+        "referer": "https://dkwin8.com/",
+        "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
+        "sec-ch-ua-mobile": "?1",
+        "sec-ch-ua-platform": '"Android"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "cross-site",
+        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+    }
+
     try:
-        bet_content = f"BigSmall_{choice}"
-        c_ts = int(time.time())
-        c_rnd = random.randint(100000000000, 999999999999)
-        
-        sig = generate_bet_sig("WinGo_30S", issue_number, amount, 1, bet_content, "en", c_rnd)
-        
-        bet_payload = {
-            "gameCode": "WinGo_30S", "issueNumber": str(issue_number), "amount": int(amount),
-            "betMultiple": 1, "betContent": bet_content, "language": "en",
-            "random": c_rnd, "signature": sig, "timestamp": c_ts
-        }
-
-        bet_headers = {
-            "accept": "application/json, text/plain, */*",
-            "accept-language": "en-US,en;q=0.9",
-            "authorization": f"Bearer {lottery_token}",
-            "content-type": "application/json",
-            "origin": "https://dkwin8.com",
-            "referer": "https://dkwin8.com/",
-            "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
-            "sec-ch-ua-mobile": "?1",
-            "sec-ch-ua-platform": '"Android"',
-            "sec-fetch-dest": "empty",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "cross-site",
-            "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
-        }
-
         bet_res = session.post(BET_URL, json=bet_payload, headers=bet_headers, timeout=15)
         return bet_res.status_code, bet_res.text
     except Exception as e:
         return 500, str(e)
 
 # ───────────────────────────────────────
-# ৪. টেলিগ্রাম বট লজিক
+# ৪. টেলিগ্রাম বট
 # ───────────────────────────────────────
 async def api_login(uid, ctx, phone, password):
     state = get_state(uid)
@@ -156,11 +155,12 @@ async def api_login(uid, ctx, phone, password):
     
     status_msg = await ctx.bot.send_message(chat_id=uid, text="🔄 CONNECTING TO SITE...\n[░░░░░░░░░░] 0%")
 
-    current_timestamp = int(time.time())
+    ts = int(time.time())
+    # ✅ আপনার CLI কোডের হুবহু পেলোড
     payload = {
         "username": login_phone, "pwd": password, "phonetype": 1, "logintype": "mobile",
-        "packId": "", "deviceId": uuid.uuid4().hex, "pixelId": "", "fbcId": "", "fbc": "", 
-        "fbp": "", "adId": "", "language": 0, "random": uuid.uuid4().hex, "timestamp": current_timestamp
+        "packId": "", "deviceId": DEVICE_ID, "pixelId": "", "fbcId": "", "fbc": "", 
+        "fbp": "", "adId": "", "language": 0, "random": uuid.uuid4().hex, "timestamp": ts
     }
     payload["signature"] = generate_login_sig(payload.copy())
 
