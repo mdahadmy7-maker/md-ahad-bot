@@ -21,9 +21,6 @@ from urllib.parse import urlparse, parse_qs
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
-# ═══════════════════════════════════════════
-# ১. কনফিগারেশন
-# ═══════════════════════════════════════════
 BOT_TOKEN = os.getenv("BOT_TOKEN", "9032921988:AAHAUaTKEB26sJ3_ZNqW0uWdDKFtaWngEbE")
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 HISTORY_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
@@ -40,9 +37,6 @@ def get_state(uid):
         user_state[uid] = {"awaiting": None, "temp_phone": "", "lottery_token": ""}
     return user_state[uid]
 
-# ═══════════════════════════════════════════
-# ২. হেল্পার ফাংশন
-# ═══════════════════════════════════════════
 def generate_login_signature(payload_dict):
     if 'signature' in payload_dict: del payload_dict['signature']
     if 'timestamp' in payload_dict: del payload_dict['timestamp']
@@ -72,9 +66,7 @@ def login_and_get_token(phone, password):
     except Exception as e:
         return False, str(e)
 
-# ═══════════════════════════════════════════
-# ৩. Termux-এর curl কমান্ড (এরর ডিটেকশন সহ)
-# ═══════════════════════════════════════════
+# ⭐ এখানে --compressed এবং সঠিক হেডার যোগ করা হয়েছে ⭐
 def fire_bet_via_termux(token, amount, choice, max_retries=3):
     for attempt in range(max_retries):
         try:
@@ -95,9 +87,9 @@ def fire_bet_via_termux(token, amount, choice, max_retries=3):
             
             data_str = json.dumps(payload, separators=(',', ':'))
 
-            # এখানে -s সরিয়ে -sS দেওয়া হয়েছে, যাতে এরর হলে সেটা stderr-এ ধরা পড়ে
+            # --compressed যুক্ত করা হয়েছে
             curl_cmd = [
-                "curl", "-sS", BET_URL,
+                "curl", "-sS", "--compressed", BET_URL,
                 "-H", "authority: api.ar-lottery01.com",
                 "-H", "accept: application/json, text/plain, */*",
                 "-H", "accept-language: en-US,en;q=0.9",
@@ -119,12 +111,11 @@ def fire_bet_via_termux(token, amount, choice, max_retries=3):
             response_text = result.stdout.strip()
             error_text = result.stderr.strip()
 
-            # যদি curl থেকে কোনো আউটপুট না আসে
             if not response_text:
                 if error_text:
                     return False, f"❌ curl error: {error_text}"
                 else:
-                    return False, "❌ খালি রেসপন্স (WAF Block বা টোকেন এক্সপায়ার)। আবার লগইন করে ট্রাই করুন।"
+                    return False, "❌ খালি রেসপন্স (WAF Block)।"
 
             res_json = json.loads(response_text)
             if res_json.get("code") == 0:
@@ -132,16 +123,13 @@ def fire_bet_via_termux(token, amount, choice, max_retries=3):
             elif res_json.get("msgCode") in [404, 411]: 
                 time.sleep(2); continue 
             elif res_json.get("code") == 401:
-                return False, "❌ টোকেন এক্সপায়ার হয়েছে! আবার /start দিয়ে লগইন করুন।"
+                return False, "❌ টোকেন এক্সপায়ার!"
             else:
                 return False, f"❌ ফেইল: {res_json.get('msg')}"
         except Exception as e:
             time.sleep(2)
     return False, "❌ বারবার চেষ্টা করেও বেট পড়ানো যায়নি।"
 
-# ═══════════════════════════════════════════
-# ৪. টেলিগ্রাম হ্যান্ডলার
-# ═══════════════════════════════════════════
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
     await update.message.reply_text("👇 Press the button below to LOGIN", reply_markup=InlineKeyboardMarkup(keyboard))
