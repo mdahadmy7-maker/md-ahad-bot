@@ -21,6 +21,9 @@ from urllib.parse import urlparse, parse_qs
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
+# ═══════════════════════════════════════════
+# ১. কনফিগারেশন
+# ═══════════════════════════════════════════
 BOT_TOKEN = os.getenv("BOT_TOKEN", "9032921988:AAHAUaTKEB26sJ3_ZNqW0uWdDKFtaWngEbE")
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 HISTORY_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
@@ -37,6 +40,9 @@ def get_state(uid):
         user_state[uid] = {"awaiting": None, "temp_phone": "", "lottery_token": ""}
     return user_state[uid]
 
+# ═══════════════════════════════════════════
+# ২. হেল্পার ফাংশন
+# ═══════════════════════════════════════════
 def generate_login_signature(payload_dict):
     if 'signature' in payload_dict: del payload_dict['signature']
     if 'timestamp' in payload_dict: del payload_dict['timestamp']
@@ -66,7 +72,10 @@ def login_and_get_token(phone, password):
     except Exception as e:
         return False, str(e)
 
-def fire_bet_via_termux(token, amount, choice, max_retries=5):
+# ═══════════════════════════════════════════
+# ৩. Termux-এর curl কমান্ড (এরর ডিটেকশন সহ)
+# ═══════════════════════════════════════════
+def fire_bet_via_termux(token, amount, choice, max_retries=3):
     for attempt in range(max_retries):
         try:
             hist_res = requests.get(HISTORY_URL, timeout=10)
@@ -86,8 +95,9 @@ def fire_bet_via_termux(token, amount, choice, max_retries=5):
             
             data_str = json.dumps(payload, separators=(',', ':'))
 
+            # এখানে -s সরিয়ে -sS দেওয়া হয়েছে, যাতে এরর হলে সেটা stderr-এ ধরা পড়ে
             curl_cmd = [
-                "curl", "-s", BET_URL,
+                "curl", "-sS", BET_URL,
                 "-H", "authority: api.ar-lottery01.com",
                 "-H", "accept: application/json, text/plain, */*",
                 "-H", "accept-language: en-US,en;q=0.9",
@@ -105,11 +115,16 @@ def fire_bet_via_termux(token, amount, choice, max_retries=5):
                 "--data-raw", data_str
             ]
 
-            result = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=10)
+            result = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=15)
             response_text = result.stdout.strip()
-            
+            error_text = result.stderr.strip()
+
+            # যদি curl থেকে কোনো আউটপুট না আসে
             if not response_text:
-                 return False, "❌ curl থেকে কোনো রেসপন্স আসেনি।"
+                if error_text:
+                    return False, f"❌ curl error: {error_text}"
+                else:
+                    return False, "❌ খালি রেসপন্স (WAF Block বা টোকেন এক্সপায়ার)। আবার লগইন করে ট্রাই করুন।"
 
             res_json = json.loads(response_text)
             if res_json.get("code") == 0:
@@ -117,89 +132,74 @@ def fire_bet_via_termux(token, amount, choice, max_retries=5):
             elif res_json.get("msgCode") in [404, 411]: 
                 time.sleep(2); continue 
             elif res_json.get("code") == 401:
-                return False, "❌ টোকেন এক্সপায়ার!"
+                return False, "❌ টোকেন এক্সপায়ার হয়েছে! আবার /start দিয়ে লগইন করুন।"
             else:
                 return False, f"❌ ফেইল: {res_json.get('msg')}"
         except Exception as e:
             time.sleep(2)
     return False, "❌ বারবার চেষ্টা করেও বেট পড়ানো যায়নি।"
 
-# ==========================================
-# ৩. টেলিগ্রাম হ্যান্ডলার (এরর হ্যান্ডলিং সহ)
-# ==========================================
+# ═══════════════════════════════════════════
+# ৪. টেলিগ্রাম হ্যান্ডলার
+# ═══════════════════════════════════════════
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    try:
-        keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
-        await update.message.reply_text("👇 Press the button below to LOGIN", reply_markup=InlineKeyboardMarkup(keyboard))
-    except Exception as e:
-        print(f"Error in start: {e}")
+    keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
+    await update.message.reply_text("👇 Press the button below to LOGIN", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    try:
-        uid = update.effective_user.id
-        state = get_state(uid)
-        text = update.message.text.strip()
+    uid = update.effective_user.id
+    state = get_state(uid)
+    text = update.message.text.strip()
+    
+    if state.get("awaiting") == "phone":
+        state["temp_phone"] = text; state["awaiting"] = "password"
+        await update.message.reply_text("🔑 Now enter your password:"); return
         
-        if state.get("awaiting") == "phone":
-            state["temp_phone"] = text; state["awaiting"] = "password"
-            await update.message.reply_text("🔑 Now enter your password:"); return
+    if state.get("awaiting") == "password":
+        state["awaiting"] = None 
+        try: await update.message.delete()
+        except: pass
+        
+        msg = await update.message.reply_text("🔄 CONNECTING...")
+        success, token = await asyncio.to_thread(login_and_get_token, state["temp_phone"], text)
+        
+        try: await ctx.bot.delete_message(chat_id=uid, message_id=msg.message_id)
+        except: pass
+        
+        if not success:
+            await update.message.reply_text(f"❌ Login Failed: {token}"); return
             
-        if state.get("awaiting") == "password":
-            state["awaiting"] = None 
-            try: await update.message.delete()
-            except: pass
+        state["lottery_token"] = token 
+        reply_keyboard = [[KeyboardButton("🚀 FIRE BET (1 Taka Big)"), KeyboardButton("🚀 FIRE BET (1 Taka Small)")], [KeyboardButton("🛑 STOP")]]
+        await update.message.reply_text("✅ LOGIN SUCCESSFUL!\n👇 বাটনে চাপ দিন।", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)); return
+        
+    if "FIRE BET" in text:
+        if not state.get("lottery_token"):
+            await update.message.reply_text("❌ আগে লগইন করুন!"); return
             
-            msg = await update.message.reply_text("🔄 CONNECTING...")
-            success, token = await asyncio.to_thread(login_and_get_token, state["temp_phone"], text)
-            
-            try: await ctx.bot.delete_message(chat_id=uid, message_id=msg.message_id)
-            except: pass
-            
-            if not success:
-                await update.message.reply_text(f"❌ Login Failed: {token}"); return
-                
-            state["lottery_token"] = token 
-            reply_keyboard = [[KeyboardButton("🚀 FIRE BET (1 Taka Big)"), KeyboardButton("🚀 FIRE BET (1 Taka Small)")], [KeyboardButton("🛑 STOP")]]
-            await update.message.reply_text("✅ LOGIN SUCCESSFUL!\n👇 বাটনে চাপ দিন।", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)); return
-            
-        if "FIRE BET" in text:
-            if not state.get("lottery_token"):
-                await update.message.reply_text("❌ আগে লগইন করুন!"); return
-                
-            choice = "Big" if "Big" in text else "Small"
-            msg = await update.message.reply_text(f"⏳ curl দিয়ে হিট করা হচ্ছে ({choice})...")
-            
-            success, response_msg = await asyncio.to_thread(fire_bet_via_termux, state["lottery_token"], 1, choice)
-            
-            await msg.edit_text(response_msg); return
-            
-        if text == "🛑 STOP":
-            await update.message.reply_text("🛑 স্টপ।"); return
-
-    except Exception as e:
-        print(f"Error in text_handler: {e}")
-        await update.message.reply_text("⚠️ একটি এরর হয়েছে! আবার চেষ্টা করুন।")
+        choice = "Big" if "Big" in text else "Small"
+        msg = await update.message.reply_text(f"⏳ curl দিয়ে হিট করা হচ্ছে ({choice})...")
+        
+        success, response_msg = await asyncio.to_thread(fire_bet_via_termux, state["lottery_token"], 1, choice)
+        
+        await msg.edit_text(response_msg); return
+        
+    if text == "🛑 STOP":
+        await update.message.reply_text("🛑 স্টপ।"); return
 
 async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    try:
-        query = update.callback_query
-        await query.answer() # এটি টেলিগ্রামকে জানায় যে বাটন ক্লিকটি রিসিভ হয়েছে
-        if query.data == "start_login":
-            get_state(update.effective_user.id)["awaiting"] = "phone"
-            await ctx.bot.send_message(chat_id=update.effective_user.id, text="📱 Enter your phone number:")
-    except Exception as e:
-        print(f"Error in callback: {e}")
+    query = update.callback_query; await query.answer()
+    if query.data == "start_login":
+        get_state(update.effective_user.id)["awaiting"] = "phone"
+        await ctx.bot.send_message(chat_id=update.effective_user.id, text="📱 Enter your phone number:")
 
 def main():
-    # read_timeout এবং write_timeout বাড়ানো হয়েছে যাতে নেটওয়ার্ক স্লো হলেও বট আটকে না যায়
     app = Application.builder().token(BOT_TOKEN).read_timeout(30).write_timeout(30).build()
-    
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    
     print("Bot started from GitHub...")
-    app.run_polling(drop_pending_updates=True) # পুরনো আটকে থাকা মেসেজ ডিলিট করে নতুন করে শুরু করবে
+    app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
