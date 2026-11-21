@@ -1,24 +1,30 @@
+import os
+import sys
+
+try:
+    import requests
+    from telegram import Update
+except ImportError:
+    os.system(f'{sys.executable} -m pip install requests python-telegram-bot==20.7')
+    import requests
+    from telegram import Update
+
 import asyncio
 import logging
-import os
-import time
-import uuid
-import hashlib
 import json
-import base64
+import time
+import hashlib
 import random
-import threading
+import uuid
+import subprocess
 from urllib.parse import urlparse, parse_qs
-from flask import Flask
-import cloudscraper # ✅ ক্লাউডফ্লেয়ার বাইপাস লাইব্রেরি
-from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন
 # ═══════════════════════════════════════════
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "9032921988:AAHAUaTKEB26sJ3_ZNqW0uWdDKFtaWngEbE") 
-
+BOT_TOKEN = os.getenv("BOT_TOKEN", "9032921988:AAF_Za5BVO0urlUpMMtngU6kBlca1P-uhPs")
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 HISTORY_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 BET_URL = "https://api.ar-lottery01.com/api/Lottery/WinGoBet"
@@ -29,495 +35,145 @@ logger = logging.getLogger(__name__)
 
 user_state = {}
 
-# ✅ cloudscraper সেশন তৈরি
-scraper = cloudscraper.create_scraper(
-    browser={'browser': 'chrome', 'platform': 'android', 'mobile': True}
-)
-
 def get_state(uid):
     if uid not in user_state:
-        user_state[uid] = {
-            "awaiting": None, "temp_phone": "", "temp_password": "",
-            "accounts": [], "balance": 0.0, "target": 0, "steps": 0, 
-            "step_amounts": [], "current_step": 0, "trade_running": False, 
-            "task": None, "wins": 0, "losses": 0, "total_trades": 0,
-            "first_bet": True, "real_uid": "Unknown", "lottery_token": None, "next_period": "----"
-        }
+        user_state[uid] = {"awaiting": None, "temp_phone": "", "lottery_token": ""}
     return user_state[uid]
 
-# ───────────────────────────────────────
-# ২. সিগনেচার জেনারেশন
-# ───────────────────────────────────────
-def generate_login_sig(payload_dict):
+def generate_login_signature(payload_dict):
     if 'signature' in payload_dict: del payload_dict['signature']
     if 'timestamp' in payload_dict: del payload_dict['timestamp']
-    sorted_dict = {}
-    for key in sorted(payload_dict.keys()):
-        if payload_dict[key] != "" and payload_dict[key] is not None:
-            sorted_dict[key] = payload_dict[key]
-    json_string = json.dumps(sorted_dict, separators=(',', ':'))
-    return hashlib.md5(json_string.encode('utf-8')).hexdigest().upper()
+    sorted_dict = {k: payload_dict[k] for k in sorted(payload_dict.keys()) if payload_dict[k] != "" and payload_dict[k] is not None}
+    return hashlib.md5(json.dumps(sorted_dict, separators=(',', ':')).encode('utf-8')).hexdigest().upper()
 
-def generate_balance_sig(random_val):
-    payload = {"language": "en", "random": int(random_val)}
-    sorted_dict = {k: payload[k] for k in sorted(payload.keys())}
-    json_string = json.dumps(sorted_dict, separators=(',', ':'))
-    return hashlib.md5(json_string.encode('utf-8')).hexdigest().upper()
-
-def generate_bet_sig(gameCode, issueNumber, amount, betMultiple, betContent, language, rnd):
-    payload_to_sign = {
-        "gameCode": gameCode, "issueNumber": str(issueNumber), "amount": int(amount),
-        "betMultiple": int(betMultiple), "betContent": betContent, "language": language, "random": int(rnd)
-    }
-    sorted_dict = {k: payload_to_sign[k] for k in sorted(payload_to_sign.keys())}
-    json_string = json.dumps(sorted_dict, separators=(',', ':'))
-    return hashlib.md5(json_string.encode('utf-8')).hexdigest().upper()
-
-def decode_jwt(token):
-    try:
-        payload = token.split('.')[1]
-        payload += '=' * (-len(payload) % 4)
-        return json.loads(base64.urlsafe_b64decode(payload).decode('utf-8'))
-    except:
-        return {}
-
-# ───────────────────────────────────────
-# ৩. API কল (cloudscraper দিয়ে)
-# ───────────────────────────────────────
-def fetch_game_balance(lottery_token):
-    bal_rnd = random.randint(100000000000, 999999999999)
-    bal_ts = int(time.time())
-    bal_sig = generate_balance_sig(bal_rnd)
-    
-    bal_url = f"https://api.ar-lottery01.com/api/Lottery/GetBalance?language=en&random={bal_rnd}&signature={bal_sig}&timestamp={bal_ts}"
-    
-    bal_headers = {
-        "accept": "application/json, text/plain, */*",
-        "authorization": f"Bearer {lottery_token.strip()}",
-        "origin": "https://dkwin8.com",
-        "referer": "https://dkwin8.com/",
-        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
-    }
-    
-    try:
-        # ✅ cloudscraper দিয়ে রিকোয়েস্ট
-        res = scraper.get(bal_url, headers=bal_headers, timeout=15)
-        
-        if not res.text.strip():
-            return 0.00, "Empty Response"
-            
-        if not res.text.strip().startswith("{"):
-            return 0.00, f"WAF Block: {res.text[:40]}"
-            
-        data = res.json()
-        if data.get("code") == 0:
-            return float(data['data']['balance']), "OK"
-        else:
-            return 0.00, f"API Error: {data.get('msg', 'Unknown')}"
-    except Exception as e:
-        return 0.00, f"Parse Fail: {str(e)[:40]}"
-
-def fetch_next_period():
-    try:
-        res = scraper.get(HISTORY_URL, timeout=10)
-        data = res.json()
-        latest_period = int(data['data']['list'][0]['issueNumber'])
-        return str(latest_period + 1)
-    except:
-        return "----"
-
-def place_bet(lottery_token, issue_number, amount, choice):
-    try:
-        bet_content = f"BigSmall_{choice}"
-        c_ts = int(time.time())
-        c_rnd = random.randint(100000000000, 999999999999)
-        
-        sig = generate_bet_sig("WinGo_30S", issue_number, amount, 1, bet_content, "en", c_rnd)
-        
-        bet_payload = {
-            "gameCode": "WinGo_30S", "issueNumber": str(issue_number), "amount": int(amount),
-            "betMultiple": 1, "betContent": bet_content, "language": "en",
-            "random": c_rnd, "signature": sig, "timestamp": c_ts
-        }
-        
-        bet_headers = {
-            "authority": "api.ar-lottery01.com",
-            "accept": "application/json, text/plain, */*",
-            "accept-language": "en-US,en;q=0.9",
-            "authorization": f"Bearer {lottery_token.strip()}",
-            "content-type": "application/json",
-            "origin": "https://dkwin8.com",
-            "referer": "https://dkwin8.com/",
-            "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
-            "sec-ch-ua-mobile": "?1",
-            "sec-ch-ua-platform": '"Android"',
-            "sec-fetch-dest": "empty",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "cross-site",
-            "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
-        }
-
-        res = scraper.post(BET_URL, json=bet_payload, headers=bet_headers, timeout=15)
-        return res.status_code, res.text
-    except Exception as e:
-        return 500, str(e)
-
-# ───────────────────────────────────────
-# ৪. টেলিগ্রাম বট লজিক
-# ───────────────────────────────────────
-async def api_login(uid, ctx, phone, password):
-    state = get_state(uid)
-    login_phone = phone.strip() 
-    
-    status_msg = await ctx.bot.send_message(chat_id=uid, text="🔄 CONNECTING TO SITE...\n[░░░░░░░░░░] 0%")
-
-    ts = int(time.time())
+def login_and_get_token(phone, password):
+    current_timestamp = int(time.time())
     payload = {
-        "username": login_phone, "pwd": password, "phonetype": 1, "logintype": "mobile",
+        "username": phone, "pwd": password, "phonetype": 1, "logintype": "mobile",
         "packId": "", "deviceId": DEVICE_ID, "pixelId": "", "fbcId": "", "fbc": "", 
-        "fbp": "", "adId": "", "language": 0, "random": uuid.uuid4().hex, "timestamp": ts
+        "fbp": "", "adId": "", "language": 0, "random": uuid.uuid4().hex, "timestamp": current_timestamp
     }
-    payload["signature"] = generate_login_sig(payload.copy())
-
+    payload["signature"] = generate_login_signature(payload.copy())
     headers = {
-        "accept": "application/json, text/plain, */*",
-        "content-type": "application/json;charset=UTF-8",
-        "origin": "https://dkwin9.com",
-        "referer": "https://dkwin9.com/",
+        "accept": "application/json, text/plain, */*", "content-type": "application/json;charset=UTF-8",
+        "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
-
     try:
-        await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 LOGGING IN...\n[█████░░░░░] 50%")
-        
-        response = await asyncio.to_thread(scraper.post, LOGIN_URL, json=payload, headers=headers, timeout=15)
+        response = requests.post(LOGIN_URL, json=payload, headers=headers, timeout=15)
         res_data = response.json()
-
         if res_data.get("code") == 0:
-            token = res_data["data"]["token"]
-            lottery_url = res_data["data"]["lotteryLoginUrl"]
-            lottery_token = parse_qs(urlparse(lottery_url).query).get("Token", [""])[0]
-            state["lottery_token"] = lottery_token
-            
-            jwt_data = decode_jwt(token)
-            real_uid = jwt_data.get("UserId", "Unknown")
-            state["real_uid"] = real_uid
-            
-            if login_phone not in state["accounts"]:
-                state["accounts"].append(login_phone)
-
-            await ctx.bot.edit_message_text(chat_id=uid, message_id=status_msg.message_id, text="🔄 FETCHING BALANCE...\n[█████████░] 90%")
-            
-            balance, debug_info = await asyncio.to_thread(fetch_game_balance, lottery_token)
-            state["balance"] = balance
-            
-            next_period = await asyncio.to_thread(fetch_next_period)
-            state["next_period"] = next_period
-
-            await status_msg.delete()
-            masked_phone = "****" + login_phone[-4:]
-
-            debug_text = f"\n🐞 Debug: {debug_info[:50]}" if balance == 0.00 else ""
-
-            dashboard_msg = (
-                "╔════════════════════════╗\n"
-                "║  🎉 LOGIN SUCCESSFUL ✅ ║\n"
-                "╚════════════════════════╝\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "📞 Phone Number\n"
-                f"{masked_phone}\n\n"
-                "👤 Account UID\n"
-                f"{real_uid}\n\n"
-                "💰 Account Balance\n"
-                f"৳ {balance:.2f}{debug_text}\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                "🧠 Analysis Engine:  READY\n"
-                "🚀 AutoTrade System: READY\n\n"
-                "👇 Press START YOUR TARGET to begin"
-            )
-            
-            reply_keyboard = [[KeyboardButton("🚀 START YOUR TARGET")], [KeyboardButton("🛑 STOP TRADE"), KeyboardButton("🚪 LOGOUT")]]
-            await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True))
-
-        else:
-            await status_msg.delete()
-            await ctx.bot.send_message(chat_id=uid, text=f"❌ LOGIN FAILED\nকারণ: {res_data.get('msg')}")
-
+            lottery_token = parse_qs(urlparse(res_data["data"].get("lotteryLoginUrl", "")).query).get("Token", [""])[0]
+            return True, lottery_token or res_data["data"].get("token", "")
+        return False, res_data.get('msg')
     except Exception as e:
-        await status_msg.delete()
-        await ctx.bot.send_message(chat_id=uid, text=f"⚠️ NETWORK ERROR: {str(e)[:100]}")
+        return False, str(e)
+
+def fire_bet_via_termux(token, amount, choice, max_retries=5):
+    for attempt in range(max_retries):
+        try:
+            hist_res = requests.get(HISTORY_URL, timeout=10)
+            latest_period = int(hist_res.json()['data']['list'][0]['issueNumber'])
+            next_issue = str(latest_period + 1)
+            
+            payload = {
+                "gameCode": "WinGo_30S", "issueNumber": str(next_issue),
+                "amount": int(amount), "betMultiple": 1, "betContent": f"BigSmall_{choice}",
+                "language": "en", "random": random.randint(100000000000, 999999999999),
+                "timestamp": int(time.time())
+            }
+            payload_for_sig = payload.copy()
+            del payload_for_sig["timestamp"]
+            sorted_dict = {k: payload_for_sig[k] for k in sorted(payload_for_sig.keys())}
+            payload["signature"] = hashlib.md5(json.dumps(sorted_dict, separators=(',', ':')).encode()).hexdigest().upper()
+            
+            data_str = json.dumps(payload, separators=(',', ':'))
+
+            curl_cmd = [
+                "curl", "-s", BET_URL,
+                "-H", "authority: api.ar-lottery01.com",
+                "-H", "accept: application/json, text/plain, */*",
+                "-H", "accept-language: en-US,en;q=0.9",
+                "-H", f"authorization: Bearer {token}",
+                "-H", "content-type: application/json",
+                "-H", "origin: https://dkwin8.com",
+                "-H", "referer: https://dkwin8.com/",
+                "-H", 'sec-ch-ua: "Chromium";v="139", "Not;A=Brand";v="99"',
+                "-H", "sec-ch-ua-mobile: ?1",
+                "-H", 'sec-ch-ua-platform: "Android"',
+                "-H", "sec-fetch-dest: empty",
+                "-H", "sec-fetch-mode: cors",
+                "-H", "sec-fetch-site: cross-site",
+                "-H", "user-agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
+                "--data-raw", data_str
+            ]
+
+            result = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=10)
+            response_text = result.stdout.strip()
+            
+            if not response_text:
+                 return False, "❌ curl থেকে কোনো রেসপন্স আসেনি।"
+
+            res_json = json.loads(response_text)
+            if res_json.get("code") == 0:
+                return True, f"🎉✅ বেট সফল!\nPeriod: {next_issue}\nChoice: {choice}"
+            elif res_json.get("msgCode") in [404, 411]: 
+                time.sleep(2); continue 
+            elif res_json.get("code") == 401:
+                return False, "❌ টোকেন এক্সপায়ার!"
+            else:
+                return False, f"❌ ফেইল: {res_json.get('msg')}"
+        except Exception as e:
+            time.sleep(2)
+    return False, "❌ বারবার চেষ্টা করেও বেট পড়ানো যায়নি।"
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    state = get_state(uid)
-    state["first_bet"] = True 
-    
-    welcome_text = (
-        "🧠 BD=WIN~GO=AUTO~BET 💥\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🧠 Mode    : Auto Analyse & bet\n"
-        "🔐 Access  : Private · Authorized Members\n"
-        "🔴 Status  : Not Logged In\n"
-        f"👥 Accounts: {len(state['accounts'])}/6\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🧠 Prediction Engine — 9 Layers\n"
-        "⚡ Streak · 🔷 Pattern · 📈 Trend\n"
-        "🔍 Manipulation · 🎨 Colour · 🔢 Frequency\n"
-        "🔄 Markov · ♻️ Cycle · 💠 Momentum\n"
-        "🔁 Every layer is back-tested live so its vote\n"
-        "weight follows its real hit-rate\n"
-        "🔴 Confidence below 30% → sit out\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "🎬 4-second 🧠 generating prediction animation\n"
-        "🚀 Analysis → auto bet every 30s period\n\n"
-        "━━━━━━━━━━━━━━━━━━━━━━━\n"
-        "👇 Press the button below to LOGIN"
-    )
     keyboard = [[InlineKeyboardButton("🔐 LOGIN TO ACCOUNT", callback_data="start_login")]]
-    await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard))
+    await update.message.reply_text("👇 Press the button below to LOGIN", reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     state = get_state(uid)
     text = update.message.text.strip()
-    
     if state.get("awaiting") == "phone":
-        state["temp_phone"] = text
-        state["awaiting"] = "password"
-        await update.message.reply_text(
-            "╔════════════════════════╗\n"
-            "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
-            "╚════════════════════════╝\n"
-            f"☎️ Number : {text}\n\n"
-            "🔑 Now enter your password:\n"
-            "Your message will be deleted immediately for security."
-        )
-        return
-
+        state["temp_phone"] = text; state["awaiting"] = "password"
+        await update.message.reply_text("🔑 Now enter your password:"); return
     if state.get("awaiting") == "password":
-        state["temp_password"] = text
         state["awaiting"] = None 
         try: await update.message.delete()
         except: pass
-        await api_login(uid, ctx, state["temp_phone"], state["temp_password"])
-        return
-        
-    if text == "🚀 START YOUR TARGET":
-        state["awaiting"] = "target"
-        target_msg = (
-            "╔════════════════════════╗\n"
-            "║   🚀 START YOUR TARGET 🚀   ║\n"
-            "╚════════════════════════╝\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "💰 YOUR BALANCE\n"
-            f"৳ {state.get('balance', 0.00):.2f}\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "🎯 Enter your TARGET profit amount:\n"
-            "How much do you want to earn? (in ৳)"
-        )
-        await update.message.reply_text(target_msg)
-        return
-        
-    if state.get("awaiting") == "target":
-        try:
-            target_amount = float(text)
-            state["target"] = target_amount
-            balance = float(state.get('balance', 0.00))
-            stop_at = balance + target_amount
-            target_set_msg = (
-                "╔════════════════════════╗\n"
-                "║   🎯 TARGET SET 🎯   ║\n"
-                "╚════════════════════════╝\n\n"
-                f"💰 Balance  : ৳ {balance:.2f}\n"
-                f"🎯 Target   : ৳ {target_amount:.2f} profit\n"
-                f"🏦 Stop At  : ৳ {stop_at:.2f}\n"
-                "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-                "🚀 Enter your STEP COUNT:\n"
-                "How many steps? (e.g. 5, max 50)"
-            )
-            state["awaiting"] = "steps"
-            await update.message.reply_text(target_set_msg)
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 50)।")
-        return
-        
-    if state.get("awaiting") == "steps":
-        try:
-            steps = int(text)
-            if steps > 50 or steps < 1: raise ValueError("Steps must be between 1 and 50")
-            state["steps"] = steps
-            state["step_amounts"] = [] 
-            state["current_step"] = 1
-            state["awaiting"] = "step_amount"
-            step_msg = (
-                "╔════════════════════════╗\n"
-                "║   💵 STEP AMOUNTS 💵   ║\n"
-                "╚════════════════════════╝\n\n"
-                f"You chose {steps} steps.\n\n"
-                f"💵 Step {state['current_step']} — bet amount? (in ৳)"
-            )
-            await update.message.reply_text(step_msg)
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! ১ থেকে ৫০ এর মধ্যে একটি সংখ্যা দিন (যেমন: 5)।")
-        return
-
-    if state.get("awaiting") == "step_amount":
-        try:
-            amount = float(text)
-            if amount <= 0: raise ValueError("Amount must be greater than 0")
-            state["step_amounts"].append(amount)
-            state["current_step"] += 1
-            if state["current_step"] <= state["steps"]:
-                step_msg = f"💵 Step {state['current_step']} — bet amount? (in ৳)"
-                await update.message.reply_text(step_msg)
-            else:
-                state["awaiting"] = None
-                total_risk = sum(state["step_amounts"])
-                balance = float(state.get('balance', 0.00))
-                target = float(state.get('target', 0))
-                stop_at = balance + target
-                step_plan_text = ""
-                for i, amt in enumerate(state["step_amounts"]):
-                    step_plan_text += f"Step {i+1:02d} : ৳ {amt:.2f}\n"
-                
-                combined_msg = (
-                    "⚙️ TRADE CONFIGURATION ⚙️\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"💰 Balance  : ৳ {balance:.2f}\n"
-                    f"🎯 Target   : ৳ {target:.2f} profit\n"
-                    f"🏦 Stop At  : ৳ {stop_at:.2f}\n"
-                    f"📋 Steps    : {state['steps']}\n"
-                    f"⚠️ Total Risk : ৳ {total_risk:.2f}\n"
-                    "━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    "📊 STEP PLAN\n"
-                    f"{step_plan_text}"
-                    "\n"
-                    "👇 Press START TRADE to begin."
-                )
-                inline_kb = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🚀 START TRADE", callback_data="start_trade_btn"), 
-                     InlineKeyboardButton("❌ CANCEL", callback_data="cancel_trade_btn")]
-                ])
-                await update.message.reply_text(combined_msg, reply_markup=inline_kb)
-        except ValueError:
-            await update.message.reply_text("❌ ভুল ফরম্যাট! দয়া করে শুধু সংখ্যা লিখুন (যেমন: 1)।")
-        return
-
-    if text == "🛑 STOP TRADE":
-        state["trade_running"] = False
-        await update.message.reply_text("🛑 TRADE STOPPED")
-        return
-    if text == "🚪 LOGOUT":
-        state["trade_running"] = False
-        state["temp_phone"] = ""
-        state["temp_password"] = ""
-        await update.message.reply_text("🚪 LOGGED OUT")
-        return
+        msg = await update.message.reply_text("🔄 CONNECTING...")
+        success, token = await asyncio.to_thread(login_and_get_token, state["temp_phone"], text)
+        try: await ctx.bot.delete_message(chat_id=uid, message_id=msg.message_id)
+        except: pass
+        if not success:
+            await update.message.reply_text(f"❌ Login Failed: {token}"); return
+        state["lottery_token"] = token 
+        reply_keyboard = [[KeyboardButton("🚀 FIRE BET (1 Taka Big)"), KeyboardButton("🚀 FIRE BET (1 Taka Small)")], [KeyboardButton("🛑 STOP")]]
+        await update.message.reply_text("✅ LOGIN SUCCESSFUL!\n👇 বাটনে চাপ দিন।", reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True)); return
+    if "FIRE BET" in text:
+        if not state.get("lottery_token"):
+            await update.message.reply_text("❌ আগে লগইন করুন!"); return
+        choice = "Big" if "Big" in text else "Small"
+        msg = await update.message.reply_text(f"⏳ curl দিয়ে হিট করা হচ্ছে ({choice})...")
+        success, response_msg = await asyncio.to_thread(fire_bet_via_termux, state["lottery_token"], 1, choice)
+        await msg.edit_text(response_msg); return
+    if text == "🛑 STOP":
+        await update.message.reply_text("🛑 স্টপ।"); return
 
 async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-    uid = update.effective_user.id
-    state = get_state(uid)
-    data = query.data
-    
-    if data == "start_login":
-        state["awaiting"] = "phone"
-        login_msg = (
-            "╔════════════════════════╗\n"
-            "║  🔐 ACCOUNT LOGIN 🔐  ║\n"
-            "╚════════════════════════╝\n\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n"
-            "📱 Enter your DKWIN phone number:\n"
-            "━━━━━━━━━━━━━━━━━━━━━━━\n\n"
-            "Everyone uses their own account — your session is private."
-        )
-        await ctx.bot.send_message(chat_id=uid, text=login_msg)
-        
-    elif data == "start_trade_btn":
-        state["trade_running"] = True
-        await query.edit_message_text("✅ TRADE STARTED...\n\nবট এখন অটোমেটিক বাজি ধরবে।")
-        
-        step_idx = 0
-        
-        while state["trade_running"] and step_idx < len(state["step_amounts"]):
-            amount = state["step_amounts"][step_idx]
-            
-            issue_number = await asyncio.to_thread(fetch_next_period)
-            if issue_number == "----":
-                await ctx.bot.send_message(chat_id=uid, text="⚠️ পিরিয়ড পাওয়া যায়নি!")
-                state["trade_running"] = False
-                break
-                
-            current_bal, _ = await asyncio.to_thread(fetch_game_balance, state["lottery_token"])
-            if current_bal < amount:
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ পর্যাপ্ত ব্যালেন্স নেই!\nপ্রয়োজন: ৳{amount}, আছে: ৳{current_bal:.2f}। ট্রেড বন্ধ হচ্ছে।")
-                state["trade_running"] = False
-                break
-
-            await ctx.bot.send_message(chat_id=uid, text=f"🎯 PLACING BET...\n🆔 Period: {issue_number}\n💰 Amount: ৳{amount}\n📊 Prediction: Big")
-            
-            status_code, res_text = await asyncio.to_thread(place_bet, state["lottery_token"], issue_number, amount, "Big")
-            
-            is_success = False
-            if status_code == 200:
-                try:
-                    res_json = json.loads(res_text)
-                    if res_json.get("code") == 0:
-                        is_success = True
-                    else:
-                        await ctx.bot.send_message(chat_id=uid, text=f"❌ BET FAILED!\nসার্ভার মেসেজ: {res_json.get('msg')}\nকোড: {res_json.get('code')}")
-                except Exception as e:
-                    await ctx.bot.send_message(chat_id=uid, text=f"❌ রেসপন্স পার্স এরর: {e}\nরেসপন্স: {res_text[:100]}")
-            else:
-                await ctx.bot.send_message(chat_id=uid, text=f"❌ BET FAILED! (Status: {status_code})\nসার্ভার রেসপন্স: {res_text[:100]}")
-
-            if is_success:
-                await ctx.bot.send_message(chat_id=uid, text=f"✅ BET SUCCESSFUL!\nPeriod: {issue_number}\nAmount: ৳{amount}")
-                step_idx += 1 
-            else:
-                state["trade_running"] = False
-                break
-                
-            await asyncio.sleep(30)
-            
-        if step_idx >= len(state["step_amounts"]):
-            await ctx.bot.send_message(chat_id=uid, text="🏁 সব স্টেপ শেষ হয়েছে!")
-            state["trade_running"] = False
-
-    elif data == "cancel_trade_btn":
-        state["trade_running"] = False
-        await query.edit_message_text("❌ TRADE CANCELLED")
-
-# ───────────────────────────────────────
-# ৫. ডামি ওয়েব সার্ভার (Render-এর জন্য)
-# ───────────────────────────────────────
-web_app = Flask(__name__)
-
-@web_app.route('/')
-def health_check():
-    return "Bot is running perfectly!", 200
-
-def run_flask():
-    port = int(os.environ.get("PORT", 8080))
-    web_app.run(host="0.0.0.0", port=port)
+    query = update.callback_query; await query.answer()
+    if query.data == "start_login":
+        get_state(update.effective_user.id)["awaiting"] = "phone"
+        await ctx.bot.send_message(chat_id=update.effective_user.id, text="📱 Enter your phone number:")
 
 def main():
-    if not BOT_TOKEN or ":" not in BOT_TOKEN:
-        print("❌ Error: সঠিক BOT_TOKEN সেট করা নেই!")
-        return
-        
-    threading.Thread(target=run_flask, daemon=True).start()
-    print("🌐 Dummy Web Server started on port", os.environ.get("PORT", 8080))
-        
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    
-    print("🤖 Bot started successfully...")
-    
-    app.run_polling(drop_pending_updates=True)
+    print("Bot started from GitHub...")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
