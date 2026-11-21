@@ -2,11 +2,11 @@ import os
 import sys
 
 try:
-    import requests
+    from curl_cffi import requests as cffi_requests # ⭐ cffi ইম্পোর্ট
     from telegram import Update
 except ImportError:
-    os.system(f'{sys.executable} -m pip install requests python-telegram-bot==20.7')
-    import requests
+    os.system(f'{sys.executable} -m pip install curl_cffi python-telegram-bot==20.7')
+    from curl_cffi import requests as cffi_requests
     from telegram import Update
 
 import asyncio
@@ -16,11 +16,13 @@ import time
 import hashlib
 import random
 import uuid
-import subprocess
 from urllib.parse import urlparse, parse_qs
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, ReplyKeyboardMarkup, KeyboardButton
 from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
+# ═══════════════════════════════════════════
+# ১. কনফিগারেশন
+# ═══════════════════════════════════════════
 BOT_TOKEN = os.getenv("BOT_TOKEN", "9032921988:AAHAUaTKEB26sJ3_ZNqW0uWdDKFtaWngEbE")
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 HISTORY_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
@@ -57,7 +59,7 @@ def login_and_get_token(phone, password):
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
-        response = requests.post(LOGIN_URL, json=payload, headers=headers, timeout=15)
+        response = cffi_requests.post(LOGIN_URL, json=payload, headers=headers, timeout=15, impersonate="chrome120")
         res_data = response.json()
         if res_data.get("code") == 0:
             lottery_token = parse_qs(urlparse(res_data["data"].get("lotteryLoginUrl", "")).query).get("Token", [""])[0]
@@ -66,14 +68,16 @@ def login_and_get_token(phone, password):
     except Exception as e:
         return False, str(e)
 
-# ⭐ এখানে --compressed এবং সঠিক হেডার যোগ করা হয়েছে ⭐
-def fire_bet_via_termux(token, amount, choice, max_retries=3):
+# ⭐ আপনার প্রথম সফল কোডের হুবহু হেডার এবং cffi ব্যবহার করা হলো ⭐
+def fire_bet_curl_cffi(token, amount, choice, max_retries=3):
     for attempt in range(max_retries):
         try:
-            hist_res = requests.get(HISTORY_URL, timeout=10)
+            # ১. লাইভ ইস্যু বের করা
+            hist_res = cffi_requests.get(HISTORY_URL, timeout=10, impersonate="chrome120")
             latest_period = int(hist_res.json()['data']['list'][0]['issueNumber'])
             next_issue = str(latest_period + 1)
             
+            # ২. পে-লোড তৈরি
             payload = {
                 "gameCode": "WinGo_30S", "issueNumber": str(next_issue),
                 "amount": int(amount), "betMultiple": 1, "betContent": f"BigSmall_{choice}",
@@ -84,40 +88,32 @@ def fire_bet_via_termux(token, amount, choice, max_retries=3):
             del payload_for_sig["timestamp"]
             sorted_dict = {k: payload_for_sig[k] for k in sorted(payload_for_sig.keys())}
             payload["signature"] = hashlib.md5(json.dumps(sorted_dict, separators=(',', ':')).encode()).hexdigest().upper()
+
+            # ৩. আপনার প্রথম সফল কোডের হুবহু হেডার
+            bet_headers = {
+                "authority": "api.ar-lottery01.com",
+                "accept": "application/json, text/plain, */*",
+                "accept-language": "en-US,en;q=0.9",
+                "authorization": f"Bearer {token}",
+                "content-type": "application/json",
+                "origin": "https://dkwin8.com",
+                "referer": "https://dkwin8.com/",
+                "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
+                "sec-ch-ua-mobile": "?1",
+                "sec-ch-ua-platform": '"Android"',
+                "sec-fetch-dest": "empty",
+                "sec-fetch-mode": "cors",
+                "sec-fetch-site": "cross-site",
+                "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+            }
+
+            # ৪. cffi দিয়ে রিকোয়েস্ট (ক্রোম ব্রাউজার হিসেবে)
+            res = cffi_requests.post(BET_URL, json=payload, headers=bet_headers, timeout=15, impersonate="chrome120")
             
-            data_str = json.dumps(payload, separators=(',', ':'))
+            if not res.text.strip():
+                 return False, "❌ খালি রেসপন্স (WAF Block)।"
 
-            # --compressed যুক্ত করা হয়েছে
-            curl_cmd = [
-                "curl", "-sS", "--compressed", BET_URL,
-                "-H", "authority: api.ar-lottery01.com",
-                "-H", "accept: application/json, text/plain, */*",
-                "-H", "accept-language: en-US,en;q=0.9",
-                "-H", f"authorization: Bearer {token}",
-                "-H", "content-type: application/json",
-                "-H", "origin: https://dkwin8.com",
-                "-H", "referer: https://dkwin8.com/",
-                "-H", 'sec-ch-ua: "Chromium";v="139", "Not;A=Brand";v="99"',
-                "-H", "sec-ch-ua-mobile: ?1",
-                "-H", 'sec-ch-ua-platform: "Android"',
-                "-H", "sec-fetch-dest: empty",
-                "-H", "sec-fetch-mode: cors",
-                "-H", "sec-fetch-site: cross-site",
-                "-H", "user-agent: Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36",
-                "--data-raw", data_str
-            ]
-
-            result = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=15)
-            response_text = result.stdout.strip()
-            error_text = result.stderr.strip()
-
-            if not response_text:
-                if error_text:
-                    return False, f"❌ curl error: {error_text}"
-                else:
-                    return False, "❌ খালি রেসপন্স (WAF Block)।"
-
-            res_json = json.loads(response_text)
+            res_json = res.json()
             if res_json.get("code") == 0:
                 return True, f"🎉✅ বেট সফল!\nPeriod: {next_issue}\nChoice: {choice}"
             elif res_json.get("msgCode") in [404, 411]: 
@@ -166,9 +162,9 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("❌ আগে লগইন করুন!"); return
             
         choice = "Big" if "Big" in text else "Small"
-        msg = await update.message.reply_text(f"⏳ curl দিয়ে হিট করা হচ্ছে ({choice})...")
+        msg = await update.message.reply_text(f"⏳ curl_cffi দিয়ে হিট করা হচ্ছে ({choice})...")
         
-        success, response_msg = await asyncio.to_thread(fire_bet_via_termux, state["lottery_token"], 1, choice)
+        success, response_msg = await asyncio.to_thread(fire_bet_curl_cffi, state["lottery_token"], 1, choice)
         
         await msg.edit_text(response_msg); return
         
@@ -186,7 +182,7 @@ def main():
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    print("Bot started from GitHub...")
+    print("Bot started...")
     app.run_polling(drop_pending_updates=True)
 
 if __name__ == "__main__":
