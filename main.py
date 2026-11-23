@@ -20,11 +20,11 @@ from threading import Thread
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন এবং কঠোর সিকিউরিটি
 # ═══════════════════════════════════════════
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN environment variable is missing! Please set it in Render.")
 
-AUTHORIZED_USERS = [7083673844]
+AUTHORIZED_USERS = [7083673844] # আপনার টেলিগ্রাম আইডি
 
 def is_authorized(uid: int) -> bool:
     if not AUTHORIZED_USERS:
@@ -177,7 +177,7 @@ def update_prediction_logic(state, current_result_size):
     return state["displayedResult"]
 
 # ───────────────────────────────────────
-# ৪. API কল
+# ৪. API কল (সমস্যা ঠিক করা হয়েছে)
 # ───────────────────────────────────────
 def refresh_token(session, phone, password):
     ts = int(time.time())
@@ -200,7 +200,6 @@ def refresh_token(session, phone, password):
             return False, data.get("msg"), None, None, None
 
         lottery_url = data["data"].get("lotteryLoginUrl", "")
-        # ✅ parse_qs + regex fallback (working কোডের মতো)
         sso_ticket = parse_qs(urlparse(lottery_url).query).get("Token", [""])[0]
         if not sso_ticket:
             m = re.search(r"Token=([^&]+)", lottery_url)
@@ -219,15 +218,37 @@ def refresh_token(session, phone, password):
             "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
             "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
         }
+        
         panel_res = session.get(panel_url, headers=panel_headers, timeout=10)
+        
+        # ✅ টোকেন হেডার অথবা JSON বডি থেকে খোঁজা
         auth_header = panel_res.headers.get('authorization', '')
+        real_token = None
+        
         if auth_header.startswith('Bearer '):
             real_token = auth_header[7:]
+        else:
+            try:
+                body_json = panel_res.json()
+                possible_keys = ["token", "accessToken", "access_token", "Authorization"]
+                for key in possible_keys:
+                    if key in body_json:
+                        real_token = body_json[key]
+                        break
+                if not real_token and isinstance(body_json.get("data"), dict):
+                    for key in possible_keys:
+                        if key in body_json["data"]:
+                            real_token = body_json["data"][key]
+                            break
+            except:
+                pass
+
+        if real_token:
             expiry = decode_jwt_expiry(real_token)
             real_uid = decode_jwt(real_token).get("UserId", "Unknown")
             return True, "Success", real_token, expiry, real_uid
         else:
-            return False, "No token in header", None, None, None
+            return False, "No token in header or body", None, None, None
     except Exception as e:
         return False, str(e), None, None, None
 
@@ -271,38 +292,24 @@ def fetch_game_balance(session, real_token):
         pass
     return 0.00
 
-# ✅✅✅ FIXED: place_bet — working কোডের মতো হুবহু ✅✅✅
 def place_bet(session, real_token, issue_number, amount, choice):
     try:
         bet_content = f"BigSmall_{choice}"
         c_ts = int(time.time())
         c_rnd = random.randint(100000000000, 999999999999)
-
-        # ১) Signature payload — str/int কনভার্শন সহ
+        
         sig_payload = {
-            "gameCode": "WinGo_30S",
-            "issueNumber": str(issue_number),
-            "amount": int(amount),
-            "betMultiple": 1,
-            "betContent": bet_content,
-            "language": "en",
-            "random": int(c_rnd)
+            "gameCode": "WinGo_30S", "issueNumber": str(issue_number), "amount": int(amount),
+            "betMultiple": 1, "betContent": bet_content, "language": "en", "random": int(c_rnd)
         }
         sig = generate_dynamic_sig(sig_payload)
-
-        # ২) Actual payload — RAW value (working কোডের মতো)
+        
         bet_payload = {
-            "gameCode": "WinGo_30S",
-            "issueNumber": issue_number,
-            "amount": amount,
-            "betMultiple": 1,
-            "betContent": bet_content,
-            "language": "en",
-            "random": c_rnd,
-            "signature": sig,
-            "timestamp": c_ts
+            "gameCode": "WinGo_30S", "issueNumber": issue_number, "amount": amount,
+            "betMultiple": 1, "betContent": bet_content, "language": "en",
+            "random": c_rnd, "signature": sig, "timestamp": c_ts
         }
-
+        
         bet_headers = {
             "accept": "application/json, text/plain, */*",
             "authorization": f"Bearer {real_token}",
@@ -310,8 +317,7 @@ def place_bet(session, real_token, issue_number, amount, choice):
             "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
             "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
         }
-
-        # ✅ json= ব্যবহার (data=json_string নয়)
+        # ✅ json= ব্যবহার করা হয়েছে
         bet_res = session.post(BET_URL, json=bet_payload, headers=bet_headers, timeout=15)
         return bet_res.status_code, bet_res.text
     except Exception as e:
@@ -372,7 +378,7 @@ def fetch_result(session, issue_number):
     return None
 
 # ───────────────────────────────────────
-# ৫. মেসেজ বিল্ডার (আগের মতোই — কিছু বদলায়নি)
+# ৫. মেসেজ বিল্ডার (হুবহু অরিজিনাল)
 # ───────────────────────────────────────
 def build_step_amounts_msg(steps):
     return (
@@ -569,7 +575,7 @@ def build_target_reached_msg(start_balance, final_balance, profit, trades, wins,
     )
 
 # ───────────────────────────────────────
-# ৬. ট্রেড ওয়ার্কার — শুধু bet verify অংশ ঠিক করা হয়েছে
+# ৬. ট্রেড ওয়ার্কার
 # ───────────────────────────────────────
 async def trade_worker(bot, uid):
     state = get_state(uid)
@@ -664,8 +670,8 @@ async def trade_worker(bot, uid):
         state["displayedResult"] = predicted
 
         status_code, res_text = await asyncio.to_thread(place_bet, session, token, issue, amount, predicted)
-
-        # ✅✅✅ FIXED bet verification — working কোডের মতো ✅✅✅
+        
+        # ✅ বেট সফল হয়েছে কিনা তা নিখুঁতভাবে চেক করা
         bet_failed = False
         if status_code == 401:
             logger.warning("⚠️ 401 Unauthorized — forcing token refresh")
@@ -675,7 +681,6 @@ async def trade_worker(bot, uid):
             bet_failed = True
             logger.warning(f"Bet HTTP error: {status_code} | {res_text[:120]}")
         elif not res_text or not res_text.strip():
-            # Empty body = fail (আগে except: pass দিয়ে success ধরে নিত)
             bet_failed = True
             logger.warning("Bet returned empty response")
         else:
@@ -761,7 +766,7 @@ async def trade_worker(bot, uid):
     state["trade_task"] = None
 
 # ───────────────────────────────────────
-# ৭. টেলিগ্রাম হ্যান্ডলার — আগের মতোই
+# ৭. টেলিগ্রাম হ্যান্ডলার
 # ───────────────────────────────────────
 async def cmd_getid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -1052,14 +1057,14 @@ def keep_alive():
 # ৯. Main
 # ───────────────────────────────────────
 def main():
-    keep_alive()
-
+    keep_alive() 
+    
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("getid", cmd_getid))
     application.add_handler(CallbackQueryHandler(callback_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-
+    
     logger.info("🤖 Bot is starting...")
     application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
