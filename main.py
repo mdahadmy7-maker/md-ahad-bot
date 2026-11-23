@@ -176,7 +176,7 @@ def update_prediction_logic(state, current_result_size):
     return state["displayedResult"]
 
 # ───────────────────────────────────────
-# ৪. API কল (ইন্টিগ্রেটেড ওয়ার্কিং লজিক)
+# ৪. API কল (হেডার এবং লজিক ইম্প্রুভড)
 # ───────────────────────────────────────
 def refresh_token(session, phone, password):
     ts = int(time.time())
@@ -206,7 +206,6 @@ def refresh_token(session, phone, password):
         real_uid = jwt_data.get("UserId", "Unknown")
         expiry = decode_jwt_expiry(token)
         
-        # টোকেনের মেয়াদ না থাকলে ডিফল্ট ২ ঘন্টা সেট করা হচ্ছে
         if expiry == 0:
             expiry = int(time.time()) + 7200
             
@@ -221,8 +220,12 @@ def get_panel_data(session, real_token):
     panel_url = f"{PANEL_URL}?gameCode=WinGo_30S&language=en&random={panel_rnd}&signature={panel_sig}&timestamp={panel_ts}"
     headers = {
         "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9",
         "authorization": f"Bearer {real_token}",
         "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
+        "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
+        "sec-ch-ua-mobile": "?1",
+        "sec-ch-ua-platform": '"Android"',
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
@@ -241,8 +244,15 @@ def fetch_game_balance(session, real_token):
     bal_url = f"https://api.ar-lottery01.com/api/Lottery/GetBalance?language=en&random={bal_rnd}&signature={bal_sig}&timestamp={bal_ts}"
     bal_headers = {
         "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9",
         "authorization": f"Bearer {real_token}",
         "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
+        "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
+        "sec-ch-ua-mobile": "?1",
+        "sec-ch-ua-platform": '"Android"',
+        "sec-fetch-dest": "empty",
+        "sec-fetch-mode": "cors",
+        "sec-fetch-site": "cross-site",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
@@ -250,8 +260,10 @@ def fetch_game_balance(session, real_token):
         bal_data = bal_res.json()
         if bal_data.get("code") == 0:
             return float(bal_data['data']['balance'])
-    except:
-        pass
+        else:
+            logger.error(f"Balance Fetch Error: {bal_data}")
+    except Exception as e:
+        logger.error(f"Balance Fetch Exception: {e}")
     return 0.00
 
 def place_bet(session, real_token, issue_number, amount, choice):
@@ -302,8 +314,12 @@ def fetch_win_loss(session, real_token, issue_number):
         )
         headers = {
             "accept": "application/json, text/plain, */*",
+            "accept-language": "en-US,en;q=0.9",
             "authorization": f"Bearer {real_token}",
             "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
+            "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
+            "sec-ch-ua-mobile": "?1",
+            "sec-ch-ua-platform": '"Android"',
             "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
         }
         res = session.get(url, headers=headers, timeout=15)
@@ -965,11 +981,14 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if query.data == "start_login":
         state["awaiting"] = "phone"
         await query.message.reply_text(
-            "<b>╔════════════════════════╗</b>\n"
-            "<b>║   📱 𝗣𝗛𝗢𝗡𝗘 𝗡𝗨𝗠𝗕𝗘𝗥   ║</b>\n"
-            "<b>╚════════════════════════╝</b>\n\n"
-            "<b>📞 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗽𝗵𝗼𝗻𝗲 𝗻𝘂𝗺𝗯𝗲𝗿 (𝘄𝗶𝘁𝗵 𝗰𝗼𝘂𝗻𝘁𝗿𝘆 𝗰𝗼𝗱𝗲):</b>\n"
-            "<b>𝗘𝘅𝗮𝗺𝗽𝗹𝗲: 8801XXXXXXXXX</b>",
+            "<b>╔═════════════════════════╗</b>\n"
+            "<b>║   🔐 𝗔𝗖𝗖𝗢𝗨𝗡𝗧 𝗟𝗢𝗚𝗜𝗡 🔐   ║</b>\n"
+            "<b>╚═════════════════════════╝</b>\n"
+            "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+            "<b>📱 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗗𝗞 𝗪𝗜𝗡 𝗽𝗵𝗼𝗻𝗲 𝗻𝘂𝗺𝗯𝗲𝗿:</b>\n"
+            "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+            "<b>𝗘𝘃𝗲𝗿𝘆𝗼𝗻𝗲 𝘂𝘀𝗲𝘀 𝘁𝗵𝗲𝗶𝗿 𝗼𝘄𝗻 𝗮𝗰𝗰𝗼𝘂𝗻𝘁 —</b>\n"
+            "<b>𝘆𝗼𝘂𝗿 𝘀𝗲𝘀𝘀𝗶𝗼𝗻 𝗶𝘀 𝗽𝗿𝗶𝘃𝗮𝘁𝗲.</b>",
             parse_mode="HTML"
         )
         return
