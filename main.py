@@ -12,11 +12,19 @@ import requests
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 
+# Render Web Service-এর জন্য Flask (Keep-Alive)
+from flask import Flask
+from threading import Thread
+
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন এবং কঠোর সিকিউরিটি
 # ═══════════════════════════════════════════
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "9044149439:AAGFVyyct2jfxDq-tuouRoeawxTudlkbDFE")
-AUTHORIZED_USERS = [7083673844]
+# Render-এর Environment Variable থেকে টোকেন নিবে
+BOT_TOKEN = os.environ.get("BOT_TOKEN") 
+if not BOT_TOKEN:
+    raise ValueError("BOT_TOKEN environment variable is missing! Please set it in Render.")
+
+AUTHORIZED_USERS = [7083673844] # আপনার টেলিগ্রাম আইডি
 
 def is_authorized(uid: int) -> bool:
     if not AUTHORIZED_USERS:
@@ -784,7 +792,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     text = update.message.text.strip()
 
-    # ── বাটন চেক আগে (keyboard buttons)
     if text in ("🛑 𝗦𝗧𝗢𝗣 𝗧𝗥𝗔𝗗𝗘", "🛑 STOP TRADE"):
         state["trade_running"] = False
         await update.message.reply_text("<b>🛑 𝗧𝗿𝗮𝗱𝗲 𝘀𝘁𝗼𝗽𝗽𝗲𝗱.</b>", parse_mode="HTML")
@@ -824,7 +831,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(target_msg, parse_mode="HTML")
         return
 
-    # ── awaiting state
     if state.get("awaiting") == "phone":
         state["temp_phone"] = text
         state["awaiting"] = "password"
@@ -985,16 +991,39 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         return
 
 # ───────────────────────────────────────
-# ৮. Main
+# ৮. Render Keep-Alive (Web Service-এর জন্য)
+# ───────────────────────────────────────
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running perfectly!"
+
+def run_flask():
+    # Render ডিফল্টভাবে 8080 পোর্ট খোঁজে, তবে ডাইনামিক PORT সেট করা ভালো
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.start()
+
+# ───────────────────────────────────────
+# ৯. Main
 # ───────────────────────────────────────
 def main():
+    # Render-এ ২৪/৭ সচল রাখার জন্য Flask সার্ভার চালু
+    keep_alive() 
+    
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("getid", cmd_getid))
     application.add_handler(CallbackQueryHandler(callback_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    
     logger.info("🤖 Bot is starting...")
-    application.run_polling(allowed_updates=Update.ALL_TYPES)
+    # 409 Conflict এরর এড়াতে ড্রপ_পেন্ডিং_আপডেটস=True করা হলো
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
