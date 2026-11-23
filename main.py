@@ -12,17 +12,19 @@ import requests
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 
-# Render Keep-Alive এর জন্য
+# Render Keep-Alive এর জন্য (এটি আপনার ফাইলে মিসিং ছিল)
 from flask import Flask
 from threading import Thread
 
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন এবং কঠোর সিকিউরিটি
 # ═══════════════════════════════════════════
+# Render-এ Environment Variable থেকে টোকেন নিবে
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9032921988:AAF_Za5BVO0urlUpMMtngU6kBlca1P-uhPs")
 
 # 🛡️ কঠোর সিকিউরিটি (Anti-Hack System)
-AUTHORIZED_USERS = [7083673844] 
+# বটে /getid কমান্ড দিয়ে আপনার আইডি বের করুন এবং নিচের ব্র্যাকেটে বসান (যেমন: [123456789])
+AUTHORIZED_USERS = [] 
 
 def is_authorized(uid: int) -> bool:
     if not AUTHORIZED_USERS:
@@ -33,7 +35,6 @@ LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 PANEL_URL = "https://api.ar-lottery01.com/api/Energy/GetPanel"
 BET_URL = "https://api.ar-lottery01.com/api/Lottery/WinGoBet"
 HISTORY_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
-WIN_LOSS_URL = "https://api.ar-lottery01.com/api/Lottery/GetWinLossResult"
 DEVICE_ID = "4aa593880f5c671907b460252b022635"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -51,6 +52,9 @@ def fmt_uid(uid):
         return s[-7:]
     return s
 
+PATTERN_PREDICTION = ["Big", "Small", "Small", "Big"]
+
+# ✅ স্টেপ শেষের মেসেজ
 STEP_EXHAUSTED_MSG = (
     "<b>╔════════════════════════════╗</b>\n"
     "<b>║    ✨ 🔔 নতুন আপডেট! 🔔 ✨     ║</b>\n"
@@ -85,10 +89,7 @@ def get_state(uid):
             "first_bet": True, "real_uid": "Unknown", "lottery_token": None,
             "token_expiry_time": 0, "last_betted_issue": None, "next_period": "----",
             "prediction_shown": False, "trade_task": None,
-            "last3": [], "reverseMode": False, "reverseCount": 0, "reverseTarget": 1,
-            "streakCount": 0, "streakType": None, "streakReversePending": False, "displayedResult": "--",
-            "auto_trade_shown": False,
-            "fail_retry_shown": False,
+            "pattern_index": 0, "last_predicted_issue": None,
             "session": requests.Session()
         }
     return user_state[uid]
@@ -123,78 +124,32 @@ def decode_jwt(token):
     except:
         return {}
 
-def get_remaining_seconds(issue_number=None):
-    return max(0, 30 - int(time.time()) % 30)
+def get_remaining_seconds(issue_number):
+    try:
+        s = str(issue_number)[:14]
+        dt = time.strptime(s, "%Y%m%d%H%M%S")
+        start_ts = time.mktime(dt)
+        elapsed = time.time() - start_ts
+        remaining = 30 - elapsed
+        return max(0, int(remaining))
+    except:
+        return max(0, 30 - int(time.time()) % 30)
 
 def build_timer_bar(seconds):
     filled = min(10, max(0, int(10 * seconds / 30)))
     bar = "█" * filled + "░" * (10 - filled)
     return f"[{bar}] {bnum(seconds)}𝘀"
 
-# ───────────────────────────────────────
-# ৩. প্রেডিকশন লজিক
-# ───────────────────────────────────────
-def update_prediction_logic(state, current_result_size):
-    current_result_size = current_result_size.upper()
-    
-    if current_result_size == state["streakType"]:
-        state["streakCount"] += 1
-    else:
-        state["streakType"] = current_result_size
-        state["streakCount"] = 1
-        
-    if not state["reverseMode"]:
-        state["last3"].append(current_result_size)
-        if len(state["last3"]) > 3:
-            state["last3"].pop(0)
-            
-    if state["streakReversePending"]:
-        state["streakReversePending"] = False
-        pattern_detected = False
-        if len(state["last3"]) == 3:
-            a, b, c = state["last3"]
-            if a != b and b != c and a == c:
-                pattern_detected = True
-                
-        if pattern_detected:
-            state["reverseMode"] = True
-            state["reverseCount"] = 1
-            state["reverseTarget"] = random.choice([1, 2])
-            state["displayedResult"] = "SMALL" if current_result_size == "BIG" else "BIG"
-        else:
-            state["displayedResult"] = current_result_size
-            
-    elif state["streakCount"] >= 6 and not state["reverseMode"]:
-        state["streakReversePending"] = True
-        state["displayedResult"] = "SMALL" if current_result_size == "BIG" else "BIG"
-        
-    elif state["reverseMode"]:
-        state["displayedResult"] = "SMALL" if current_result_size == "BIG" else "BIG"
-        state["reverseCount"] += 1
-        if state["reverseCount"] >= state["reverseTarget"]:
-            state["reverseMode"] = False
-            state["reverseCount"] = 0
-            state["last3"] = []
-            
-    else:
-        pattern_detected = False
-        if len(state["last3"]) == 3:
-            a, b, c = state["last3"]
-            if a != b and b != c and a == c:
-                pattern_detected = True
-                
-        if pattern_detected:
-            state["reverseMode"] = True
-            state["reverseCount"] = 1
-            state["reverseTarget"] = random.choice([1, 2])
-            state["displayedResult"] = "SMALL" if current_result_size == "BIG" else "BIG"
-        else:
-            state["displayedResult"] = current_result_size
-            
-    return state["displayedResult"]
+def get_pattern_prediction(state, issue):
+    if state.get("last_predicted_issue") != issue:
+        pred = PATTERN_PREDICTION[state["pattern_index"] % len(PATTERN_PREDICTION)]
+        state["pattern_index"] += 1
+        state["last_predicted_issue"] = issue
+        return pred
+    return PATTERN_PREDICTION[(state["pattern_index"] - 1) % len(PATTERN_PREDICTION)]
 
 # ───────────────────────────────────────
-# ৪. API কল (লগইন ফিক্স করা হয়েছে)
+# ৩. API কল
 # ───────────────────────────────────────
 def refresh_token(session, phone, password):
     ts = int(time.time())
@@ -214,25 +169,18 @@ def refresh_token(session, phone, password):
         res = session.post(LOGIN_URL, json=payload, headers=headers, timeout=15)
         data = res.json()
         if data.get("code") != 0:
-            return False, data.get("msg", "Login failed"), None, None, None
-            
+            return False, data.get("msg"), None, None, None
+        
         lottery_url = data["data"].get("lotteryLoginUrl", "")
-        if not lottery_url:
-             return False, "No lottery URL found", None, None, None
-            
-        # রোবাস্ট টোকেন এক্সট্রাকশন (Token বা token)
+        # টোকেন ছোট বা বড় হাতের অক্ষরে আসতে পারে, তাই দুটোই চেক করা হচ্ছে
         query_params = parse_qs(urlparse(lottery_url).query)
         sso_ticket = query_params.get("Token", [""])[0] or query_params.get("token", [""])[0]
-        
-        if not sso_ticket:
-             return False, "No SSO Ticket in URL", None, None, None
 
         panel_rnd = random.randint(100000000000, 999999999999)
         panel_ts = int(time.time())
         panel_sig = generate_dynamic_sig({"gameCode": "WinGo_30S", "language": "en", "random": panel_rnd})
         panel_url = f"{PANEL_URL}?gameCode=WinGo_30S&language=en&random={panel_rnd}&signature={panel_sig}&timestamp={panel_ts}"
         
-        # ডোমেইন কনসিস্টেন্ট করা হয়েছে
         panel_headers = {
             "accept": "application/json, text/plain, */*",
             "authorization": f"Bearer {sso_ticket}",
@@ -241,18 +189,14 @@ def refresh_token(session, phone, password):
         }
         panel_res = session.get(panel_url, headers=panel_headers, timeout=10)
         auth_header = panel_res.headers.get('authorization', '')
-        
         if auth_header.startswith('Bearer '):
             real_token = auth_header[7:]
             expiry = decode_jwt_expiry(real_token)
             real_uid = decode_jwt(real_token).get("UserId", "Unknown")
             return True, "Success", real_token, expiry, real_uid
         else:
-            # যদি টোকেন না পাওয়া যায়, তবে Response টি লগে দেখানো হবে
-            logger.error(f"Panel Response Error: {panel_res.text}")
-            return False, "No token in header (Server rejected)", None, None, None
+            return False, "No token in header", None, None, None
     except Exception as e:
-        logger.error(f"Login Exception: {e}")
         return False, str(e), None, None, None
 
 def get_panel_data(session, real_token):
@@ -322,54 +266,12 @@ def place_bet(session, real_token, issue_number, amount, choice):
     except Exception as e:
         return 500, str(e)
 
-# ✅ নির্ভুল WIN/LOSS চেক ফাংশন (main.py থেকে নেওয়া)
-def fetch_win_loss(session, real_token, issue_number):
-    try:
-        rnd = random.randint(100000000000, 999999999999)
-        ts = int(time.time())
-        sig = generate_dynamic_sig({
-            "issueNumber": str(issue_number),
-            "language": "en",
-            "random": rnd
-        })
-        url = (
-            f"{WIN_LOSS_URL}?issueNumber={issue_number}"
-            f"&language=en&random={rnd}&signature={sig}&timestamp={ts}"
-        )
-        headers = {
-            "accept": "application/json, text/plain, */*",
-            "authorization": f"Bearer {real_token}",
-            "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/",
-            "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
-        }
-        res = session.get(url, headers=headers, timeout=15)
-        data = res.json()
-        if data.get("code") == 0:
-            d = data.get("data") or {}
-            if "status" not in d:
-                return None, 0.0
-            status = bool(d.get("status"))
-            win_amt = float(d.get("winAmount") or 0)
-            return status, win_amt
-    except Exception as e:
-        logger.error(f"fetch_win_loss error: {e}")
-    return None, 0.0
-
-# ফলব্যাক: History API
 def fetch_result(session, issue_number):
     try:
         res = session.get(HISTORY_URL, timeout=10)
         data = res.json()
         for item in data.get('data', {}).get('list', []):
             if str(item.get('issueNumber')) == str(issue_number):
-                premium = str(item.get('premium', '')).upper()
-                if premium in ('B', 'BIG'):
-                    return "Big"
-                elif premium in ('S', 'SMALL'):
-                    return "Small"
-                if 'sum' in item:
-                    total = int(item['sum'])
-                    return "Big" if total >= 23 else "Small"
                 nums = item.get('number', '')
                 if nums:
                     total = sum(int(x) for x in str(nums).split(','))
@@ -379,7 +281,7 @@ def fetch_result(session, issue_number):
     return None
 
 # ───────────────────────────────────────
-# ৫. মেসেজ বিল্ডার
+# ৪. মেসেজ বিল্ডার
 # ───────────────────────────────────────
 def build_step_amounts_msg(steps):
     return (
@@ -411,7 +313,7 @@ def build_step_plan_tree(step_amounts):
     return "\n".join(lines)
 
 def build_config_msg(balance, target, stop_at, steps, step_amounts, current_issue):
-    remaining = get_remaining_seconds(current_issue)
+    remaining = get_remaining_seconds(current_issue) if current_issue else 30
     timer_bar = build_timer_bar(remaining)
     total_risk = sum(step_amounts)
     return (
@@ -438,7 +340,7 @@ def build_config_msg(balance, target, stop_at, steps, step_amounts, current_issu
     )
 
 def build_auto_trade_msg(balance, target, stop_at, steps, step_amounts, current_issue):
-    remaining = get_remaining_seconds(current_issue)
+    remaining = get_remaining_seconds(current_issue) if current_issue else 30
     timer_bar = build_timer_bar(remaining)
     return (
         "<b>╔════════════════════════╗</b>\n"
@@ -580,7 +482,7 @@ def build_target_reached_msg(start_balance, final_balance, profit, trades, wins,
     )
 
 # ───────────────────────────────────────
-# ৬. ট্রেড ওয়ার্কার (Win/Loss API সহ)
+# ৫. ট্রেড ওয়ার্কার
 # ───────────────────────────────────────
 async def trade_worker(bot, uid):
     state = get_state(uid)
@@ -627,18 +529,17 @@ async def trade_worker(bot, uid):
                 state["lottery_token"] = new_token
                 state["token_expiry_time"] = expiry
             else:
-                await asyncio.sleep(2)
-                continue
+                await bot.send_message(chat_id=uid, text=f"<b>❌ 𝗧𝗼𝗸𝗲𝗻 𝗿𝗲𝗳𝗿𝗲𝘀𝗵 𝗳𝗮𝗶𝗹𝗲𝗱: {msg}</b>", parse_mode="HTML")
+                state["trade_running"] = False
+                break
 
         issue, phase = await asyncio.to_thread(get_panel_data, session, token)
-        
-        if not issue or phase != "Betting" or issue == state.get("last_betted_issue"):
-            await asyncio.sleep(1)
+        if not issue or phase != "Betting":
+            await asyncio.sleep(2)
             continue
-            
-        remaining = get_remaining_seconds(issue)
-        if remaining < 7: 
-            await asyncio.sleep(1)
+
+        if issue == state.get("last_betted_issue"):
+            await asyncio.sleep(2)
             continue
 
         if current_step >= len(steps):
@@ -657,16 +558,12 @@ async def trade_worker(bot, uid):
             state["trade_running"] = False
             break
 
-        # ✅ AUTO TRADE ACTIVE শুধু প্রথমবার
-        if not state.get("auto_trade_shown"):
-            state["auto_trade_shown"] = True
-            await bot.send_message(
-                chat_id=uid,
-                text=build_auto_trade_msg(curr_bal, target, stop_at, len(steps), steps, issue),
-                parse_mode="HTML"
-            )
+        await bot.send_message(
+            chat_id=uid,
+            text=build_auto_trade_msg(curr_bal, target, stop_at, len(steps), steps, issue),
+            parse_mode="HTML"
+        )
 
-        # ✅ GENERATING PREDICTION অ্যানিমেশন শুধু প্রথমবার
         if not state.get("prediction_shown"):
             state["prediction_shown"] = True
             try:
@@ -683,80 +580,43 @@ async def trade_worker(bot, uid):
             except Exception as e:
                 logger.error(f"prediction animation error: {e}")
 
-        remaining = get_remaining_seconds(issue)
-        if remaining < 2:
-            state["last_betted_issue"] = issue
-            continue
+        predicted = get_pattern_prediction(state, issue)
 
-        predicted = state.get("displayedResult", "--")
-        if predicted == "--" or str(predicted).upper() not in ("BIG", "SMALL"):
-            predicted = random.choice(["Big", "Small"])
-        else:
-            predicted = str(predicted).capitalize()
-        state["displayedResult"] = predicted
-
-        # বাজি ধরার চেষ্টা
         status_code, res_text = await asyncio.to_thread(
             place_bet, session, token, issue, amount, predicted
         )
 
-        bet_failed = False
         if status_code != 200:
-            bet_failed = True
-        else:
-            try:
-                rj = json.loads(res_text)
-                if rj.get("code") != 0:
-                    bet_failed = True
-            except:
-                pass
-
-        if bet_failed:
-            if not state.get("fail_retry_shown"):
-                state["fail_retry_shown"] = True
-                await asyncio.sleep(1)
-                continue
-            else:
-                state["last_betted_issue"] = issue
-                await asyncio.sleep(1)
-                continue
+            await bot.send_message(chat_id=uid, text=f"<b>❌ 𝗕𝗘𝗧 𝗙𝗔𝗜𝗟𝗘𝗗 (status {status_code})</b>", parse_mode="HTML")
+            state["trade_running"] = False
+            break
+        try:
+            rj = json.loads(res_text)
+            if rj.get("code") != 0:
+                await bot.send_message(chat_id=uid, text=f"<b>❌ 𝗕𝗘𝗧 𝗙𝗔𝗜𝗟𝗘𝗗: {rj.get('msg')}</b>", parse_mode="HTML")
+                state["trade_running"] = False
+                break
+        except:
+            pass
 
         state["last_betted_issue"] = issue
 
-        # ✅ NEW TRADE PLACED
         await bot.send_message(
             chat_id=uid,
             text=build_new_trade_msg(issue, predicted, current_step + 1, amount, curr_bal),
             parse_mode="HTML"
         )
 
-        # ⏱️ পিরিয়ড শেষ হওয়ার জন্য অপেক্ষা
-        for _ in range(16):
-            if not state["trade_running"]:
-                break
-            await asyncio.sleep(2)
-        if not state["trade_running"]:
-            break
+        # অপেক্ষা করুন ৩০ সেকেন্ড + ২ সেকেন্ড বাফার
+        await asyncio.sleep(32)
 
-        # ✅ নতুন WIN/LOSS API দিয়ে রেজাল্ট চেক
-        won = None
-        win_amount = 0.0
-        for _ in range(15):
-            won, win_amount = await asyncio.to_thread(fetch_win_loss, session, token, issue)
-            if won is not None:
+        # 🛠️ Smart Result Check
+        result = None
+        for _ in range(6): 
+            result = await asyncio.to_thread(fetch_result, session, issue)
+            if result is not None:
                 break
-            if not state["trade_running"]:
-                break
-            await asyncio.sleep(2)
-
-        # API ফেইল হলে ফলব্যাক: History API
-        if won is None:
-            hist_res = await asyncio.to_thread(fetch_result, session, issue)
-            if hist_res is not None:
-                actual_res_fb = hist_res.capitalize()
-                won = (actual_res_fb.lower() == predicted.lower())
-            else:
-                continue
+            await asyncio.sleep(3)
 
         try:
             new_bal = await asyncio.to_thread(fetch_game_balance, session, token)
@@ -765,8 +625,11 @@ async def trade_worker(bot, uid):
 
         state["balance"] = new_bal
         total_trades += 1
-        actual_res = predicted if won else ("Small" if predicted.upper() == "BIG" else "Big")
-        update_prediction_logic(state, actual_res.upper())
+
+        if result is None:
+            won = False
+        else:
+            won = (result.lower() == predicted.lower())
 
         if won:
             wins += 1
@@ -780,8 +643,6 @@ async def trade_worker(bot, uid):
             next_step = current_step + 1
 
         pl = amount * 0.96 if won else -amount
-
-        # ✅ TRADE RESULT
         await bot.send_message(
             chat_id=uid,
             text=build_result_msg(issue, predicted, step_used, amount, won, pl, new_bal, wins, losses, next_step),
@@ -799,7 +660,7 @@ async def trade_worker(bot, uid):
     state["trade_task"] = None
 
 # ───────────────────────────────────────
-# ৭. টেলিগ্রাম হ্যান্ডলার
+# ৬. টেলিগ্রাম হ্যান্ডলার
 # ───────────────────────────────────────
 async def cmd_getid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -825,41 +686,30 @@ async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     state = get_state(uid)
     state["first_bet"] = True
     state["prediction_shown"] = False
-    state["auto_trade_shown"] = False
-    state["fail_retry_shown"] = False
-    state["last3"] = []
-    state["reverseMode"] = False
-    state["reverseCount"] = 0
-    state["reverseTarget"] = 1
-    state["streakCount"] = 0
-    state["streakType"] = None
-    state["streakReversePending"] = False
-    state["displayedResult"] = "--"
+    state["pattern_index"] = 0
+    state["last_predicted_issue"] = None
 
     welcome_text = (
-        "<b>🧠 𝐁𝐃=𝐖𝐈𝐍~𝐆𝐎=𝐀𝐔𝐓𝐎~𝐁𝐄𝐓 💥</b>\n"
-        "<b>━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
-        "<b>🧠 𝐌𝐨𝐝𝐞    : 𝐀𝐮𝐭𝐨 𝐀𝐧𝐚𝐥𝐲𝐬𝐞 & 𝐁𝐞𝐭</b>\n"
-        "<b>🔐 𝐀𝐜𝐜𝐞𝐬𝐬  : 𝐏𝐫𝐢𝐯𝐚𝐭𝐞 · 𝐀𝐮𝐭𝐡𝐨𝐫𝐢𝐳𝐞𝐝 𝐌𝐞𝐦𝐛𝐞𝐫𝐬</b>\n"
-        "<b>🔴 𝐒𝐭𝐚𝐭𝐮𝐬  : 𝐍𝐨𝐭 𝐋𝐨𝐠𝐠𝐞𝐝 𝐈𝐧</b>\n"
-        f"<b>👥 𝐀𝐜𝐜𝐨𝐮𝐧𝐭𝐬: {bnum(len(state['accounts']))}/𝟔</b>\n"
-        "<b>━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
-        "<b>🧠 𝐏𝐫𝐞𝐝𝐢𝐜𝐭𝐢𝐨𝐧 𝐄𝐧𝐠𝐢𝐧𝐞 — 𝟗 𝐋𝐚𝐲𝐞𝐫𝐬</b>\n"
+        "<b>🧠 𝗕𝗗=𝗪𝗜𝗡~𝗚𝗢=𝗔𝗨𝗧𝗢~𝗕𝗘𝗧 💥</b>\n"
+        "<b>━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+        "<b>🧠 𝗠𝗼𝗱𝗲    : 𝗔𝘂𝘁𝗼 𝗔𝗻𝗮𝗹𝘆𝘀𝗲 & 𝗯𝗲𝘁</b>\n"
+        "<b>🔐 𝗔𝗰𝗰𝗲𝘀𝘀  : 𝗣𝗿𝗶𝘃𝗮𝘁𝗲 · 𝗔𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱 𝗠𝗲𝗺𝗯𝗲𝗿𝘀</b>\n"
+        "<b>🔴 𝗦𝘁𝗮𝘁𝘂𝘀  : 𝗡𝗼𝘁 𝗟𝗼𝗴𝗴𝗲𝗱 𝗜𝗻</b>\n"
+        f"<b>👥 𝗔𝗰𝗰𝗼𝘂𝗻𝘁𝘀: {len(state['accounts'])}/6</b>\n"
+        "<b>━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+        "<b>🧠 𝗣𝗿𝗲𝗱𝗶𝗰𝘁𝗶𝗼𝗻 𝗘𝗻𝗴𝗶𝗻𝗲 — 𝟵 𝗟𝗮𝘆𝗲𝗿𝘀</b>\n"
+        "<b>⚡ 𝗦𝘁𝗿𝗲𝗮𝗸 · 🔷 𝗣𝗮𝘁𝘁𝗲𝗿𝗻 · 📈 𝗧𝗿𝗲𝗻𝗱</b>\n"
+        "<b>🔍 𝗠𝗮𝗻𝗶𝗽𝘂𝗹𝗮𝘁𝗶𝗼𝗻 · 🎨 𝗖𝗼𝗹𝗼𝘂𝗿 · 🔢 𝗙𝗿𝗲𝗾𝘂𝗲𝗻𝗰𝘆</b>\n"
+        "<b>🔄 𝗠𝗮𝗿𝗸𝗼𝘃 · ♻️ 𝗖𝘆𝗰𝗹𝗲 · 💠 𝗠𝗼𝗺𝗲𝗻𝘁𝘂𝗺</b>\n"
+        "<b>🔁 𝗘𝘃𝗲𝗿𝘆 𝗹𝗮𝘆𝗲𝗿 𝗶𝘀 𝗯𝗮𝗰𝗸-𝘁𝗲𝘀𝘁𝗲𝗱 𝗹𝗶𝘃𝗲 𝘀𝗼 𝗶𝘁𝘀 𝘃𝗼𝘁𝗲</b>\n"
+        "<b>𝘄𝗲𝗶𝗴𝗵𝘁 𝗳𝗼𝗹𝗹𝗼𝘄𝘀 𝗶𝘁𝘀 𝗿𝗲𝗮𝗹 𝗵𝗶𝘁-𝗿𝗮𝘁𝗲</b>\n"
+        "<b>🔴 𝗖𝗼𝗻𝗳𝗶𝗱𝗲𝗻𝗰𝗲 𝗯𝗲𝗹𝗼𝘄 30% → 𝘀𝗶𝘁 𝗼𝘂𝘁</b>\n"
+        "<b>━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+        "<b>🎬 𝟰-𝘀𝗲𝗰𝗼𝗻𝗱 🧠 𝗴𝗲𝗻𝗲𝗿𝗮𝘁𝗶𝗻𝗴 𝗽𝗿𝗲𝗱𝗶𝗰𝘁𝗶𝗼𝗻 𝗮𝗻𝗶𝗺𝗮𝘁𝗶𝗼𝗻</b>\n"
+        "<b>🚀 𝗔𝗻𝗮𝗹𝘆𝘀𝗶𝘀 → 𝗮𝘂𝘁𝗼 𝗯𝗲𝘁 𝗲𝘃𝗲𝗿𝘆 𝟯𝟬𝘀 𝗽𝗲𝗿𝗶𝗼𝗱</b>\n"
         "\n"
-        "<b>⚡ 𝐒𝐭𝐫𝐞𝐚𝐤 · 🔷 𝐏𝐚𝐭𝐭𝐞𝐫𝐧 · 📈 𝐓𝐫𝐞𝐧𝐝</b>\n"
-        "<b>🔍 𝐌𝐚𝐧𝐢𝐩𝐮𝐥𝐚𝐭𝐢𝐨𝐧 · 🎨 𝐂𝐨𝐥𝐨𝐮𝐫 · 🔢 𝐅𝐫𝐞𝐪𝐮𝐞𝐧𝐜𝐲</b>\n"
-        "<b>🔄 𝐌𝐚𝐫𝐤𝐨𝐯 · ♻️ 𝐂𝐲𝐜𝐥𝐞 · 💠 𝐌𝐨𝐦𝐞𝐧𝐭𝐮𝐦</b>\n"
-        "\n"
-        "<b>🔁 𝐄𝐯𝐞𝐫𝐲 𝐥𝐚𝐲𝐞𝐫 𝐢𝐬 𝐛𝐚𝐜𝐤-𝐭𝐞𝐬𝐭𝐞𝐝 𝐥𝐢𝐯𝐞 𝐬𝐨 𝐢𝐭𝐬 𝐯𝐨𝐭𝐞</b>\n"
-        "<b>𝐰𝐞𝐢𝐠𝐡𝐭 𝐟𝐨𝐥𝐥𝐨𝐰𝐬 𝐢𝐭𝐬 𝐫𝐞𝐚𝐥 𝐡𝐢𝐭-𝐫𝐚𝐭𝐞</b>\n"
-        "\n"
-        "<b>🔴 𝐂𝐨𝐧𝐟𝐢𝐝𝐞𝐧𝐜𝐞 𝐛𝐞𝐥𝐨𝐰 𝟑𝟎% → 𝐒𝐢𝐭 𝐎𝐮𝐭</b>\n"
-        "<b>━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
-        "<b>🎬 𝟒-𝐬𝐞𝐜𝐨𝐧𝐝 🧠 𝐆𝐞𝐧𝐞𝐫𝐚𝐭𝐢𝐧𝐠 𝐏𝐫𝐞𝐝𝐢𝐜𝐭𝐢𝐨𝐧 𝐀𝐧𝐢𝐦𝐚𝐭𝐢𝐨𝐧</b>\n"
-        "<b>🚀 𝐀𝐧𝐚𝐥𝐲𝐬𝐢𝐬 → 𝐀𝐮𝐭𝐨 𝐁𝐞𝐭 𝐄𝐯𝐞𝐫𝐲 𝟑𝟎𝐬 𝐏𝐞𝐫𝐢𝐨𝐝</b>\n"
-        "\n"
-        "<b>━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
-        "<b>👇 𝐏𝐫𝐞𝐬𝐬 𝐓𝐡𝐞 𝐁𝐮𝐭𝐭𝐨𝐧 𝐁𝐞𝐥𝐨𝐰 𝐓𝐨 𝐋𝐎𝐆𝐈𝐍</b>"
+        "<b>━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+        "<b>👇 𝗣𝗿𝗲𝘀𝘀 𝘁𝗵𝗲 𝗯𝘂𝘁𝘁𝗼𝗻 𝗯𝗲𝗹𝗼𝘄 𝘁𝗼 𝗟𝗢𝗚𝗜𝗡</b>"
     )
     keyboard = [[InlineKeyboardButton("🔐 𝗟𝗢𝗚𝗜𝗡 𝗧𝗢 𝗔𝗖𝗖𝗢𝗨𝗡𝗧", callback_data="start_login")]]
     await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
@@ -1071,18 +921,9 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["wins"] = 0
         state["losses"] = 0
         state["total_trades"] = 0
-        # 🔁 নতুন সেশনের জন্য সব ফ্ল্যাগ রিসেট
         state["prediction_shown"] = False
-        state["auto_trade_shown"] = False
-        state["fail_retry_shown"] = False
-        state["last3"] = []
-        state["reverseMode"] = False
-        state["reverseCount"] = 0
-        state["reverseTarget"] = 1
-        state["streakCount"] = 0
-        state["streakType"] = None
-        state["streakReversePending"] = False
-        state["displayedResult"] = "--"
+        state["pattern_index"] = 0
+        state["last_predicted_issue"] = None
         state["trade_task"] = asyncio.create_task(trade_worker(ctx.bot, uid))
 
     elif data == "cancel_trade_btn":
@@ -1090,7 +931,7 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         await ctx.bot.send_message(chat_id=uid, text="<b>❌ 𝗧𝗥𝗔𝗗𝗘 𝗖𝗔𝗡𝗖𝗘𝗟𝗟𝗘𝗗</b>", parse_mode="HTML")
 
 # ───────────────────────────────────────
-# ৮. Render Keep-Alive (Web Service-এর জন্য)
+# ৭. Render Keep-Alive (Web Service-এর জন্য)
 # ───────────────────────────────────────
 app = Flask('')
 
@@ -1107,7 +948,7 @@ def keep_alive():
     t.start()
 
 # ───────────────────────────────────────
-# ৯. Main
+# ৮. Main
 # ───────────────────────────────────────
 def main():
     if not BOT_TOKEN or ":" not in BOT_TOKEN:
@@ -1125,7 +966,7 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     
     print("🤖 Bot started successfully...")
-    # 409 Conflict এরর এড়াতে drop_pending_updates=True
+    # ✅ 409 Conflict এরর এড়াতে drop_pending_updates=True যুক্ত করা হলো
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 if __name__ == "__main__":
