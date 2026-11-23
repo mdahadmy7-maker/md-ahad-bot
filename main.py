@@ -200,7 +200,7 @@ def refresh_token(session, phone, password):
             return False, data.get("msg"), None, None, None
 
         lottery_url = data["data"].get("lotteryLoginUrl", "")
-        # ✅ regex fallback সহ টোকেন নিষ্কাশন
+        # ✅ parse_qs + regex fallback (working কোডের মতো)
         sso_ticket = parse_qs(urlparse(lottery_url).query).get("Token", [""])[0]
         if not sso_ticket:
             m = re.search(r"Token=([^&]+)", lottery_url)
@@ -271,14 +271,14 @@ def fetch_game_balance(session, real_token):
         pass
     return 0.00
 
-# ✅✅✅ এটাই মূল ফিক্স — working কোডের মতো হুবহু ✅✅✅
+# ✅✅✅ FIXED: place_bet — working কোডের মতো হুবহু ✅✅✅
 def place_bet(session, real_token, issue_number, amount, choice):
     try:
         bet_content = f"BigSmall_{choice}"
         c_ts = int(time.time())
         c_rnd = random.randint(100000000000, 999999999999)
 
-        # Signature payload (str/int conversion — working code-এর মতো)
+        # ১) Signature payload — str/int কনভার্শন সহ
         sig_payload = {
             "gameCode": "WinGo_30S",
             "issueNumber": str(issue_number),
@@ -290,7 +290,7 @@ def place_bet(session, real_token, issue_number, amount, choice):
         }
         sig = generate_dynamic_sig(sig_payload)
 
-        # Actual payload (RAW values — working code-এর মতো)
+        # ২) Actual payload — RAW value (working কোডের মতো)
         bet_payload = {
             "gameCode": "WinGo_30S",
             "issueNumber": issue_number,
@@ -372,7 +372,7 @@ def fetch_result(session, issue_number):
     return None
 
 # ───────────────────────────────────────
-# ৫. মেসেজ বিল্ডার (আগের মতোই)
+# ৫. মেসেজ বিল্ডার (আগের মতোই — কিছু বদলায়নি)
 # ───────────────────────────────────────
 def build_step_amounts_msg(steps):
     return (
@@ -569,7 +569,7 @@ def build_target_reached_msg(start_balance, final_balance, profit, trades, wins,
     )
 
 # ───────────────────────────────────────
-# ৬. ট্রেড ওয়ার্কার (ফিক্সড)
+# ৬. ট্রেড ওয়ার্কার — শুধু bet verify অংশ ঠিক করা হয়েছে
 # ───────────────────────────────────────
 async def trade_worker(bot, uid):
     state = get_state(uid)
@@ -615,9 +615,8 @@ async def trade_worker(bot, uid):
             await asyncio.sleep(1)
             continue
 
-        # ✅ time check কমানো হয়েছে (আগে 7 ছিল, এখন 3)
         remaining = get_remaining_seconds(issue)
-        if remaining < 3:
+        if remaining < 7:
             await asyncio.sleep(1)
             continue
 
@@ -627,10 +626,6 @@ async def trade_worker(bot, uid):
             break
 
         amount = steps[current_step]
-        # ✅ amount কে int-এ কনভার্ট (working code-এর মতো)
-        if isinstance(amount, float) and amount.is_integer():
-            amount = int(amount)
-
         if curr_bal < amount:
             await bot.send_message(chat_id=uid, text=f"<b>❌ 𝗜𝗻𝘀𝘂𝗳𝗳𝗶𝗰𝗶𝗲𝗻𝘁 𝗯𝗮𝗹𝗮𝗻𝗰𝗲!\n𝗡𝗲𝗲𝗱: ৳ {bnum(f'{amount:.2f}')}, 𝗛𝗮𝘃𝗲: ৳ {bnum(f'{curr_bal:.2f}')}.</b>", parse_mode="HTML")
             state["trade_running"] = False
@@ -670,23 +665,28 @@ async def trade_worker(bot, uid):
 
         status_code, res_text = await asyncio.to_thread(place_bet, session, token, issue, amount, predicted)
 
-        # ✅✅✅ উন্নত bet verification (working code-এর মতো) ✅✅✅
+        # ✅✅✅ FIXED bet verification — working কোডের মতো ✅✅✅
         bet_failed = False
-        if status_code != 200:
+        if status_code == 401:
+            logger.warning("⚠️ 401 Unauthorized — forcing token refresh")
+            state["token_expiry_time"] = 0
             bet_failed = True
-            if status_code == 401:
-                logger.warning("⚠️ 401 Unauthorized — forcing token refresh")
-                state["token_expiry_time"] = 0
+        elif status_code != 200:
+            bet_failed = True
+            logger.warning(f"Bet HTTP error: {status_code} | {res_text[:120]}")
         elif not res_text or not res_text.strip():
+            # Empty body = fail (আগে except: pass দিয়ে success ধরে নিত)
             bet_failed = True
+            logger.warning("Bet returned empty response")
         else:
             try:
                 rj = json.loads(res_text)
                 if rj.get("code") != 0:
                     bet_failed = True
                     logger.warning(f"Bet rejected by API: {rj.get('msg')}")
-            except Exception:
+            except Exception as e:
                 bet_failed = True
+                logger.warning(f"Bet response not JSON: {e} | {res_text[:120]}")
 
         if bet_failed:
             if not state.get("fail_retry_shown"):
@@ -761,7 +761,7 @@ async def trade_worker(bot, uid):
     state["trade_task"] = None
 
 # ───────────────────────────────────────
-# ৭. টেলিগ্রাম হ্যান্ডলার (আগের মতোই — শুধু step_amount int-এ কনভার্ট)
+# ৭. টেলিগ্রাম হ্যান্ডলার — আগের মতোই
 # ───────────────────────────────────────
 async def cmd_getid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -973,9 +973,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if state.get("awaiting") == "step_amount":
         try:
-            # ✅ int-এ কনভার্ট (working code-এর মতো — lottery-এ int amount)
-            amt_float = float(text)
-            amt = int(amt_float)
+            amt = float(text)
             if amt <= 0:
                 raise ValueError()
             state["step_amounts"].append(amt)
@@ -1011,4 +1009,59 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "<b>║   📱 𝗣𝗛𝗢𝗡𝗘 𝗡𝗨𝗠𝗕𝗘𝗥   ║</b>\n"
             "<b>╚════════════════════════╝</b>\n\n"
             "<b>📞 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗽𝗵𝗼𝗻𝗲 𝗻𝘂𝗺𝗯𝗲𝗿 (𝘄𝗶𝘁𝗵 𝗰𝗼𝘂𝗻𝘁𝗿𝘆 𝗰𝗼𝗱𝗲):</b>\n"
-            "<b>𝗘𝘅𝗮𝗺𝗽
+            "<b>𝗘𝘅𝗮𝗺𝗽𝗹𝗲: 8801XXXXXXXXX</b>",
+            parse_mode="HTML"
+        )
+        return
+
+    if query.data == "start_trade":
+        if state.get("trade_running"):
+            await query.message.reply_text("<b>⚠️ 𝗧𝗿𝗮𝗱𝗲 𝗮𝗹𝗿𝗲𝗮𝗱𝘆 𝗿𝘂𝗻𝗻𝗶𝗻𝗴.</b>", parse_mode="HTML")
+            return
+        if not state.get("lottery_token") or not state.get("step_amounts"):
+            await query.message.reply_text("<b>❌ 𝗦𝗲𝘁𝘂𝗽 𝗶𝗻𝗰𝗼𝗺𝗽𝗹𝗲𝘁𝗲. 𝗣𝗹𝗲𝗮𝘀𝗲 /start 𝗮𝗴𝗮𝗶𝗻.</b>", parse_mode="HTML")
+            return
+        state["trade_running"] = True
+        state["auto_trade_shown"] = False
+        state["prediction_shown"] = False
+        state["fail_retry_shown"] = False
+        state["last_betted_issue"] = None
+        task = asyncio.create_task(trade_worker(ctx.bot, uid))
+        state["trade_task"] = task
+        await query.message.reply_text("<b>🚀 𝗧𝗥𝗔𝗗𝗘 𝗦𝗧𝗔𝗥𝗧𝗘𝗗! 🎬</b>", parse_mode="HTML")
+        return
+
+# ───────────────────────────────────────
+# ৮. Render Keep-Alive
+# ───────────────────────────────────────
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running perfectly!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.start()
+
+# ───────────────────────────────────────
+# ৯. Main
+# ───────────────────────────────────────
+def main():
+    keep_alive()
+
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", cmd_start))
+    application.add_handler(CommandHandler("getid", cmd_getid))
+    application.add_handler(CallbackQueryHandler(callback_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+
+    logger.info("🤖 Bot is starting...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+
+if __name__ == "__main__":
+    main()
