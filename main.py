@@ -19,11 +19,11 @@ from threading import Thread
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন এবং কঠোর সিকিউরিটি
 # ═══════════════════════════════════════════
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+BOT_TOKEN = os.environ.get("BOT_TOKEN") 
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN environment variable is missing! Please set it in Render.")
 
-AUTHORIZED_USERS = [7083673844]
+AUTHORIZED_USERS = [7083673844] # আপনার টেলিগ্রাম আইডি
 
 def is_authorized(uid: int) -> bool:
     if not AUTHORIZED_USERS:
@@ -176,10 +176,9 @@ def update_prediction_logic(state, current_result_size):
     return state["displayedResult"]
 
 # ───────────────────────────────────────
-# ৪. API কল (ওয়ার্কিং স্ক্রিপ্ট অনুযায়ী)
+# ৪. API কল (ইন্টিগ্রেটেড ওয়ার্কিং লজিক)
 # ───────────────────────────────────────
 def refresh_token(session, phone, password):
-    """লগইন থেকে SSO টোকেন নিয়ে সরাসরি ব্যবহার — GetPanel এক্সচেঞ্জ ফলব্যাক সহ।"""
     ts = int(time.time())
     payload = {
         "username": phone, "pwd": password, "phonetype": 1, "logintype": "mobile",
@@ -198,40 +197,20 @@ def refresh_token(session, phone, password):
         data = res.json()
         if data.get("code") != 0:
             return False, data.get("msg"), None, None, None
-
-        login_token = data["data"]["token"]
+        
+        token = data["data"]["token"]
         lottery_url = data["data"].get("lotteryLoginUrl", "")
-        sso_ticket = parse_qs(urlparse(lottery_url).query).get("Token", [""])[0]
-        if not sso_ticket:
-            return False, "No lottery token in URL", None, None, None
-
-        # অপশনাল: GetPanel এক্সচেঞ্জ — লম্বা এক্সপায়ারি টোকেন পাওয়ার জন্য
-        real_token = sso_ticket
-        try:
-            panel_rnd = random.randint(100000000000, 999999999999)
-            panel_ts = int(time.time())
-            panel_sig = generate_dynamic_sig({"gameCode": "WinGo_30S", "language": "en", "random": panel_rnd})
-            panel_url = f"{PANEL_URL}?gameCode=WinGo_30S&language=en&random={panel_rnd}&signature={panel_sig}&timestamp={panel_ts}"
-            panel_headers = {
-                "accept": "application/json, text/plain, */*",
-                "authorization": f"Bearer {sso_ticket}",
-                "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
-                "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
-            }
-            panel_res = session.get(panel_url, headers=panel_headers, timeout=10)
-            auth_header = panel_res.headers.get('authorization', '')
-            if auth_header.startswith('Bearer '):
-                real_token = auth_header[7:]
-        except Exception:
-            pass
-
-        expiry = decode_jwt_expiry(real_token)
-        if expiry == 0:
-            expiry = decode_jwt_expiry(login_token) or (int(time.time()) + 1800)
-
-        jwt_data = decode_jwt(login_token)
+        lottery_token = parse_qs(urlparse(lottery_url).query).get("Token", [""])[0]
+        
+        jwt_data = decode_jwt(token)
         real_uid = jwt_data.get("UserId", "Unknown")
-        return True, "Success", real_token, expiry, real_uid
+        expiry = decode_jwt_expiry(token)
+        
+        # টোকেনের মেয়াদ না থাকলে ডিফল্ট ২ ঘন্টা সেট করা হচ্ছে
+        if expiry == 0:
+            expiry = int(time.time()) + 7200
+            
+        return True, "Success", lottery_token, expiry, real_uid
     except Exception as e:
         return False, str(e), None, None, None
 
@@ -276,7 +255,6 @@ def fetch_game_balance(session, real_token):
     return 0.00
 
 def place_bet(session, real_token, issue_number, amount, choice):
-    """ওয়ার্কিং স্ক্রিপ্ট অনুযায়ী json= ব্যবহার করে বেট পাঠানো হচ্ছে।"""
     try:
         bet_content = f"BigSmall_{choice}"
         c_ts = int(time.time())
@@ -860,4 +838,190 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             "<b>╚════════════════════════╝</b>\n"
             f"<b>☎️ 𝗡𝘂𝗺𝗯𝗲𝗿 : {bnum(text)}</b>\n\n"
             "<b>🔑 𝗡𝗼𝘄 𝗲𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗽𝗮𝘀𝘀𝘄𝗼𝗿𝗱:</b>\n"
-            "<b>𝗬𝗼𝘂𝗿 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝘄𝗶𝗹𝗹 𝗯𝗲 𝗱𝗲𝗹𝗲𝘁𝗲𝗱 𝗶
+            "<b>𝗬𝗼𝘂𝗿 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝘄𝗶𝗹𝗹 𝗯𝗲 𝗱𝗲𝗹𝗲𝘁𝗲𝗱 𝗶𝗺𝗺𝗲𝗱𝗶𝗮𝘁𝗲𝗹𝘆 𝗳𝗼𝗿 𝘀𝗲𝗰𝘂𝗿𝗶𝘁𝘆.</b>",
+            parse_mode="HTML"
+        )
+        return
+
+    if state.get("awaiting") == "password":
+        state["temp_password"] = text
+        state["awaiting"] = None
+        try: await update.message.delete()
+        except: pass
+
+        status_msg = await ctx.bot.send_message(chat_id=uid, text="<b>🔄 𝗖𝗢𝗡𝗡𝗘𝗖𝗧𝗜𝗡𝗚 𝗧𝗢 𝗦𝗜𝗧𝗘...\n[░░░░░░░░░░] 0%</b>", parse_mode="HTML")
+        success, msg, real_token, expiry, real_uid = await asyncio.to_thread(refresh_token, state["session"], state["temp_phone"], state["temp_password"])
+        
+        if success:
+            state["lottery_token"] = real_token
+            state["token_expiry_time"] = expiry
+            state["real_uid"] = real_uid
+            if state["temp_phone"] not in state["accounts"]:
+                state["accounts"].append(state["temp_phone"])
+            balance = await asyncio.to_thread(fetch_game_balance, state["session"], real_token)
+            state["balance"] = balance
+            
+            await status_msg.delete()
+            masked_phone = "****" + bnum(state["temp_phone"][-4:])
+            display_uid = fmt_uid(real_uid)
+            
+            dashboard_msg = (
+                "<b>╔═══════════════════════╗</b>\n"
+                "<b>║  🎉 𝗟𝗢𝗚𝗜𝗡 𝗦𝗨𝗖𝗖𝗘𝗦𝗦𝗙𝗨𝗟 ✅ ║</b>\n"
+                "<b>╚═══════════════════════╝</b>\n"
+                "\n"
+                "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+                "<b>☎️ 𝗣𝗵𝗼𝗻𝗲 𝗡𝘂𝗺𝗯𝗲𝗿</b>\n"
+                f"<b>{masked_phone}</b>\n"
+                "\n"
+                "<b>👤 𝗔𝗰𝗰𝗼𝘂𝗻𝘁 𝗨𝗜𝗗</b>\n"
+                f"<b>{bnum(display_uid)}</b>\n"
+                "\n"
+                "<b>💰 𝗔𝗰𝗰𝗼𝘂𝗻𝘁 𝗕𝗮𝗹𝗮𝗻𝗰𝗲</b>\n"
+                f"<b>৳ {bnum(f'{balance:.2f}')}</b>\n"
+                "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+                "\n"
+                "<b>🧠 𝗔𝗻𝗮𝗹𝘆𝘀𝗶𝘀 𝗘𝗻𝗴𝗶𝗻𝗲:  𝗥𝗘𝗔𝗗𝗬</b>\n"
+                "<b>🚀 𝗔𝘂𝘁𝗼𝗧𝗿𝗮𝗱𝗲 𝗦𝘆𝘀𝘁𝗲𝗺: 𝗥𝗘𝗔𝗗𝗬</b>\n"
+                "\n"
+                "<b>👇 𝗣𝗿𝗲𝘀𝘀 𝗦𝗧𝗔𝗥𝗧 𝗬𝗢𝗨𝗥 𝗧𝗔𝗥𝗚𝗘𝗧 𝘁𝗼 𝗯𝗲𝗴𝗶𝗻</b>"
+            )
+            reply_keyboard = [[KeyboardButton("🚀 𝗦𝗧𝗔𝗥𝗧 𝗬𝗢𝗨𝗥 𝗧𝗔𝗥𝗚𝗘𝗧")], [KeyboardButton("🛑 𝗦𝗧𝗢𝗣 𝗧𝗥𝗔𝗗𝗘"), KeyboardButton("🚪 𝗟𝗢𝗚𝗢𝗨𝗧")]]
+            await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True), parse_mode="HTML")
+        else:
+            await status_msg.delete()
+            await ctx.bot.send_message(chat_id=uid, text=f"<b>❌ 𝗟𝗢𝗚𝗜𝗡 𝗙𝗔𝗜𝗟𝗘𝗗\n𝗞𝗮𝗿𝗼𝗻: {msg}</b>", parse_mode="HTML")
+        return
+
+    if state.get("awaiting") == "target":
+        try:
+            target_amount = float(text)
+            if target_amount <= 0:
+                raise ValueError()
+            state["target"] = target_amount
+            balance = float(state.get('balance', 0.00))
+            stop_at = balance + target_amount
+            target_set_msg = (
+                "<b>╔════════════════════════╗</b>\n"
+                "<b>║   🎯 𝗧𝗔𝗥𝗚𝗘𝗧 𝗦𝗘𝗧 🎯    ║</b>\n"
+                "<b>╚════════════════════════╝</b>\n"
+                f"<b>💰 𝗕𝗮𝗹𝗮𝗻𝗰𝗲  : ৳ {bnum(f'{balance:.2f}')}</b>\n"
+                f"<b>🎯 𝗧𝗮𝗿𝗴𝗲𝘁   : ৳ {bnum(f'{target_amount:.2f}')} 𝗽𝗿𝗼𝗳𝗶𝘁</b>\n"
+                f"<b>🏦 𝗦𝘁𝗼𝗽 𝗔𝘁  : ৳ {bnum(f'{stop_at:.2f}')}</b>\n"
+                "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+                "<b>🚀 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗦𝗧𝗘𝗣 𝗖𝗢𝗨𝗡𝗧: 𝗛𝗼𝘄 𝗺𝗮𝗻𝘆 𝘀𝘁𝗲𝗽𝘀? (𝗲.𝗴. 𝟱)</b>"
+            )
+            state["awaiting"] = "steps"
+            await update.message.reply_text(target_set_msg, parse_mode="HTML")
+        except ValueError:
+            await update.message.reply_text("<b>❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗮𝗺𝗼𝘂𝗻𝘁. 𝗣𝗹𝗲𝗮𝘀𝗲 𝗲𝗻𝘁𝗲𝗿 𝗮 𝗽𝗼𝘀𝗶𝘁𝗶𝘃𝗲 𝗻𝘂𝗺𝗯𝗲𝗿 (𝗶𝗻 ৳).</b>", parse_mode="HTML")
+        return
+
+    if state.get("awaiting") == "steps":
+        try:
+            steps_n = int(text)
+            if steps_n < 1 or steps_n > 20:
+                raise ValueError()
+            state["steps"] = steps_n
+            state["step_amounts"] = []
+            state["current_step"] = 0
+            state["awaiting"] = "step_amount"
+            await update.message.reply_text(build_step_amounts_msg(steps_n), parse_mode="HTML")
+        except ValueError:
+            await update.message.reply_text("<b>❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱. 𝗘𝗻𝘁𝗲𝗿 𝗮 𝗻𝘂𝗺𝗯𝗲𝗿 𝗯𝗲𝘁𝘄𝗲𝗲𝗻 𝟭-𝟮𝟬.</b>", parse_mode="HTML")
+        return
+
+    if state.get("awaiting") == "step_amount":
+        try:
+            amt = float(text)
+            if amt <= 0:
+                raise ValueError()
+            state["step_amounts"].append(amt)
+            state["current_step"] += 1
+
+            if state["current_step"] < state["steps"]:
+                await update.message.reply_text(build_single_step_prompt(state["current_step"] + 1), parse_mode="HTML")
+            else:
+                state["awaiting"] = None
+                issue, phase = await asyncio.to_thread(get_panel_data, state["session"], state["lottery_token"])
+                cfg_msg = build_config_msg(
+                    state["balance"], state["target"], state["balance"] + state["target"],
+                    state["steps"], state["step_amounts"], issue
+                )
+                kb = [[InlineKeyboardButton("🚀 𝗦𝗧𝗔𝗥𝗧 𝗧𝗥𝗔𝗗𝗘", callback_data="start_trade")]]
+                await update.message.reply_text(cfg_msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode="HTML")
+        except ValueError:
+            await update.message.reply_text("<b>❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗮𝗺𝗼𝘂𝗻𝘁. 𝗘𝗻𝘁𝗲𝗿 𝗮 𝗽𝗼𝘀𝗶𝘁𝗶𝘃𝗲 𝗻𝘂𝗺𝗯𝗲𝗿.</b>", parse_mode="HTML")
+        return
+
+async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id
+    if not is_authorized(uid):
+        return
+    state = get_state(uid)
+
+    if query.data == "start_login":
+        state["awaiting"] = "phone"
+        await query.message.reply_text(
+            "<b>╔════════════════════════╗</b>\n"
+            "<b>║   📱 𝗣𝗛𝗢𝗡𝗘 𝗡𝗨𝗠𝗕𝗘𝗥   ║</b>\n"
+            "<b>╚════════════════════════╝</b>\n\n"
+            "<b>📞 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗽𝗵𝗼𝗻𝗲 𝗻𝘂𝗺𝗯𝗲𝗿 (𝘄𝗶𝘁𝗵 𝗰𝗼𝘂𝗻𝘁𝗿𝘆 𝗰𝗼𝗱𝗲):</b>\n"
+            "<b>𝗘𝘅𝗮𝗺𝗽𝗹𝗲: 8801XXXXXXXXX</b>",
+            parse_mode="HTML"
+        )
+        return
+
+    if query.data == "start_trade":
+        if state.get("trade_running"):
+            await query.message.reply_text("<b>⚠️ 𝗧𝗿𝗮𝗱𝗲 𝗮𝗹𝗿𝗲𝗮𝗱𝘆 𝗿𝘂𝗻𝗻𝗶𝗻𝗴.</b>", parse_mode="HTML")
+            return
+        if not state.get("lottery_token") or not state.get("step_amounts"):
+            await query.message.reply_text("<b>❌ 𝗦𝗲𝘁𝘂𝗽 𝗶𝗻𝗰𝗼𝗺𝗽𝗹𝗲𝘁𝗲. 𝗣𝗹𝗲𝗮𝘀𝗲 /start 𝗮𝗴𝗮𝗶𝗻.</b>", parse_mode="HTML")
+            return
+        state["trade_running"] = True
+        state["auto_trade_shown"] = False
+        state["prediction_shown"] = False
+        state["fail_retry_shown"] = False
+        state["last_betted_issue"] = None
+        task = asyncio.create_task(trade_worker(ctx.bot, uid))
+        state["trade_task"] = task
+        await query.message.reply_text("<b>🚀 𝗧𝗥𝗔𝗗𝗘 𝗦𝗧𝗔𝗥𝗧𝗘𝗗! 🎬</b>", parse_mode="HTML")
+        return
+
+# ───────────────────────────────────────
+# ৮. Render Keep-Alive
+# ───────────────────────────────────────
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running perfectly!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.start()
+
+# ───────────────────────────────────────
+# ৯. Main
+# ───────────────────────────────────────
+def main():
+    keep_alive() 
+    
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", cmd_start))
+    application.add_handler(CommandHandler("getid", cmd_getid))
+    application.add_handler(CallbackQueryHandler(callback_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    
+    logger.info("🤖 Bot is starting...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+
+if __name__ == "__main__":
+    main()
