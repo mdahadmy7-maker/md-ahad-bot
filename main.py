@@ -12,7 +12,7 @@ import requests
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 
-# Render Keep-Alive এর জন্য (আপনার ফাইলে এটি মিসিং ছিল)
+# Render Keep-Alive এর জন্য
 from flask import Flask
 from threading import Thread
 
@@ -145,7 +145,7 @@ def get_pattern_prediction(state, issue):
     return PATTERN_PREDICTION[(state["pattern_index"] - 1) % len(PATTERN_PREDICTION)]
 
 # ───────────────────────────────────────
-# ৩. API কল (লগইন এবং টোকেন ফিক্স করা হয়েছে)
+# ৩. API কল
 # ───────────────────────────────────────
 def refresh_token(session, phone, password):
     ts = int(time.time())
@@ -176,7 +176,6 @@ def refresh_token(session, phone, password):
         panel_sig = generate_dynamic_sig({"gameCode": "WinGo_30S", "language": "en", "random": panel_rnd})
         panel_url = f"{PANEL_URL}?gameCode=WinGo_30S&language=en&random={panel_rnd}&signature={panel_sig}&timestamp={panel_ts}"
         
-        # 🟢 FIX 1: origin এবং referer এখানেও dkwin9.com করা হলো
         panel_headers = {
             "accept": "application/json, text/plain, */*",
             "authorization": f"Bearer {sso_ticket}",
@@ -185,7 +184,6 @@ def refresh_token(session, phone, password):
         }
         panel_res = session.get(panel_url, headers=panel_headers, timeout=10)
         
-        # 🟢 FIX 2: হেডারের পাশাপাশি JSON বডি থেকেও টোকেন খোঁজা হবে
         auth_header = panel_res.headers.get('authorization', '')
         if auth_header.startswith('Bearer '):
             real_token = auth_header[7:]
@@ -292,7 +290,7 @@ def fetch_result(session, issue_number):
     return None
 
 # ───────────────────────────────────────
-# ৪. মেসেজ বিল্ডার (আপনার আগের কোডের মতোই)
+# ৪. মেসেজ বিল্ডার
 # ───────────────────────────────────────
 def build_step_amounts_msg(steps):
     return f"<b>╔════════════════════════╗</b>\n<b>║   💵 𝗦𝗧𝗘𝗣 𝗔𝗠𝗢𝗨𝗡𝗧𝗦 💵   ║</b>\n<b>╚════════════════════════╝</b>\n\n<b>𝗬𝗼𝘂 𝗰𝗵𝗼𝘀𝗲 {bnum(steps)} 𝘀𝘁𝗲𝗽𝘀.</b>\n\n<b>💵 𝗦𝘁𝗲𝗽 𝟭 — 𝗯𝗲𝘁 𝗮𝗺𝗼𝘂𝗻𝘁? (𝗶𝗻 ৳)</b>"
@@ -339,7 +337,7 @@ def build_target_reached_msg(start_balance, final_balance, profit, trades, wins,
     return f"<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n<b>🎯 𝗧𝗔𝗥𝗚𝗘𝗧 𝗥𝗘𝗔𝗖𝗛𝗘𝗗 🎉</b>\n<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n<b>💰 𝗦𝘁𝗮𝗿𝘁 𝗕𝗮𝗹𝗮𝗻𝗰𝗲 : ৳ {bnum(f'{start_balance:.2f}')}</b>\n<b>💳 𝗙𝗶𝗻𝗮𝗹 𝗕𝗮𝗹𝗮𝗻𝗰𝗲 : ৳ {bnum(f'{final_balance:.2f}')}</b>\n<b>💹 𝗣𝗿𝗼𝗳𝗶𝘁 𝗠𝗮𝗱𝗲 : +৳ {bnum(f'{profit:.2f}')}</b>\n<b>📊 𝗧𝗿𝗮𝗱𝗲𝘀 : {bnum(trades)} | 🟢 𝗪𝗶𝗻 : {bnum(wins)} | 🔴 𝗟𝗼𝘀𝘀 : {bnum(losses)}</b>\n<b>🏆 𝗪𝗶𝗻 𝗥𝗮𝘁𝗲 : {bnum(f'{rate:.1f}')}%</b>\n<b>✅ 𝗔𝗰𝗰𝗼𝘂𝗻𝘁 𝗮𝘂𝘁𝗼-𝗹𝗼𝗴𝗴𝗲𝗱 𝗼𝘂𝘁.</b>\n<b>👇 𝗧𝘆𝗽𝗲 /𝘀𝘁𝗮𝗿𝘁 𝘁𝗼 𝗯𝗲𝗴𝗶𝗻 𝗮𝗴𝗮𝗶𝗻.</b>"
 
 # ───────────────────────────────────────
-# ৫. ট্রেড ওয়ার্কার (Smart Wait System)
+# ৫. ট্রেড ওয়ার্কার
 # ───────────────────────────────────────
 async def trade_worker(bot, uid):
     state = get_state(uid)
@@ -542,7 +540,9 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if text in ("🚀 𝗦𝗧𝗔𝗥𝗧 𝗬𝗢𝗨𝗥 𝗧𝗔𝗥𝗚𝗘𝗧", "🚀 START YOUR TARGET"):
         state["awaiting"] = "target"
-        await update.message.reply_text(f"<b>💰 𝗬𝗢𝗨𝗥 𝗕𝗔𝗟𝗔𝗡𝗖𝗘: ৳ {bnum(f'{float(state.get(\"balance\", 0.00)):.2f}')}</b>\n\n<b>🎯 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗧𝗔𝗥𝗚𝗘𝗧 𝗽𝗿𝗼𝗳𝗶𝘁 𝗮𝗺𝗼𝘂𝗻𝘁:</b>", parse_mode="HTML")
+        # 🟢 সিনট্যাক্স এরর ফিক্স করা হয়েছে এখানে
+        bal_val = float(state.get('balance', 0.00))
+        await update.message.reply_text(f"<b>💰 𝗬𝗢𝗨𝗥 𝗕𝗔𝗟𝗔𝗡𝗖𝗘: ৳ {bnum(f'{bal_val:.2f}')}</b>\n\n<b>🎯 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗧𝗔𝗥𝗚𝗘𝗧 𝗽𝗿𝗼𝗳𝗶𝘁 𝗮𝗺𝗼𝘂𝗻𝘁:</b>", parse_mode="HTML")
         return
 
     if state.get("awaiting") == "target":
@@ -646,15 +646,13 @@ def keep_alive():
 # ───────────────────────────────────────
 def main():
     if not BOT_TOKEN or ":" not in BOT_TOKEN: return
-    keep_alive() # Render এ সচল রাখার জন্য
+    keep_alive() 
     app = Application.builder().token(BOT_TOKEN).build()
     app.add_handler(CommandHandler("getid", cmd_getid))
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CallbackQueryHandler(callback_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     print("🤖 Bot started successfully...")
-    
-    # 🟢 409 Conflict ফিক্স
     app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 if __name__ == "__main__":
