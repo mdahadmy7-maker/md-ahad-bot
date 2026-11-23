@@ -12,9 +12,14 @@ import requests
 from telegram import Update, ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, ContextTypes, filters, CallbackQueryHandler
 
+# Render Keep-Alive এর জন্য
+from flask import Flask
+from threading import Thread
+
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন এবং কঠোর সিকিউরিটি
 # ═══════════════════════════════════════════
+# Render-এ Environment Variable থেকে টোকেন নিবে, না থাকলে ডিফল্টটি ব্যবহার করবে
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9032921988:AAF_Za5BVO0urlUpMMtngU6kBlca1P-uhPs")
 
 # 🛡️ কঠোর সিকিউরিটি (Anti-Hack System)
@@ -29,6 +34,8 @@ LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 PANEL_URL = "https://api.ar-lottery01.com/api/Energy/GetPanel"
 BET_URL = "https://api.ar-lottery01.com/api/Lottery/WinGoBet"
 HISTORY_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
+# ✅ নতুন WIN/LOSS API
+WIN_LOSS_URL = "https://api.ar-lottery01.com/api/Lottery/GetWinLossResult"
 DEVICE_ID = "4aa593880f5c671907b460252b022635"
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -46,7 +53,6 @@ def fmt_uid(uid):
         return s[-7:]
     return s
 
-# ✅ স্টেপ শেষের মেসেজ
 STEP_EXHAUSTED_MSG = (
     "<b>╔════════════════════════════╗</b>\n"
     "<b>║    ✨ 🔔 নতুন আপডেট! 🔔 ✨     ║</b>\n"
@@ -83,7 +89,6 @@ def get_state(uid):
             "prediction_shown": False, "trade_task": None,
             "last3": [], "reverseMode": False, "reverseCount": 0, "reverseTarget": 1,
             "streakCount": 0, "streakType": None, "streakReversePending": False, "displayedResult": "--",
-            # 🆕 নতুন ফ্ল্যাগ
             "auto_trade_shown": False,
             "fail_retry_shown": False,
             "session": requests.Session()
@@ -129,7 +134,7 @@ def build_timer_bar(seconds):
     return f"[{bar}] {bnum(seconds)}𝘀"
 
 # ───────────────────────────────────────
-# ৩. HTML থেকে নেওয়া প্রেডিকশন লজিক
+# ৩. প্রেডিকশন লজিক
 # ───────────────────────────────────────
 def update_prediction_logic(state, current_result_size):
     current_result_size = current_result_size.upper()
@@ -303,12 +308,54 @@ def place_bet(session, real_token, issue_number, amount, choice):
     except Exception as e:
         return 500, str(e)
 
+# ✅ নতুন WIN/LOSS চেক ফাংশন
+def fetch_win_loss(session, real_token, issue_number):
+    try:
+        rnd = random.randint(100000000000, 999999999999)
+        ts = int(time.time())
+        sig = generate_dynamic_sig({
+            "issueNumber": str(issue_number),
+            "language": "en",
+            "random": rnd
+        })
+        url = (
+            f"{WIN_LOSS_URL}?issueNumber={issue_number}"
+            f"&language=en&random={rnd}&signature={sig}&timestamp={ts}"
+        )
+        headers = {
+            "accept": "application/json, text/plain, */*",
+            "authorization": f"Bearer {real_token}",
+            "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
+            "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+        }
+        res = session.get(url, headers=headers, timeout=15)
+        data = res.json()
+        if data.get("code") == 0:
+            d = data.get("data") or {}
+            if "status" not in d:
+                return None, 0.0
+            status = bool(d.get("status"))
+            win_amt = float(d.get("winAmount") or 0)
+            return status, win_amt
+    except Exception as e:
+        logger.error(f"fetch_win_loss error: {e}")
+    return None, 0.0
+
+# ফলব্যাক: History API
 def fetch_result(session, issue_number):
     try:
         res = session.get(HISTORY_URL, timeout=10)
         data = res.json()
         for item in data.get('data', {}).get('list', []):
             if str(item.get('issueNumber')) == str(issue_number):
+                premium = str(item.get('premium', '')).upper()
+                if premium in ('B', 'BIG'):
+                    return "Big"
+                elif premium in ('S', 'SMALL'):
+                    return "Small"
+                if 'sum' in item:
+                    total = int(item['sum'])
+                    return "Big" if total >= 23 else "Small"
                 nums = item.get('number', '')
                 if nums:
                     total = sum(int(x) for x in str(nums).split(','))
@@ -519,7 +566,7 @@ def build_target_reached_msg(start_balance, final_balance, profit, trades, wins,
     )
 
 # ───────────────────────────────────────
-# ৬. ট্রেড ওয়ার্কার (মূল ফিক্স এখানে)
+# ৬. ট্রেড ওয়ার্কার (Win/Loss API সহ)
 # ───────────────────────────────────────
 async def trade_worker(bot, uid):
     state = get_state(uid)
@@ -628,9 +675,11 @@ async def trade_worker(bot, uid):
             continue
 
         predicted = state.get("displayedResult", "--")
-        if predicted == "--":
+        if predicted == "--" or str(predicted).upper() not in ("BIG", "SMALL"):
             predicted = random.choice(["Big", "Small"])
-            state["displayedResult"] = predicted
+        else:
+            predicted = str(predicted).capitalize()
+        state["displayedResult"] = predicted
 
         # বাজি ধরার চেষ্টা
         status_code, res_text = await asyncio.to_thread(
@@ -649,42 +698,51 @@ async def trade_worker(bot, uid):
                 pass
 
         if bet_failed:
-            # ✅ প্রথম ফেইলে: অ্যানিমেশন + ২.৫ সেকেন্ড ওয়েট → রিট্রাই (একই ইস্যু)
             if not state.get("fail_retry_shown"):
                 state["fail_retry_shown"] = True
-                try:
-                    fail_msg = await bot.send_message(chat_id=uid, text=build_prediction_animation(75), parse_mode="HTML")
-                    await asyncio.sleep(2.5)
-                    await fail_msg.delete()
-                except Exception as e:
-                    logger.error(f"Error showing fail msg: {e}")
-                # last_betted_issue সেট করছি না → রিট্রাই হবে
+                await asyncio.sleep(1)
                 continue
             else:
-                # পরের ফেইলগুলো সাইলেন্ট → পরের পিরিয়ডে যাবে
                 state["last_betted_issue"] = issue
+                await asyncio.sleep(1)
                 continue
 
         state["last_betted_issue"] = issue
 
-        # ✅ NEW TRADE PLACED মেসেজ (predicted = যেটা ক্লিক করেছে)
+        # ✅ NEW TRADE PLACED
         await bot.send_message(
             chat_id=uid,
             text=build_new_trade_msg(issue, predicted, current_step + 1, amount, curr_bal),
             parse_mode="HTML"
         )
 
-        await asyncio.sleep(32)
-
-        result = None
-        for _ in range(10):
-            result = await asyncio.to_thread(fetch_result, session, issue)
-            if result is not None:
+        # ⏱️ পিরিয়ড শেষ হওয়ার জন্য অপেক্ষা (ইন্টারাপ্টিবল)
+        for _ in range(16):
+            if not state["trade_running"]:
                 break
-            await asyncio.sleep(3)
+            await asyncio.sleep(2)
+        if not state["trade_running"]:
+            break
 
-        if result is None:
-            continue 
+        # ✅ নতুন WIN/LOSS API দিয়ে রেজাল্ট চেক
+        won = None
+        win_amount = 0.0
+        for _ in range(15):
+            won, win_amount = await asyncio.to_thread(fetch_win_loss, session, token, issue)
+            if won is not None:
+                break
+            if not state["trade_running"]:
+                break
+            await asyncio.sleep(2)
+
+        # API ফেইল হলে ফলব্যাক: History API
+        if won is None:
+            hist_res = await asyncio.to_thread(fetch_result, session, issue)
+            if hist_res is not None:
+                actual_res_fb = hist_res.capitalize()
+                won = (actual_res_fb.lower() == predicted.lower())
+            else:
+                continue
 
         try:
             new_bal = await asyncio.to_thread(fetch_game_balance, session, token)
@@ -693,12 +751,8 @@ async def trade_worker(bot, uid):
 
         state["balance"] = new_bal
         total_trades += 1
-
-        actual_res = result.capitalize()
-        
-        next_pred = update_prediction_logic(state, actual_res.upper())
-        
-        won = (actual_res.lower() == predicted.lower())
+        actual_res = predicted if won else ("Small" if predicted.upper() == "BIG" else "Big")
+        update_prediction_logic(state, actual_res.upper())
 
         if won:
             wins += 1
@@ -712,6 +766,8 @@ async def trade_worker(bot, uid):
             next_step = current_step + 1
 
         pl = amount * 0.96 if won else -amount
+
+        # ✅ TRADE RESULT
         await bot.send_message(
             chat_id=uid,
             text=build_result_msg(issue, predicted, step_used, amount, won, pl, new_bal, wins, losses, next_step),
@@ -1019,10 +1075,33 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["trade_running"] = False
         await ctx.bot.send_message(chat_id=uid, text="<b>❌ 𝗧𝗥𝗔𝗗𝗘 𝗖𝗔𝗡𝗖𝗘𝗟𝗟𝗘𝗗</b>", parse_mode="HTML")
 
+# ───────────────────────────────────────
+# ৮. Render Keep-Alive (Web Service-এর জন্য)
+# ───────────────────────────────────────
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running perfectly!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.start()
+
+# ───────────────────────────────────────
+# ৯. Main
+# ───────────────────────────────────────
 def main():
     if not BOT_TOKEN or ":" not in BOT_TOKEN:
         print("❌ Error: BOT_TOKEN env variable সেট করা নেই! সঠিক token দিয়ে চালান।")
         return
+
+    # Render-এ ২৪/৭ সচল রাখার জন্য Flask সার্ভার চালু
+    keep_alive() 
 
     app = Application.builder().token(BOT_TOKEN).build()
     
@@ -1032,7 +1111,8 @@ def main():
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     
     print("🤖 Bot started successfully...")
-    app.run_polling()
+    # 409 Conflict এরর এড়াতে drop_pending_updates=True
+    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 if __name__ == "__main__":
     main()
