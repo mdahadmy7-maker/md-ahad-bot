@@ -19,7 +19,6 @@ from threading import Thread
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন এবং কঠোর সিকিউরিটি
 # ═══════════════════════════════════════════
-# Render-এ Environment Variable থেকে টোকেন নিবে, না থাকলে ডিফল্টটি ব্যবহার করবে
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "9032921988:AAF_Za5BVO0urlUpMMtngU6kBlca1P-uhPs")
 
 # 🛡️ কঠোর সিকিউরিটি (Anti-Hack System)
@@ -34,7 +33,6 @@ LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 PANEL_URL = "https://api.ar-lottery01.com/api/Energy/GetPanel"
 BET_URL = "https://api.ar-lottery01.com/api/Lottery/WinGoBet"
 HISTORY_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
-# ✅ নতুন WIN/LOSS API
 WIN_LOSS_URL = "https://api.ar-lottery01.com/api/Lottery/GetWinLossResult"
 DEVICE_ID = "4aa593880f5c671907b460252b022635"
 
@@ -196,7 +194,7 @@ def update_prediction_logic(state, current_result_size):
     return state["displayedResult"]
 
 # ───────────────────────────────────────
-# ৪. API কল
+# ৪. API কল (লগইন ফিক্স করা হয়েছে)
 # ───────────────────────────────────────
 def refresh_token(session, phone, password):
     ts = int(time.time())
@@ -216,29 +214,45 @@ def refresh_token(session, phone, password):
         res = session.post(LOGIN_URL, json=payload, headers=headers, timeout=15)
         data = res.json()
         if data.get("code") != 0:
-            return False, data.get("msg"), None, None, None
+            return False, data.get("msg", "Login failed"), None, None, None
+            
         lottery_url = data["data"].get("lotteryLoginUrl", "")
-        sso_ticket = parse_qs(urlparse(lottery_url).query).get("Token", [""])[0]
+        if not lottery_url:
+             return False, "No lottery URL found", None, None, None
+            
+        # রোবাস্ট টোকেন এক্সট্রাকশন (Token বা token)
+        query_params = parse_qs(urlparse(lottery_url).query)
+        sso_ticket = query_params.get("Token", [""])[0] or query_params.get("token", [""])[0]
+        
+        if not sso_ticket:
+             return False, "No SSO Ticket in URL", None, None, None
+
         panel_rnd = random.randint(100000000000, 999999999999)
         panel_ts = int(time.time())
         panel_sig = generate_dynamic_sig({"gameCode": "WinGo_30S", "language": "en", "random": panel_rnd})
         panel_url = f"{PANEL_URL}?gameCode=WinGo_30S&language=en&random={panel_rnd}&signature={panel_sig}&timestamp={panel_ts}"
+        
+        # ডোমেইন কনসিস্টেন্ট করা হয়েছে
         panel_headers = {
             "accept": "application/json, text/plain, */*",
             "authorization": f"Bearer {sso_ticket}",
-            "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
+            "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/",
             "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
         }
         panel_res = session.get(panel_url, headers=panel_headers, timeout=10)
         auth_header = panel_res.headers.get('authorization', '')
+        
         if auth_header.startswith('Bearer '):
             real_token = auth_header[7:]
             expiry = decode_jwt_expiry(real_token)
             real_uid = decode_jwt(real_token).get("UserId", "Unknown")
             return True, "Success", real_token, expiry, real_uid
         else:
-            return False, "No token in header", None, None, None
+            # যদি টোকেন না পাওয়া যায়, তবে Response টি লগে দেখানো হবে
+            logger.error(f"Panel Response Error: {panel_res.text}")
+            return False, "No token in header (Server rejected)", None, None, None
     except Exception as e:
+        logger.error(f"Login Exception: {e}")
         return False, str(e), None, None, None
 
 def get_panel_data(session, real_token):
@@ -249,7 +263,7 @@ def get_panel_data(session, real_token):
     headers = {
         "accept": "application/json, text/plain, */*",
         "authorization": f"Bearer {real_token}",
-        "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
+        "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
@@ -269,7 +283,7 @@ def fetch_game_balance(session, real_token):
     bal_headers = {
         "accept": "application/json, text/plain, */*",
         "authorization": f"Bearer {real_token}",
-        "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
+        "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
@@ -300,7 +314,7 @@ def place_bet(session, real_token, issue_number, amount, choice):
             "accept": "application/json, text/plain, */*",
             "authorization": f"Bearer {real_token}",
             "content-type": "application/json",
-            "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
+            "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/",
             "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
         }
         bet_res = session.post(BET_URL, data=json_string, headers=bet_headers, timeout=15)
@@ -308,7 +322,7 @@ def place_bet(session, real_token, issue_number, amount, choice):
     except Exception as e:
         return 500, str(e)
 
-# ✅ নতুন WIN/LOSS চেক ফাংশন
+# ✅ নির্ভুল WIN/LOSS চেক ফাংশন (main.py থেকে নেওয়া)
 def fetch_win_loss(session, real_token, issue_number):
     try:
         rnd = random.randint(100000000000, 999999999999)
@@ -325,7 +339,7 @@ def fetch_win_loss(session, real_token, issue_number):
         headers = {
             "accept": "application/json, text/plain, */*",
             "authorization": f"Bearer {real_token}",
-            "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
+            "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/",
             "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
         }
         res = session.get(url, headers=headers, timeout=15)
@@ -716,7 +730,7 @@ async def trade_worker(bot, uid):
             parse_mode="HTML"
         )
 
-        # ⏱️ পিরিয়ড শেষ হওয়ার জন্য অপেক্ষা (ইন্টারাপ্টিবল)
+        # ⏱️ পিরিয়ড শেষ হওয়ার জন্য অপেক্ষা
         for _ in range(16):
             if not state["trade_running"]:
                 break
