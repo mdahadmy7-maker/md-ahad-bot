@@ -19,11 +19,11 @@ from threading import Thread
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন এবং কঠোর সিকিউরিটি
 # ═══════════════════════════════════════════
-BOT_TOKEN = os.environ.get("BOT_TOKEN") 
+BOT_TOKEN = os.environ.get("BOT_TOKEN")
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN environment variable is missing! Please set it in Render.")
 
-AUTHORIZED_USERS = [7083673844] # আপনার টেলিগ্রাম আইডি
+AUTHORIZED_USERS = [7083673844]
 
 def is_authorized(uid: int) -> bool:
     if not AUTHORIZED_USERS:
@@ -33,6 +33,7 @@ def is_authorized(uid: int) -> bool:
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 PANEL_URL = "https://api.ar-lottery01.com/api/Energy/GetPanel"
 BET_URL = "https://api.ar-lottery01.com/api/Lottery/WinGoBet"
+BALANCE_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
 HISTORY_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 WIN_LOSS_URL = "https://api.ar-lottery01.com/api/Lottery/GetWinLossResult"
 DEVICE_ID = "4aa593880f5c671907b460252b022635"
@@ -91,20 +92,9 @@ def generate_login_sig(payload_dict):
     sorted_dict = {k: payload_dict[k] for k in sorted(payload_dict.keys()) if payload_dict[k] != "" and payload_dict[k] is not None}
     return hashlib.md5(json.dumps(sorted_dict, separators=(',', ':')).encode('utf-8')).hexdigest().upper()
 
-def generate_balance_sig(random_val, timestamp_val):
-    payload = {"language": "en", "random": int(random_val)}
-    sorted_dict = {k: payload[k] for k in sorted(payload.keys())}
-    json_string = json.dumps(sorted_dict, separators=(',', ':'))
-    return hashlib.md5(json_string.encode('utf-8')).hexdigest().upper()
-
-def generate_bet_sig(gameCode, issueNumber, amount, betMultiple, betContent, language, rnd):
-    payload_to_sign = {
-        "gameCode": gameCode, "issueNumber": str(issueNumber), "amount": int(amount),
-        "betMultiple": int(betMultiple), "betContent": betContent, "language": language, "random": int(rnd)
-    }
-    sorted_dict = {k: payload_to_sign[k] for k in sorted(payload_to_sign.keys())}
-    json_string = json.dumps(sorted_dict, separators=(',', ':'))
-    return hashlib.md5(json_string.encode('utf-8')).hexdigest().upper()
+def generate_dynamic_sig(payload_dict):
+    sorted_dict = {k: payload_dict[k] for k in sorted(payload_dict.keys())}
+    return hashlib.md5(json.dumps(sorted_dict, separators=(',', ':')).encode('utf-8')).hexdigest().upper()
 
 def decode_jwt_expiry(token):
     try:
@@ -207,127 +197,157 @@ def refresh_token(session, phone, password):
         res = session.post(LOGIN_URL, json=payload, headers=headers, timeout=15)
         data = res.json()
         if data.get("code") != 0:
-            return False, data.get("msg"), None, None, None, 0.0
-        
-        token = data["data"]["token"]
+            return False, data.get("msg"), None, None, None
         lottery_url = data["data"].get("lotteryLoginUrl", "")
-        lottery_token = parse_qs(urlparse(lottery_url).query).get("Token", [""])[0]
-        
-        jwt_data = decode_jwt(token)
-        real_uid = jwt_data.get("UserId", "Unknown")
-        expiry = decode_jwt_expiry(token)
-        login_balance = float(data["data"].get("balance", 0.0))
-
-        if expiry == 0:
-            expiry = int(time.time()) + 7200
-            
-        return True, "Success", lottery_token, expiry, real_uid, login_balance
+        sso_ticket = parse_qs(urlparse(lottery_url).query).get("Token", [""])[0]
+        panel_rnd = random.randint(100000000000, 999999999999)
+        panel_ts = int(time.time())
+        panel_sig = generate_dynamic_sig({"gameCode": "WinGo_30S", "language": "en", "random": panel_rnd})
+        panel_url = f"{PANEL_URL}?gameCode=WinGo_30S&language=en&random={panel_rnd}&signature={panel_sig}&timestamp={panel_ts}"
+        panel_headers = {
+            "accept": "application/json, text/plain, */*",
+            "authorization": f"Bearer {sso_ticket}",
+            "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
+            "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+        }
+        panel_res = session.get(panel_url, headers=panel_headers, timeout=10)
+        auth_header = panel_res.headers.get('authorization', '')
+        if auth_header.startswith('Bearer '):
+            real_token = auth_header[7:]
+            expiry = decode_jwt_expiry(real_token)
+            real_uid = decode_jwt(real_token).get("UserId", "Unknown")
+            return True, "Success", real_token, expiry, real_uid
+        else:
+            return False, "No token in header", None, None, None
     except Exception as e:
-        logger.error(f"Login Exception: {e}")
-        return False, str(e), None, None, None, 0.0
+        return False, str(e), None, None, None
 
 def get_panel_data(session, real_token):
     panel_rnd = random.randint(100000000000, 999999999999)
     panel_ts = int(time.time())
-    payload = {"gameCode": "WinGo_30S", "language": "en", "random": int(panel_rnd)}
-    sorted_dict = {k: payload[k] for k in sorted(payload.keys())}
-    panel_sig = hashlib.md5(json.dumps(sorted_dict, separators=(',', ':')).encode('utf-8')).hexdigest().upper()
-    
+    panel_sig = generate_dynamic_sig({"gameCode": "WinGo_30S", "language": "en", "random": panel_rnd})
     panel_url = f"{PANEL_URL}?gameCode=WinGo_30S&language=en&random={panel_rnd}&signature={panel_sig}&timestamp={panel_ts}"
     headers = {
         "accept": "application/json, text/plain, */*",
-        "accept-language": "en-US,en;q=0.9",
         "authorization": f"Bearer {real_token}",
         "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
-        res = session.get(panel_url, headers=headers, timeout=5)
+        res = session.get(panel_url, headers=headers, timeout=10)
         data = res.json()
         if data.get("code") == 0:
             return data["data"]["currentIssueNumber"], data["data"]["phase"]
     except:
         pass
-        
-    try:
-        res = session.get(HISTORY_URL, timeout=5)
-        data = res.json()
-        if data.get("code") == 0:
-            latest_period = int(data['data']['list'][0]['issueNumber'])
-            next_issue = str(latest_period + 1)
-            return next_issue, "Betting"
-    except:
-        pass
-        
     return None, None
 
-def fetch_game_balance(session, real_token):
-    if not real_token:
-        logger.error("Balance fetch failed: Token is empty")
-        return None
+# ═══════════════════════════════════════════
+# 🔧 FIXED: fetch_game_balance (মূল সমাধান)
+# ═══════════════════════════════════════════
+def fetch_game_balance(session, real_token, retries=3):
+    """
+    ব্যালেন্স আনার শক্তিশালী ফাংশন:
+      - code int বা string দুটোই হ্যান্ডেল করে
+      - data dict/int/float/string সব ফরম্যাট চেষ্টা করে
+      - ব্যর্থ হলে ৩ বার retry করে
+      - বিস্তারিত logging রাখে
+    """
+    last_err = None
+    for attempt in range(1, retries + 1):
+        try:
+            bal_rnd = random.randint(100000000000, 999999999999)
+            bal_ts = int(time.time())
+            bal_sig = generate_dynamic_sig({"language": "en", "random": bal_rnd})
+            bal_url = (
+                f"{BALANCE_URL}?language=en&random={bal_rnd}"
+                f"&signature={bal_sig}&timestamp={bal_ts}"
+            )
+            bal_headers = {
+                "accept": "application/json, text/plain, */*",
+                "authorization": f"Bearer {real_token}",
+                "origin": "https://dkwin8.com",
+                "referer": "https://dkwin8.com/",
+                "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+            }
+            bal_res = session.get(bal_url, headers=bal_headers, timeout=15)
+            body_preview = (bal_res.text or "")[:250]
+            logger.info(f"[BALANCE] attempt={attempt} status={bal_res.status_code} body={body_preview}")
 
-    bal_rnd = random.randint(100000000000, 999999999999)
-    bal_ts = int(time.time())
-    bal_sig = generate_balance_sig(bal_rnd, bal_ts)
-    bal_url = f"https://api.ar-lottery01.com/api/Lottery/GetBalance?language=en&random={bal_rnd}&signature={bal_sig}&timestamp={bal_ts}"
-    
-    bal_headers = {
-        "accept": "application/json, text/plain, */*",
-        "authorization": f"Bearer {real_token}",
-        "origin": "https://dkwin8.com",  # স্ট্যান্ডঅ্যালোন স্ক্রিপ্টের মতো আগের অবস্থায় ফেরত
-        "referer": "https://dkwin8.com/",
-        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
-    }
-    
-    try:
-        bal_res = session.get(bal_url, headers=bal_headers, timeout=15)
-        # রেসপন্স টেক্সট প্রিন্ট করা হচ্ছে যাতে Render Logs-এ দেখা যায়
-        logger.info(f"Balance API Status: {bal_res.status_code} | Response: {bal_res.text[:200]}")
-        
-        bal_data = bal_res.json()
-        if bal_data.get("code") == 0:
-            data_obj = bal_data.get('data')
-            if data_obj and 'balance' in data_obj:
-                return float(data_obj['balance'])
+            try:
+                bal_data = bal_res.json()
+            except Exception:
+                last_err = f"JSON parse failed: {body_preview}"
+                logger.warning(f"[BALANCE] {last_err}")
+                if attempt < retries: time.sleep(1)
+                continue
+
+            code_raw = bal_data.get("code")
+            # code == 0 OR "0"
+            if code_raw == 0 or str(code_raw) == "0":
+                data = bal_data.get("data")
+                # case 1: dict
+                if isinstance(data, dict):
+                    for key in ("balance", "Balance", "money", "amount", "userBalance", "availableBalance"):
+                        if key in data and data[key] is not None:
+                            try:
+                                val = float(data[key])
+                                logger.info(f"[BALANCE] OK (dict) → {val}")
+                                return val
+                            except (TypeError, ValueError):
+                                continue
+                # case 2: pure number
+                elif isinstance(data, (int, float)):
+                    val = float(data)
+                    logger.info(f"[BALANCE] OK (number) → {val}")
+                    return val
+                # case 3: string number
+                elif isinstance(data, str):
+                    try:
+                        val = float(data)
+                        logger.info(f"[BALANCE] OK (string) → {val}")
+                        return val
+                    except ValueError:
+                        pass
+                # unknown structure
+                last_err = f"Unknown data structure: {data}"
+                logger.warning(f"[BALANCE] {last_err}")
             else:
-                logger.error(f"Balance key missing in data: {bal_data}")
-                return None
-        else:
-            logger.error(f"Balance Fetch API Error Code: {bal_data}")
-            return None 
-    except Exception as e:
-        logger.error(f"Balance Fetch Exception: {e}")
-        return None
+                last_err = f"code={code_raw}, msg={bal_data.get('msg')}"
+                logger.warning(f"[BALANCE] API error: {last_err} | body={body_preview}")
+        except Exception as e:
+            last_err = str(e)
+            logger.error(f"[BALANCE] attempt={attempt} exception: {e}")
+
+        if attempt < retries:
+            time.sleep(1)
+
+    logger.error(f"[BALANCE] All {retries} attempts failed. Last error: {last_err}")
+    return 0.00
 
 def place_bet(session, real_token, issue_number, amount, choice):
     try:
         bet_content = f"BigSmall_{choice}"
         c_ts = int(time.time())
         c_rnd = random.randint(100000000000, 999999999999)
-        
-        sig = generate_bet_sig("WinGo_30S", issue_number, amount, 1, bet_content, "en", c_rnd)
-        
+        sig = generate_dynamic_sig({
+            "gameCode": "WinGo_30S", "issueNumber": str(issue_number), "amount": int(amount),
+            "betMultiple": 1, "betContent": bet_content, "language": "en", "random": int(c_rnd)
+        })
         bet_payload = {
             "gameCode": "WinGo_30S", "issueNumber": str(issue_number), "amount": int(amount),
             "betMultiple": 1, "betContent": bet_content, "language": "en",
             "random": c_rnd, "signature": sig, "timestamp": c_ts
         }
+        json_string = json.dumps(bet_payload, separators=(',', ':'))
         bet_headers = {
             "accept": "application/json, text/plain, */*",
-            "accept-language": "en-US,en;q=0.9",
             "authorization": f"Bearer {real_token}",
             "content-type": "application/json",
-            "origin": "https://dkwin8.com",
-            "referer": "https://dkwin8.com/",
-            "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
-            "sec-ch-ua-mobile": "?1",
-            "sec-ch-ua-platform": '"Android"',
-            "sec-fetch-dest": "empty",
-            "sec-fetch-mode": "cors",
-            "sec-fetch-site": "cross-site",
+            "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
             "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
         }
-        bet_res = session.post(BET_URL, json=bet_payload, headers=bet_headers, timeout=15)
+        bet_res = session.post(BET_URL, data=json_string, headers=bet_headers, timeout=15)
         return bet_res.status_code, bet_res.text
     except Exception as e:
         return 500, str(e)
@@ -336,18 +356,17 @@ def fetch_win_loss(session, real_token, issue_number):
     try:
         rnd = random.randint(100000000000, 999999999999)
         ts = int(time.time())
-        
-        payload_to_sign = {"issueNumber": str(issue_number), "language": "en", "random": int(rnd)}
-        sorted_dict = {k: payload_to_sign[k] for k in sorted(payload_to_sign.keys())}
-        sig = hashlib.md5(json.dumps(sorted_dict, separators=(',', ':')).encode('utf-8')).hexdigest().upper()
-
+        sig = generate_dynamic_sig({
+            "issueNumber": str(issue_number),
+            "language": "en",
+            "random": rnd
+        })
         url = (
             f"{WIN_LOSS_URL}?issueNumber={issue_number}"
             f"&language=en&random={rnd}&signature={sig}&timestamp={ts}"
         )
         headers = {
             "accept": "application/json, text/plain, */*",
-            "accept-language": "en-US,en;q=0.9",
             "authorization": f"Bearer {real_token}",
             "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
             "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
@@ -603,8 +622,6 @@ async def trade_worker(bot, uid):
     while state["trade_running"]:
         try:
             curr_bal = await asyncio.to_thread(fetch_game_balance, session, token)
-            if curr_bal is None:
-                curr_bal = state["balance"] 
         except:
             curr_bal = state["balance"]
 
@@ -619,7 +636,7 @@ async def trade_worker(bot, uid):
             break
 
         if not token or int(time.time()) >= (state["token_expiry_time"] - 10):
-            success, msg, new_token, expiry, _, _ = await asyncio.to_thread(refresh_token, session, state["temp_phone"], state["temp_password"])
+            success, msg, new_token, expiry, _ = await asyncio.to_thread(refresh_token, session, state["temp_phone"], state["temp_password"])
             if success:
                 token = new_token
                 state["lottery_token"] = new_token
@@ -629,12 +646,6 @@ async def trade_worker(bot, uid):
                 continue
 
         issue, phase = await asyncio.to_thread(get_panel_data, session, token)
-        
-        if not state.get("auto_trade_shown"):
-            state["auto_trade_shown"] = True
-            display_issue = issue if issue else "----"
-            await bot.send_message(chat_id=uid, text=build_auto_trade_msg(curr_bal, target, stop_at, len(steps), steps, display_issue), parse_mode="HTML")
-
         if not issue or phase != "Betting" or issue == state.get("last_betted_issue"):
             await asyncio.sleep(1)
             continue
@@ -654,6 +665,10 @@ async def trade_worker(bot, uid):
             await bot.send_message(chat_id=uid, text=f"<b>❌ 𝗜𝗻𝘀𝘂𝗳𝗳𝗶𝗰𝗶𝗲𝗻𝘁 𝗯𝗮𝗹𝗮𝗻𝗰𝗲!\n𝗡𝗲𝗲𝗱: ৳ {bnum(f'{amount:.2f}')}, 𝗛𝗮𝘃𝗲: ৳ {bnum(f'{curr_bal:.2f}')}.</b>", parse_mode="HTML")
             state["trade_running"] = False
             break
+
+        if not state.get("auto_trade_shown"):
+            state["auto_trade_shown"] = True
+            await bot.send_message(chat_id=uid, text=build_auto_trade_msg(curr_bal, target, stop_at, len(steps), steps, issue), parse_mode="HTML")
 
         if not state.get("prediction_shown"):
             state["prediction_shown"] = True
@@ -684,17 +699,6 @@ async def trade_worker(bot, uid):
         state["displayedResult"] = predicted
 
         status_code, res_text = await asyncio.to_thread(place_bet, session, token, issue, amount, predicted)
-        
-        if status_code == 401:
-            logger.warning("401 Unauthorized detected during bet. Refreshing token...")
-            success, msg, new_token, expiry, _, _ = await asyncio.to_thread(refresh_token, session, state["temp_phone"], state["temp_password"])
-            if success:
-                token = new_token
-                state["lottery_token"] = new_token
-                state["token_expiry_time"] = expiry
-                await asyncio.sleep(1)
-                status_code, res_text = await asyncio.to_thread(place_bet, session, token, issue, amount, predicted)
-
         bet_failed = False
         if status_code != 200:
             bet_failed = True
@@ -746,8 +750,6 @@ async def trade_worker(bot, uid):
 
         try:
             new_bal = await asyncio.to_thread(fetch_game_balance, session, token)
-            if new_bal is None:
-                new_bal = curr_bal
         except:
             new_bal = curr_bal
 
@@ -792,45 +794,6 @@ async def cmd_getid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         f"<b>এরপর বট রিস্টার্ট করলে অন্য কেউ আপনার বট ব্যবহার করতে পারবে না।</b>",
         parse_mode="HTML"
     )
-
-# 👇 নতুন ডিবাগ কমান্ড যা দিয়ে সার্ভার রেসপন্স চেক করা যাবে
-async def cmd_checkbal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
-    uid = update.effective_user.id
-    state = get_state(uid)
-    token = state.get("lottery_token")
-    
-    if not token:
-        await update.message.reply_text("❌ আপনি লগইন করেননি। আগে /start দিয়ে লগইন করুন।")
-        return
-        
-    await update.message.reply_text("🔄 চেক করা হচ্ছে... গেম সার্ভারে রিকোয়েস্ট পাঠানো হচ্ছে।")
-    
-    bal_rnd = random.randint(100000000000, 999999999999)
-    bal_ts = int(time.time())
-    bal_sig = generate_balance_sig(bal_rnd, bal_ts)
-    bal_url = f"https://api.ar-lottery01.com/api/Lottery/GetBalance?language=en&random={bal_rnd}&signature={bal_sig}&timestamp={bal_ts}"
-    
-    bal_headers = {
-        "accept": "application/json, text/plain, */*",
-        "authorization": f"Bearer {token}",
-        "origin": "https://dkwin8.com",
-        "referer": "https://dkwin8.com/",
-        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
-    }
-    
-    try:
-        res = await asyncio.to_thread(state["session"].get, bal_url, headers=bal_headers, timeout=15)
-        if res.status_code == 200:
-            try:
-                res.json()
-                await update.message.reply_text(f"✅ স্ট্যাটাস: {res.status_code}\n\nরেসপন্স:\n`{res.text}`", parse_mode="Markdown")
-            except:
-                # যদি JSON না হয় (যেমন ক্লাউডফ্লেয়ার ব্লক), তবে টেক্সট দেখাবে
-                await update.message.reply_text(f"⚠️ স্ট্যাটাস: {res.status_code} (JSON নয়)\n\nরেসপন্স:\n`{res.text[:500]}`", parse_mode="Markdown")
-        else:
-            await update.message.reply_text(f"❌ স্ট্যাটাস: {res.status_code}\n\nরেসপন্স:\n`{res.text[:500]}`", parse_mode="Markdown")
-    except Exception as e:
-        await update.message.reply_text(f"🚨 এরর: {str(e)}")
 
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
@@ -917,7 +880,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
         state["awaiting"] = "target"
         balance_val = float(state.get('balance', 0.00))
-        
         target_msg = (
             "<b>╔════════════════════════╗</b>\n"
             "<b>║   🚀 𝗦𝗧𝗔𝗥𝗧 𝗬𝗢𝗨𝗥 𝗧𝗔𝗥𝗚𝗘𝗧 🚀  ║</b>\n"
@@ -953,30 +915,20 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except: pass
 
         status_msg = await ctx.bot.send_message(chat_id=uid, text="<b>🔄 𝗖𝗢𝗡𝗡𝗘𝗖𝗧𝗜𝗡𝗚 𝗧𝗢 𝗦𝗜𝗧𝗘...\n[░░░░░░░░░░] 0%</b>", parse_mode="HTML")
-        
-        success, msg, real_token, expiry, real_uid, login_bal = await asyncio.to_thread(refresh_token, state["session"], state["temp_phone"], state["temp_password"])
-        
+        success, msg, real_token, expiry, real_uid = await asyncio.to_thread(refresh_token, state["session"], state["temp_phone"], state["temp_password"])
         if success:
             state["lottery_token"] = real_token
             state["token_expiry_time"] = expiry
             state["real_uid"] = real_uid
-            
-            await asyncio.sleep(1) 
-            
             if state["temp_phone"] not in state["accounts"]:
                 state["accounts"].append(state["temp_phone"])
-            
+            # 🔧 FIX: টোকেন propagate হওয়ার জন্য ছোট delay
+            await asyncio.sleep(1)
             balance = await asyncio.to_thread(fetch_game_balance, state["session"], real_token)
-            
-            if balance is None: 
-                balance = login_bal 
-                
             state["balance"] = balance
-            
             await status_msg.delete()
             masked_phone = "****" + bnum(state["temp_phone"][-4:])
             display_uid = fmt_uid(real_uid)
-            
             dashboard_msg = (
                 "<b>╔═══════════════════════╗</b>\n"
                 "<b>║  🎉 𝗟𝗢𝗚𝗜𝗡 𝗦𝗨𝗖𝗖𝗘𝗦𝗦𝗙𝗨𝗟 ✅ ║</b>\n"
@@ -998,10 +950,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "\n"
                 "<b>👇 𝗣𝗿𝗲𝘀𝘀 𝗦𝗧𝗔𝗥𝗧 𝗬𝗢𝗨𝗥 𝗧𝗔𝗥𝗚𝗘𝗧 𝘁𝗼 𝗯𝗲𝗴𝗶𝗻</b>"
             )
-            
-            if balance == 0.0:
-                dashboard_msg += "\n\n<b>⚠️ 𝗡𝗼𝘁𝗲: 𝗕𝗮𝗹𝗮𝗻𝗰𝗲 ৳ 𝟬.𝟬𝟬 𝗱𝗲𝗸𝗵𝗮𝗰𝗰𝗵𝗲. 𝗔𝗽𝗻𝗮𝗿 𝗺𝗮𝗶𝗻 𝘄𝗮𝗹𝗹𝗲𝘁 𝘁𝗵𝗲𝗸𝗲 𝗴𝗮𝗺𝗲 𝘄𝗮𝗹𝗹𝗲𝘁𝗲 𝗯𝗮𝗹𝗮𝗻𝗰𝗲 𝘁𝗿𝗮𝗻𝘀𝗳𝗲𝗿 𝗸𝗼𝗿𝗲𝗻 𝗶𝗻𝗮 𝗻𝗶𝘀𝗰𝗵𝗶𝘁 𝗸𝗼𝗿𝘂𝗻.</b>"
-
             reply_keyboard = [[KeyboardButton("🚀 𝗦𝗧𝗔𝗥𝗧 𝗬𝗢𝗨𝗥 𝗧𝗔𝗥𝗚𝗘𝗧")], [KeyboardButton("🛑 𝗦𝗧𝗢𝗣 𝗧𝗥𝗔𝗗𝗘"), KeyboardButton("🚪 𝗟𝗢𝗚𝗢𝗨𝗧")]]
             await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True), parse_mode="HTML")
         else:
@@ -1021,8 +969,8 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "<b>╔════════════════════════╗</b>\n"
                 "<b>║   🎯 𝗧𝗔𝗥𝗚𝗘𝗧 𝗦𝗘𝗧 🎯    ║</b>\n"
                 "<b>╚════════════════════════╝</b>\n"
-                f"<b>💰 𝗕𝗮𝗹𝗮𝗻𝗰𝗲  : ৳ {bnum(f'{balance:.2f}')} </b>\n"
-                f"<b>🎯 𝗧𝗮𝗿𝗴𝗲𝘁   : ৳ {bnum(f'{target_amount:.2f}')} 𝗽𝗿𝗼𝗳𝗶𝘁 </b>\n"
+                f"<b>💰 𝗕𝗮𝗹𝗮𝗻𝗰𝗲  : ৳ {bnum(f'{balance:.2f}')}</b>\n"
+                f"<b>🎯 𝗧𝗮𝗿𝗴𝗲𝘁   : ৳ {bnum(f'{target_amount:.2f}')} 𝗽𝗿𝗼𝗳𝗶𝘁</b>\n"
                 f"<b>🏦 𝗦𝘁𝗼𝗽 𝗔𝘁  : ৳ {bnum(f'{stop_at:.2f}')}</b>\n"
                 "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
                 "<b>🚀 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗦𝗧𝗘𝗣 𝗖𝗢𝗨𝗡𝗧: 𝗛𝗼𝘄 𝗺𝗮𝗻𝘆 𝘀𝘁𝗲𝗽𝘀? (𝗲.𝗴. 𝟱)</b>"
@@ -1064,10 +1012,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     state["balance"], state["target"], state["balance"] + state["target"],
                     state["steps"], state["step_amounts"], issue
                 )
-                kb = [
-                    [InlineKeyboardButton("🚀 𝗦𝗧𝗔𝗥𝗧 𝗧𝗥𝗔𝗗𝗘", callback_data="start_trade")],
-                    [InlineKeyboardButton("❌ 𝗖𝗔𝗡𝗖𝗘𝗟", callback_data="cancel_trade")]
-                ]
+                kb = [[InlineKeyboardButton("🚀 𝗦𝗧𝗔𝗥𝗧 𝗧𝗥𝗔𝗗𝗘", callback_data="start_trade")]]
                 await update.message.reply_text(cfg_msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode="HTML")
         except ValueError:
             await update.message.reply_text("<b>❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗮𝗺𝗼𝘂𝗻𝘁. 𝗘𝗻𝘁𝗲𝗿 𝗮 𝗽𝗼𝘀𝗶𝘁𝗶𝘃𝗲 𝗻𝘂𝗺𝗯𝗲𝗿.</b>", parse_mode="HTML")
@@ -1084,14 +1029,11 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     if query.data == "start_login":
         state["awaiting"] = "phone"
         await query.message.reply_text(
-            "<b>╔═════════════════════════╗</b>\n"
-            "<b>║   🔐 𝗔𝗖𝗖𝗢𝗨𝗡𝗧 𝗟𝗢𝗚𝗜𝗡 🔐   ║</b>\n"
-            "<b>╚═════════════════════════╝</b>\n"
-            "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
-            "<b>📱 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗗𝗞 𝗪𝗜𝗡 𝗽𝗵𝗼𝗻𝗲 𝗻𝘂𝗺𝗯𝗲𝗿:</b>\n"
-            "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
-            "<b>𝗘𝘃𝗲𝗿𝘆𝗼𝗻𝗲 𝘂𝘀𝗲𝘀 𝘁𝗵𝗲𝗶𝗿 𝗼𝘄𝗻 𝗮𝗰𝗰𝗼𝘂𝗻𝘁 —</b>\n"
-            "<b>𝘆𝗼𝘂𝗿 𝘀𝗲𝘀𝘀𝗶𝗼𝗻 𝗶𝘀 𝗽𝗿𝗶𝘃𝗮𝘁𝗲.</b>",
+            "<b>╔════════════════════════╗</b>\n"
+            "<b>║   📱 𝗣𝗛𝗢𝗡𝗘 𝗡𝗨𝗠𝗕𝗘𝗥   ║</b>\n"
+            "<b>╚════════════════════════╝</b>\n\n"
+            "<b>📞 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗽𝗵𝗼𝗻𝗲 𝗻𝘂𝗺𝗯𝗲𝗿 (𝘄𝗶𝘁𝗵 𝗰𝗼𝘂𝗻𝘁𝗿𝘆 𝗰𝗼𝗱𝗲):</b>\n"
+            "<b>𝗘𝘅𝗮𝗺𝗽𝗹𝗲: 8801XXXXXXXXX</b>",
             parse_mode="HTML"
         )
         return
@@ -1103,31 +1045,18 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not state.get("lottery_token") or not state.get("step_amounts"):
             await query.message.reply_text("<b>❌ 𝗦𝗲𝘁𝘂𝗽 𝗶𝗻𝗰𝗼𝗺𝗽𝗹𝗲𝘁𝗲. 𝗣𝗹𝗲𝗮𝘀𝗲 /start 𝗮𝗴𝗮𝗶𝗻.</b>", parse_mode="HTML")
             return
-        
         state["trade_running"] = True
         state["auto_trade_shown"] = False
         state["prediction_shown"] = False
         state["fail_retry_shown"] = False
         state["last_betted_issue"] = None
-        
         task = asyncio.create_task(trade_worker(ctx.bot, uid))
         state["trade_task"] = task
-        
-        try:
-            await query.message.delete()
-        except:
-            pass
-        return
-
-    if query.data == "cancel_trade":
-        state["trade_running"] = False
-        state["step_amounts"] = []
-        state["awaiting"] = None
-        await query.message.edit_text("<b>❌ 𝗧𝗿𝗮𝗱𝗲 𝗰𝗮𝗻𝗰𝗲𝗹𝗲𝗱. 𝗬𝗼𝘂 𝗰𝗮𝗻 𝗿𝗲𝘀𝘁𝗮𝗿𝘁 𝘁𝗵𝗲 𝗽𝗿𝗼𝗰𝗲𝘀𝘀.</b>", parse_mode="HTML")
+        await query.message.reply_text("<b>🚀 𝗧𝗥𝗔𝗗𝗘 𝗦𝗧𝗔𝗥𝗧𝗘𝗗! 🎬</b>", parse_mode="HTML")
         return
 
 # ───────────────────────────────────────
-# ৮. Render Keep-Alive
+# ৮. Render Keep-Alive (Web Service-এর জন্য)
 # ───────────────────────────────────────
 app = Flask('')
 
@@ -1147,15 +1076,14 @@ def keep_alive():
 # ৯. Main
 # ───────────────────────────────────────
 def main():
-    keep_alive() 
-    
+    keep_alive()
+
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("getid", cmd_getid))
-    application.add_handler(CommandHandler("checkbal", cmd_checkbal)) # 👈 নতুন ডিবাগ কমান্ড
     application.add_handler(CallbackQueryHandler(callback_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    
+
     logger.info("🤖 Bot is starting...")
     application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
