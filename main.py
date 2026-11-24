@@ -217,6 +217,7 @@ def refresh_token(session, phone, password):
         real_uid = jwt_data.get("UserId", "Unknown")
         expiry = decode_jwt_expiry(token)
         
+        # Safe extraction of login balance
         login_balance = float(data["data"].get("balance", 0.0))
 
         if expiry == 0:
@@ -224,6 +225,7 @@ def refresh_token(session, phone, password):
             
         return True, "Success", lottery_token, expiry, real_uid, login_balance
     except Exception as e:
+        logger.error(f"Login Exception: {e}")
         return False, str(e), None, None, None, 0.0
 
 def get_panel_data(session, real_token):
@@ -238,7 +240,7 @@ def get_panel_data(session, real_token):
         "accept": "application/json, text/plain, */*",
         "accept-language": "en-US,en;q=0.9",
         "authorization": f"Bearer {real_token}",
-        "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
+        "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
@@ -269,9 +271,10 @@ def fetch_game_balance(session, real_token):
     
     bal_headers = {
         "accept": "application/json, text/plain, */*",
+        "accept-language": "en-US,en;q=0.9",
         "authorization": f"Bearer {real_token}",
-        "origin": "https://dkwin8.com",
-        "referer": "https://dkwin8.com/",
+        "origin": "https://dkwin9.com",
+        "referer": "https://dkwin9.com/",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
@@ -280,10 +283,11 @@ def fetch_game_balance(session, real_token):
         if bal_data.get("code") == 0:
             return float(bal_data['data']['balance'])
         else:
-            logger.error(f"Balance Fetch Error: {bal_data}")
+            logger.error(f"Balance Fetch API Error: {bal_data}")
+            return None # Return None on API failure instead of 0.00
     except Exception as e:
         logger.error(f"Balance Fetch Exception: {e}")
-    return 0.00
+    return None
 
 def place_bet(session, real_token, issue_number, amount, choice):
     try:
@@ -303,7 +307,7 @@ def place_bet(session, real_token, issue_number, amount, choice):
             "accept-language": "en-US,en;q=0.9",
             "authorization": f"Bearer {real_token}",
             "content-type": "application/json",
-            "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
+            "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/",
             "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
         }
         bet_res = session.post(BET_URL, json=bet_payload, headers=bet_headers, timeout=15)
@@ -328,7 +332,7 @@ def fetch_win_loss(session, real_token, issue_number):
             "accept": "application/json, text/plain, */*",
             "accept-language": "en-US,en;q=0.9",
             "authorization": f"Bearer {real_token}",
-            "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
+            "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/",
             "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
         }
         res = session.get(url, headers=headers, timeout=15)
@@ -582,6 +586,8 @@ async def trade_worker(bot, uid):
     while state["trade_running"]:
         try:
             curr_bal = await asyncio.to_thread(fetch_game_balance, session, token)
+            if curr_bal is None:
+                curr_bal = state["balance"] # Fallback to last known balance
         except:
             curr_bal = state["balance"]
 
@@ -724,6 +730,8 @@ async def trade_worker(bot, uid):
 
         try:
             new_bal = await asyncio.to_thread(fetch_game_balance, session, token)
+            if new_bal is None:
+                new_bal = curr_bal
         except:
             new_bal = curr_bal
 
@@ -900,10 +908,11 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if state["temp_phone"] not in state["accounts"]:
                 state["accounts"].append(state["temp_phone"])
             
+            # Fixed Balance Logic
             balance = await asyncio.to_thread(fetch_game_balance, state["session"], real_token)
             
-            if balance == 0.0 and login_bal > 0.0:
-                balance = login_bal
+            if balance is None: 
+                balance = login_bal # Fallback to login balance if API fails
                 
             state["balance"] = balance
             
@@ -932,6 +941,10 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "\n"
                 "<b>👇 𝗣𝗿𝗲𝘀𝘀 𝗦𝗧𝗔𝗥𝗧 𝗬𝗢𝗨𝗥 𝗧𝗔𝗥𝗚𝗘𝗧 𝘁𝗼 𝗯𝗲𝗴𝗶𝗻</b>"
             )
+            
+            if balance == 0.0:
+                dashboard_msg += "\n\n<b>⚠️ 𝗡𝗼𝘁𝗲: 𝗕𝗮𝗹𝗮𝗻𝗰𝗲 ৳ 𝟬.𝟬𝟬 𝗱𝗲𝗸𝗵𝗮𝗰𝗰𝗵𝗲. 𝗔𝗽𝗻𝗮𝗿 𝗺𝗮𝗶𝗻 𝘄𝗮𝗹𝗹𝗲𝘁 𝘁𝗵𝗲𝗸𝗲 𝗴𝗮𝗺𝗲 𝘄𝗮𝗹𝗹𝗲𝘁𝗲 𝗯𝗮𝗹𝗮𝗻𝗰𝗲 𝘁𝗿𝗮𝗻𝘀𝗳𝗲𝗿 𝗸𝗼𝗿𝗲𝗻 �𝗶𝗻𝗮 𝗻𝗶𝘀𝗰𝗵𝗶𝘁 𝗸𝗼𝗿𝘂𝗻.</b>"
+
             reply_keyboard = [[KeyboardButton("🚀 𝗦𝗧𝗔𝗥𝗧 𝗬𝗢𝗨𝗥 𝗧𝗔𝗥𝗚𝗘𝗧")], [KeyboardButton("🛑 𝗦𝗧𝗢𝗣 𝗧𝗥𝗔𝗗𝗘"), KeyboardButton("🚪 𝗟𝗢𝗚𝗢𝗨𝗧")]]
             await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True), parse_mode="HTML")
         else:
