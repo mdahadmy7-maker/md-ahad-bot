@@ -200,7 +200,7 @@ def refresh_token(session, phone, password):
     headers = {
         "accept": "application/json, text/plain, */*",
         "content-type": "application/json;charset=UTF-8",
-        "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/",
+        "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/", # Login uses dkwin9
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
@@ -216,8 +216,6 @@ def refresh_token(session, phone, password):
         jwt_data = decode_jwt(token)
         real_uid = jwt_data.get("UserId", "Unknown")
         expiry = decode_jwt_expiry(token)
-        
-        # Safe extraction of login balance
         login_balance = float(data["data"].get("balance", 0.0))
 
         if expiry == 0:
@@ -240,7 +238,7 @@ def get_panel_data(session, real_token):
         "accept": "application/json, text/plain, */*",
         "accept-language": "en-US,en;q=0.9",
         "authorization": f"Bearer {real_token}",
-        "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/",
+        "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/", # Fixed to dkwin8
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
@@ -269,12 +267,12 @@ def fetch_game_balance(session, real_token):
     bal_sig = generate_balance_sig(bal_rnd, bal_ts)
     bal_url = f"https://api.ar-lottery01.com/api/Lottery/GetBalance?language=en&random={bal_rnd}&signature={bal_sig}&timestamp={bal_ts}"
     
+    # আপনার সফল স্ক্রিপ্ট অনুযায়ী হেডার সেট করা হলো (origin: dkwin8.com)
     bal_headers = {
         "accept": "application/json, text/plain, */*",
-        "accept-language": "en-US,en;q=0.9",
         "authorization": f"Bearer {real_token}",
-        "origin": "https://dkwin9.com",
-        "referer": "https://dkwin9.com/",
+        "origin": "https://dkwin8.com",
+        "referer": "https://dkwin8.com/",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
@@ -284,7 +282,7 @@ def fetch_game_balance(session, real_token):
             return float(bal_data['data']['balance'])
         else:
             logger.error(f"Balance Fetch API Error: {bal_data}")
-            return None # Return None on API failure instead of 0.00
+            return None
     except Exception as e:
         logger.error(f"Balance Fetch Exception: {e}")
     return None
@@ -302,14 +300,24 @@ def place_bet(session, real_token, issue_number, amount, choice):
             "betMultiple": 1, "betContent": bet_content, "language": "en",
             "random": c_rnd, "signature": sig, "timestamp": c_ts
         }
+        
+        # আপনার সফল স্ক্রিপ্ট অনুযায়ী হেডার সেট করা হলো
         bet_headers = {
             "accept": "application/json, text/plain, */*",
             "accept-language": "en-US,en;q=0.9",
             "authorization": f"Bearer {real_token}",
             "content-type": "application/json",
-            "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/",
+            "origin": "https://dkwin8.com",
+            "referer": "https://dkwin8.com/",
+            "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
+            "sec-ch-ua-mobile": "?1",
+            "sec-ch-ua-platform": '"Android"',
+            "sec-fetch-dest": "empty",
+            "sec-fetch-mode": "cors",
+            "sec-fetch-site": "cross-site",
             "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
         }
+        
         bet_res = session.post(BET_URL, json=bet_payload, headers=bet_headers, timeout=15)
         return bet_res.status_code, bet_res.text
     except Exception as e:
@@ -332,7 +340,7 @@ def fetch_win_loss(session, real_token, issue_number):
             "accept": "application/json, text/plain, */*",
             "accept-language": "en-US,en;q=0.9",
             "authorization": f"Bearer {real_token}",
-            "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/",
+            "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/", # Fixed to dkwin8
             "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
         }
         res = session.get(url, headers=headers, timeout=15)
@@ -587,7 +595,7 @@ async def trade_worker(bot, uid):
         try:
             curr_bal = await asyncio.to_thread(fetch_game_balance, session, token)
             if curr_bal is None:
-                curr_bal = state["balance"] # Fallback to last known balance
+                curr_bal = state["balance"] # Fallback
         except:
             curr_bal = state["balance"]
 
@@ -676,7 +684,7 @@ async def trade_worker(bot, uid):
                 token = new_token
                 state["lottery_token"] = new_token
                 state["token_expiry_time"] = expiry
-                await asyncio.sleep(1) # Wait a bit before retrying
+                await asyncio.sleep(1)
                 status_code, res_text = await asyncio.to_thread(place_bet, session, token, issue, amount, predicted)
 
         bet_failed = False
@@ -908,11 +916,10 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             if state["temp_phone"] not in state["accounts"]:
                 state["accounts"].append(state["temp_phone"])
             
-            # Fixed Balance Logic
             balance = await asyncio.to_thread(fetch_game_balance, state["session"], real_token)
             
             if balance is None: 
-                balance = login_bal # Fallback to login balance if API fails
+                balance = login_bal 
                 
             state["balance"] = balance
             
@@ -943,7 +950,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             )
             
             if balance == 0.0:
-                dashboard_msg += "\n\n<b>⚠️ 𝗡𝗼𝘁𝗲: 𝗕𝗮𝗹𝗮𝗻𝗰𝗲 ৳ 𝟬.𝟬𝟬 𝗱𝗲𝗸𝗵𝗮𝗰𝗰𝗵𝗲. 𝗔𝗽𝗻𝗮𝗿 𝗺𝗮𝗶𝗻 𝘄𝗮𝗹𝗹𝗲𝘁 𝘁𝗵𝗲𝗸𝗲 𝗴𝗮𝗺𝗲 𝘄𝗮𝗹𝗹𝗲𝘁𝗲 𝗯𝗮𝗹𝗮𝗻𝗰𝗲 𝘁𝗿𝗮𝗻𝘀𝗳𝗲𝗿 𝗸𝗼𝗿𝗲𝗻 �𝗶𝗻𝗮 𝗻𝗶𝘀𝗰𝗵𝗶𝘁 𝗸𝗼𝗿𝘂𝗻.</b>"
+                dashboard_msg += "\n\n<b>⚠️ 𝗡𝗼𝘁𝗲: 𝗕𝗮𝗹𝗮𝗻𝗰𝗲 ৳ 𝟬.𝟬𝟬 𝗱𝗲𝗸𝗵𝗮𝗰𝗰𝗵𝗲. 𝗔𝗽𝗻𝗮𝗿 𝗺𝗮𝗶𝗻 𝘄𝗮𝗹𝗹𝗲𝘁 𝘁𝗵𝗲𝗸𝗲 𝗴𝗮𝗺𝗲 𝘄𝗮𝗹𝗹𝗲𝘁𝗲 𝗯𝗮𝗹𝗮𝗻𝗰𝗲 𝘁𝗿𝗮𝗻𝘀𝗳𝗲𝗿 𝗸𝗼𝗿𝗲𝗻 𝗶𝗻𝗮 𝗻𝗶𝘀𝗰𝗵𝗶𝘁 𝗸𝗼𝗿𝘂𝗻.</b>"
 
             reply_keyboard = [[KeyboardButton("🚀 𝗦𝗧𝗔𝗥𝗧 𝗬𝗢𝗨𝗥 𝗧𝗔𝗥𝗚𝗘𝗧")], [KeyboardButton("🛑 𝗦𝗧𝗢𝗣 𝗧𝗥𝗔𝗗𝗘"), KeyboardButton("🚪 𝗟𝗢𝗚𝗢𝗨𝗧")]]
             await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True), parse_mode="HTML")
