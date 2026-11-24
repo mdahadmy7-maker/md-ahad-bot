@@ -214,6 +214,7 @@ def refresh_token(session, phone, password):
         return False, str(e), None, None, None
 
 def get_panel_data(session, real_token):
+    # Try GetPanel first
     panel_rnd = random.randint(100000000000, 999999999999)
     panel_ts = int(time.time())
     panel_sig = generate_dynamic_sig({"gameCode": "WinGo_30S", "language": "en", "random": panel_rnd})
@@ -223,18 +224,27 @@ def get_panel_data(session, real_token):
         "accept-language": "en-US,en;q=0.9",
         "authorization": f"Bearer {real_token}",
         "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
-        "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
-        "sec-ch-ua-mobile": "?1",
-        "sec-ch-ua-platform": '"Android"',
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
-        res = session.get(panel_url, headers=headers, timeout=10)
+        res = session.get(panel_url, headers=headers, timeout=5)
         data = res.json()
         if data.get("code") == 0:
             return data["data"]["currentIssueNumber"], data["data"]["phase"]
     except:
         pass
+        
+    # Fallback to History
+    try:
+        res = session.get(HISTORY_URL, timeout=5)
+        data = res.json()
+        if data.get("code") == 0:
+            latest_period = int(data['data']['list'][0]['issueNumber'])
+            next_issue = str(latest_period + 1)
+            return next_issue, "Betting"
+    except:
+        pass
+        
     return None, None
 
 def fetch_game_balance(session, real_token):
@@ -244,15 +254,9 @@ def fetch_game_balance(session, real_token):
     bal_url = f"https://api.ar-lottery01.com/api/Lottery/GetBalance?language=en&random={bal_rnd}&signature={bal_sig}&timestamp={bal_ts}"
     bal_headers = {
         "accept": "application/json, text/plain, */*",
-        "accept-language": "en-US,en;q=0.9",
         "authorization": f"Bearer {real_token}",
-        "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
-        "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
-        "sec-ch-ua-mobile": "?1",
-        "sec-ch-ua-platform": '"Android"',
-        "sec-fetch-dest": "empty",
-        "sec-fetch-mode": "cors",
-        "sec-fetch-site": "cross-site",
+        "origin": "https://dkwin8.com",
+        "referer": "https://dkwin8.com/",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
@@ -597,6 +601,13 @@ async def trade_worker(bot, uid):
                 continue
 
         issue, phase = await asyncio.to_thread(get_panel_data, session, token)
+        
+        # Send Auto Trade Message Immediately upon first loop
+        if not state.get("auto_trade_shown"):
+            state["auto_trade_shown"] = True
+            display_issue = issue if issue else "----"
+            await bot.send_message(chat_id=uid, text=build_auto_trade_msg(curr_bal, target, stop_at, len(steps), steps, display_issue), parse_mode="HTML")
+
         if not issue or phase != "Betting" or issue == state.get("last_betted_issue"):
             await asyncio.sleep(1)
             continue
@@ -616,10 +627,6 @@ async def trade_worker(bot, uid):
             await bot.send_message(chat_id=uid, text=f"<b>❌ 𝗜𝗻𝘀𝘂𝗳𝗳𝗶𝗰𝗶𝗲𝗻𝘁 𝗯𝗮𝗹𝗮𝗻𝗰𝗲!\n𝗡𝗲𝗲𝗱: ৳ {bnum(f'{amount:.2f}')}, 𝗛𝗮𝘃𝗲: ৳ {bnum(f'{curr_bal:.2f}')}.</b>", parse_mode="HTML")
             state["trade_running"] = False
             break
-
-        if not state.get("auto_trade_shown"):
-            state["auto_trade_shown"] = True
-            await bot.send_message(chat_id=uid, text=build_auto_trade_msg(curr_bal, target, stop_at, len(steps), steps, issue), parse_mode="HTML")
 
         if not state.get("prediction_shown"):
             state["prediction_shown"] = True
@@ -921,11 +928,11 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 "<b>╔════════════════════════╗</b>\n"
                 "<b>║   🎯 𝗧𝗔𝗥𝗚𝗘𝗧 𝗦𝗘𝗧 🎯    ║</b>\n"
                 "<b>╚════════════════════════╝</b>\n"
-                f"<b>💰 𝗕𝗮𝗹𝗮𝗻𝗰𝗲  : ৳ {bnum(f'{balance:.2f}')}</b>\n"
-                f"<b>🎯 𝗧𝗮𝗿𝗴𝗲𝘁   : ৳ {bnum(f'{target_amount:.2f}')} 𝗽𝗿𝗼𝗳𝗶𝘁</b>\n"
+                f"<b>💰 𝗕𝗮𝗹𝗮𝗻𝗰𝗲  : ৳ {bnum(f'{balance:.2f}')} </b>\n"
+                f"<b>🎯 𝗧𝗮𝗿𝗴𝗲𝘁   : ৳ {bnum(f'{target_amount:.2f}')} 𝗽𝗿𝗼𝗳𝗶𝘁 </b>\n"
                 f"<b>🏦 𝗦𝘁𝗼𝗽 𝗔𝘁  : ৳ {bnum(f'{stop_at:.2f}')}</b>\n"
                 "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
-                "<b>🚀 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗦𝗧𝗘𝗣 𝗖𝗢𝗨𝗡𝗧: 𝗛𝗼𝘄 𝗺𝗮𝗻𝘆 𝘀𝘁𝗲𝗽𝘀? (𝗲.𝗴. 𝟱)</b>"
+                "<b>🚀 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗦𝗧𝗘𝗣 𝗖𝗢𝗨𝗡𝗧: 𝗛𝗼𝘄 𝗺𝗮𝗻𝘆 𝘀𝘁𝗲𝗽𝘀? (𝗲.𝗴. 𝟱, {𝟭,𝟮,𝟰} 𝟱𝟬)</b>"
             )
             state["awaiting"] = "steps"
             await update.message.reply_text(target_set_msg, parse_mode="HTML")
