@@ -242,17 +242,7 @@ def get_panel_data(session, real_token):
         pass
     return None, None
 
-# ═══════════════════════════════════════════
-# 🔧 FIXED: fetch_game_balance (মূল সমাধান)
-# ═══════════════════════════════════════════
 def fetch_game_balance(session, real_token, retries=3):
-    """
-    ব্যালেন্স আনার শক্তিশালী ফাংশন:
-      - code int বা string দুটোই হ্যান্ডেল করে
-      - data dict/int/float/string সব ফরম্যাট চেষ্টা করে
-      - ব্যর্থ হলে ৩ বার retry করে
-      - বিস্তারিত logging রাখে
-    """
     last_err = None
     for attempt in range(1, retries + 1):
         try:
@@ -271,58 +261,36 @@ def fetch_game_balance(session, real_token, retries=3):
                 "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
             }
             bal_res = session.get(bal_url, headers=bal_headers, timeout=15)
-            body_preview = (bal_res.text or "")[:250]
-            logger.info(f"[BALANCE] attempt={attempt} status={bal_res.status_code} body={body_preview}")
-
             try:
                 bal_data = bal_res.json()
             except Exception:
-                last_err = f"JSON parse failed: {body_preview}"
-                logger.warning(f"[BALANCE] {last_err}")
                 if attempt < retries: time.sleep(1)
                 continue
 
             code_raw = bal_data.get("code")
-            # code == 0 OR "0"
             if code_raw == 0 or str(code_raw) == "0":
                 data = bal_data.get("data")
-                # case 1: dict
                 if isinstance(data, dict):
-                    for key in ("balance", "Balance", "money", "amount", "userBalance", "availableBalance"):
+                    for key in ("balance", "Balance", "money", "amount", "userBalance", "availableBalance", "totalAmount"):
                         if key in data and data[key] is not None:
                             try:
-                                val = float(data[key])
-                                logger.info(f"[BALANCE] OK (dict) → {val}")
-                                return val
+                                return float(data[key])
                             except (TypeError, ValueError):
                                 continue
-                # case 2: pure number
                 elif isinstance(data, (int, float)):
-                    val = float(data)
-                    logger.info(f"[BALANCE] OK (number) → {val}")
-                    return val
-                # case 3: string number
+                    return float(data)
                 elif isinstance(data, str):
                     try:
-                        val = float(data)
-                        logger.info(f"[BALANCE] OK (string) → {val}")
-                        return val
+                        return float(data)
                     except ValueError:
                         pass
-                # unknown structure
-                last_err = f"Unknown data structure: {data}"
-                logger.warning(f"[BALANCE] {last_err}")
             else:
                 last_err = f"code={code_raw}, msg={bal_data.get('msg')}"
-                logger.warning(f"[BALANCE] API error: {last_err} | body={body_preview}")
         except Exception as e:
             last_err = str(e)
-            logger.error(f"[BALANCE] attempt={attempt} exception: {e}")
-
         if attempt < retries:
             time.sleep(1)
 
-    logger.error(f"[BALANCE] All {retries} attempts failed. Last error: {last_err}")
     return 0.00
 
 def place_bet(session, real_token, issue_number, amount, choice):
@@ -647,12 +615,12 @@ async def trade_worker(bot, uid):
 
         issue, phase = await asyncio.to_thread(get_panel_data, session, token)
         if not issue or phase != "Betting" or issue == state.get("last_betted_issue"):
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5) # দ্রুত চেক করবে
             continue
 
         remaining = get_remaining_seconds(issue)
         if remaining < 7:
-            await asyncio.sleep(1)
+            await asyncio.sleep(0.5)
             continue
 
         if current_step >= len(steps):
@@ -681,8 +649,7 @@ async def trade_worker(bot, uid):
                 try: await pred_msg.edit_text(build_prediction_animation(100), parse_mode="HTML")
                 except: pass
                 await asyncio.sleep(2)
-                try: await pred_msg.delete()
-                except: pass
+                # মেসেজটি ডিলিট করা হচ্ছে না (ইউজারের রিকোয়েস্ট অনুযায়ী)
             except Exception as e:
                 logger.error(f"prediction animation error: {e}")
 
@@ -726,7 +693,8 @@ async def trade_worker(bot, uid):
         for _ in range(16):
             if not state["trade_running"]:
                 break
-            await asyncio.sleep(2)
+            await asyncio.sleep(1) # দ্রুত রেজাল্ট চেক
+            
         if not state["trade_running"]:
             break
 
@@ -738,7 +706,7 @@ async def trade_worker(bot, uid):
                 break
             if not state["trade_running"]:
                 break
-            await asyncio.sleep(2)
+            await asyncio.sleep(1) # ১ সেকেন্ড পর পর চেক
 
         if won is None:
             hist_res = await asyncio.to_thread(fetch_result, session, issue)
@@ -777,7 +745,8 @@ async def trade_worker(bot, uid):
             state["trade_running"] = False
             break
 
-        await asyncio.sleep(2)
+        # অপেক্ষা কমিয়ে আনা হয়েছে যাতে দ্রুত পরের পিরিয়ড ধরা যায়
+        await asyncio.sleep(0.5)
 
     state["trade_running"] = False
     state["trade_task"] = None
@@ -922,7 +891,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             state["real_uid"] = real_uid
             if state["temp_phone"] not in state["accounts"]:
                 state["accounts"].append(state["temp_phone"])
-            # 🔧 FIX: টোকেন propagate হওয়ার জন্য ছোট delay
             await asyncio.sleep(1)
             balance = await asyncio.to_thread(fetch_game_balance, state["session"], real_token)
             state["balance"] = balance
@@ -1012,7 +980,11 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     state["balance"], state["target"], state["balance"] + state["target"],
                     state["steps"], state["step_amounts"], issue
                 )
-                kb = [[InlineKeyboardButton("🚀 𝗦𝗧𝗔𝗥𝗧 𝗧𝗥𝗔𝗗𝗘", callback_data="start_trade")]]
+                # START TRADE এবং CANCEL বাটন পাশাপাশি যুক্ত করা হলো
+                kb = [[
+                    InlineKeyboardButton("🚀 𝗦𝗧𝗔𝗥𝗧 𝗧𝗥𝗔𝗗𝗘", callback_data="start_trade"),
+                    InlineKeyboardButton("❌ 𝗖𝗔𝗡𝗖𝗘𝗟", callback_data="cancel_trade")
+                ]]
                 await update.message.reply_text(cfg_msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode="HTML")
         except ValueError:
             await update.message.reply_text("<b>❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗮𝗺𝗼𝘂𝗻𝘁. 𝗘𝗻𝘁𝗲𝗿 𝗮 𝗽𝗼𝘀𝗶𝘁𝗶𝘃𝗲 𝗻𝘂𝗺𝗯𝗲𝗿.</b>", parse_mode="HTML")
@@ -1028,14 +1000,27 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
 
     if query.data == "start_login":
         state["awaiting"] = "phone"
+        # নতুন মেসেজ বসানো হলো
         await query.message.reply_text(
-            "<b>╔════════════════════════╗</b>\n"
-            "<b>║   📱 𝗣𝗛𝗢𝗡𝗘 𝗡𝗨𝗠𝗕𝗘𝗥   ║</b>\n"
-            "<b>╚════════════════════════╝</b>\n\n"
-            "<b>📞 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗽𝗵𝗼𝗻𝗲 𝗻𝘂𝗺𝗯𝗲𝗿 (𝘄𝗶𝘁𝗵 𝗰𝗼𝘂𝗻𝘁𝗿𝘆 𝗰𝗼𝗱𝗲):</b>\n"
-            "<b>𝗘𝘅𝗮𝗺𝗽𝗹𝗲: 8801XXXXXXXXX</b>",
+            "<b>╔═════════════════════════╗</b>\n"
+            "<b>║   🔐 𝗔𝗖𝗖𝗢𝗨𝗡𝗧 𝗟𝗢𝗚𝗜𝗡 🔐   ║</b>\n"
+            "<b>╚═════════════════════════╝</b>\n"
+            "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+            "<b>📱 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗗𝗞 𝗪𝗜𝗡 𝗽𝗵𝗼𝗻𝗲 𝗻𝘂𝗺𝗯𝗲𝗿:</b>\n"
+            "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+            "<b>𝗘𝘃𝗲𝗿𝘆𝗼𝗻𝗲 𝘂𝘀𝗲𝘀 𝘁𝗵𝗲𝗶𝗿 𝗼𝘄𝗻 𝗮𝗰𝗰𝗼𝘂𝗻𝘁 —</b>\n"
+            "<b>𝘆𝗼𝘂𝗿 𝘀𝗲𝘀𝘀𝗶𝗼𝗻 𝗶𝘀 𝗽𝗿𝗶𝘃𝗮𝘁𝗲.</b>",
             parse_mode="HTML"
         )
+        return
+
+    if query.data == "cancel_trade":
+        state["trade_running"] = False
+        state["step_amounts"] = []
+        try:
+            await query.message.edit_text("<b>❌ 𝗧𝗿𝗮𝗱𝗲 𝗖𝗮𝗻𝗰𝗲𝗹𝗹𝗲𝗱.</b>", parse_mode="HTML")
+        except:
+            await query.message.reply_text("<b>❌ 𝗧𝗿𝗮𝗱𝗲 𝗖𝗮𝗻𝗰𝗲𝗹𝗹𝗲𝗱.</b>", parse_mode="HTML")
         return
 
     if query.data == "start_trade":
@@ -1052,7 +1037,12 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         state["last_betted_issue"] = None
         task = asyncio.create_task(trade_worker(ctx.bot, uid))
         state["trade_task"] = task
-        await query.message.reply_text("<b>🚀 𝗧𝗥𝗔𝗗𝗘 𝗦𝗧𝗔𝗥𝗧𝗘𝗗! 🎬</b>", parse_mode="HTML")
+        
+        # "TRADE STARTED" মেসেজটি বাদ দেওয়া হলো
+        try:
+            await query.message.edit_reply_markup(reply_markup=None) # বাটনগুলো রিমুভ করে দেওয়া হলো
+        except:
+            pass
         return
 
 # ───────────────────────────────────────
