@@ -261,7 +261,6 @@ def get_panel_data(session, real_token):
         
     return None, None
 
-# ⬇️⬇️⬇️ এখানে আপনার ওয়ার্কিং স্ক্রিপ্টের হুবহু হেডার ব্যবহার করা হয়েছে ⬇️⬇️⬇️
 def fetch_game_balance(session, real_token):
     bal_rnd = random.randint(100000000000, 999999999999)
     bal_ts = int(time.time())
@@ -679,4 +678,430 @@ async def trade_worker(bot, uid):
             if success:
                 token = new_token
                 state["lottery_token"] = new_token
-                state["token_expiry_time
+                state["token_expiry_time"] = expiry
+                await asyncio.sleep(1)
+                status_code, res_text = await asyncio.to_thread(place_bet, session, token, issue, amount, predicted)
+
+        bet_failed = False
+        if status_code != 200:
+            bet_failed = True
+        else:
+            try:
+                rj = json.loads(res_text)
+                if rj.get("code") != 0:
+                    bet_failed = True
+            except:
+                pass
+
+        if bet_failed:
+            if not state.get("fail_retry_shown"):
+                state["fail_retry_shown"] = True
+                await asyncio.sleep(1)
+                continue
+            else:
+                state["last_betted_issue"] = issue
+                await asyncio.sleep(1)
+                continue
+
+        state["last_betted_issue"] = issue
+        await bot.send_message(chat_id=uid, text=build_new_trade_msg(issue, predicted, current_step + 1, amount, curr_bal), parse_mode="HTML")
+
+        for _ in range(16):
+            if not state["trade_running"]:
+                break
+            await asyncio.sleep(2)
+        if not state["trade_running"]:
+            break
+
+        won = None
+        win_amount = 0.0
+        for _ in range(15):
+            won, win_amount = await asyncio.to_thread(fetch_win_loss, session, token, issue)
+            if won is not None:
+                break
+            if not state["trade_running"]:
+                break
+            await asyncio.sleep(2)
+
+        if won is None:
+            hist_res = await asyncio.to_thread(fetch_result, session, issue)
+            if hist_res is not None:
+                actual_res_fb = hist_res.capitalize()
+                won = (actual_res_fb.lower() == predicted.lower())
+            else:
+                continue
+
+        try:
+            new_bal = await asyncio.to_thread(fetch_game_balance, session, token)
+            if new_bal is None:
+                new_bal = curr_bal
+        except:
+            new_bal = curr_bal
+
+        state["balance"] = new_bal
+        total_trades += 1
+        actual_res = predicted if won else ("Small" if predicted.upper() == "BIG" else "Big")
+        update_prediction_logic(state, actual_res.upper())
+
+        if won:
+            wins += 1
+            step_used = current_step + 1
+            current_step = 0
+            next_step = 1
+        else:
+            losses += 1
+            step_used = current_step + 1
+            current_step += 1
+            next_step = current_step + 1
+
+        pl = amount * 0.96 if won else -amount
+        await bot.send_message(chat_id=uid, text=build_result_msg(issue, predicted, step_used, amount, won, pl, new_bal, wins, losses, next_step), parse_mode="HTML")
+
+        if not won and current_step >= len(steps):
+            await bot.send_message(chat_id=uid, text=STEP_EXHAUSTED_MSG, parse_mode="HTML")
+            state["trade_running"] = False
+            break
+
+        await asyncio.sleep(2)
+
+    state["trade_running"] = False
+    state["trade_task"] = None
+
+# ───────────────────────────────────────
+# ৭. টেলিগ্রাম হ্যান্ডলার
+# ───────────────────────────────────────
+async def cmd_getid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    await update.message.reply_text(
+        f"<b>🔐 আপনার Telegram ID: `{uid}`</b>\n\n"
+        f"<b>এই আইডিটি কপি করে কোডের `AUTHORIZED_USERS = []` এর ভেতরে বসান, </b>"
+        f"<b>যেমন: `AUTHORIZED_USERS = [{uid}]`</b>\n"
+        f"<b>এরপর বট রিস্টার্ট করলে অন্য কেউ আপনার বট ব্যবহার করতে পারবে না।</b>",
+        parse_mode="HTML"
+    )
+
+async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_authorized(uid):
+        await update.message.reply_text(
+            "<b>⛔ 𝗔𝗖𝗖𝗘𝗦𝗦 𝗗𝗘𝗡𝗜𝗘𝗗\n\n𝗬𝗼𝘂 𝗮𝗿𝗲 𝗻𝗼𝘁 𝗮𝘂𝘁𝗵𝗼𝗿𝗶𝘇𝗲𝗱 𝘁𝗼 𝘂𝘀𝗲 𝘁𝗵𝗶𝘀 𝗯𝗼𝘁.</b>",
+            parse_mode="HTML"
+        )
+        return
+
+    state = get_state(uid)
+    state["first_bet"] = True
+    state["prediction_shown"] = False
+    state["auto_trade_shown"] = False
+    state["fail_retry_shown"] = False
+    state["last3"] = []
+    state["reverseMode"] = False
+    state["reverseCount"] = 0
+    state["reverseTarget"] = 1
+    state["streakCount"] = 0
+    state["streakType"] = None
+    state["streakReversePending"] = False
+    state["displayedResult"] = "--"
+
+    welcome_text = (
+        "<b>🧠 𝐁𝐃=𝐖𝐈𝐍~𝐆𝐎=𝐀𝐔𝐓𝐎~𝐁𝐄𝐓 💥</b>\n"
+        "<b>━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+        "<b>🧠 𝐌𝐨𝐝𝐞    : 𝐀𝐮𝐭𝐨 𝐀𝐧𝐚𝐥𝐲𝐬𝐞 &amp; 𝐁𝐞𝐭</b>\n"
+        "<b>🔐 𝐀𝐜𝐜𝐞𝐬𝐬  : 𝐏𝐫𝐢𝐯𝐚𝐭𝐞 · 𝐀𝐮𝐭𝐡𝐨𝐫𝐢𝐳𝐞𝐝 𝐌𝐞𝐦𝐛𝐞𝐫𝐬</b>\n"
+        "<b>🔴 𝐒𝐭𝐚𝐭𝐮𝐬  : 𝐍𝐨𝐭 𝐋𝐨𝐠𝐠𝐞𝐝 𝐈𝐧</b>\n"
+        f"<b>👥 𝐀𝐜𝐜𝐨𝐮𝐧𝐭𝐬: {bnum(len(state['accounts']))}/𝟔</b>\n"
+        "<b>━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+        "<b>🧠 𝐏𝐫𝐞𝐝𝐢𝐜𝐭𝐢𝐨𝐧 𝐄𝐧𝐠𝐢𝐧𝐞 — 𝟗 𝐋𝐚𝐲𝐞𝐫𝐬</b>\n"
+        "\n"
+        "<b>⚡ 𝐒𝐭𝐫𝐞𝐚𝐤 · 🔷 𝐏𝐚𝐭𝐭𝐞𝐫𝐧 · 📈 𝐓𝐫𝐞𝐧𝐝</b>\n"
+        "<b>🔍 𝐌𝐚𝐧𝐢𝐩𝐮𝐥𝐚𝐭𝐢𝐨𝐧 · 🎨 𝐂𝐨𝐥𝐨𝐮𝐫 · 🔢 𝐅𝐫𝐞𝐪𝐮𝐞𝐧𝐜𝐲</b>\n"
+        "<b>🔄 𝐌𝐚𝐫𝐤𝐨𝐯 · ♻️ 𝐂𝐲𝐜𝐥𝐞 · 💠 𝐌𝐨𝐦𝐞𝐧𝐭𝐮𝐦</b>\n"
+        "\n"
+        "<b>🔁 𝐄𝐯𝐞𝐫𝐲 𝐥𝐚𝐲𝐞𝐫 𝐢𝐬 𝐛𝐚𝐜𝐤-𝐭𝐞𝐬𝐭𝐞𝐝 𝐥𝐢𝐯𝐞 𝐬𝐨 𝐢𝐭𝐬 𝐯𝐨𝐭𝐞</b>\n"
+        "<b>𝐰𝐞𝐢𝐠𝐡𝐭 𝐟𝐨𝐥𝐥𝐨𝐰𝐬 𝐢𝐭𝐬 𝐫𝐞𝐚𝐥 𝐡𝐢𝐭-𝐫𝐚𝐭𝐞</b>\n"
+        "\n"
+        "<b>🔴 𝐂𝐨𝐧𝐟𝐢𝐝𝐞𝐧𝐜𝐞 𝐛𝐞𝐥𝐨𝐰 𝟑𝟎% → 𝐒𝐢𝐭 𝐎𝐮𝐭</b>\n"
+        "<b>━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+        "<b>🎬 𝟒-𝐬𝐞𝐜𝐨𝐧𝐝 🧠 𝐆𝐞𝐧𝐞𝐫𝐚𝐭𝐢𝐧𝐠 𝐏𝐫𝐞𝐝𝐢𝐜𝐭𝐢𝐨𝐧 𝐀𝐧𝐢𝐦𝐚𝐭𝐢𝐨𝐧</b>\n"
+        "<b>🚀 𝐀𝐧𝐚𝐥𝐲𝐬𝐢𝐬 → 𝐀𝐮𝐭𝐨 𝐁𝐞𝐭 𝐄𝐯𝐞𝐫𝐲 𝟑𝟎𝐬 𝐏𝐞𝐫𝐢𝐨𝐝</b>\n"
+        "\n"
+        "<b>━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+        "<b>👇 𝐏𝐫𝐞𝐬𝐬 𝐓𝐡𝐞 𝐁𝐮𝐭𝐭𝐨𝐧 𝐁𝐞𝐥𝐨𝐰 𝐓𝐨 𝐋𝐎𝐆𝐈𝐍</b>"
+    )
+    keyboard = [[InlineKeyboardButton("🔐 𝗟𝗢𝗚𝗜𝗡 𝗧𝗢 𝗔𝗖𝗖𝗢𝗨𝗡𝗧", callback_data="start_login")]]
+    await update.message.reply_text(welcome_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+
+async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    if not is_authorized(uid):
+        await update.message.reply_text("<b>⛔ 𝗔𝗖𝗖𝗘𝗦𝗦 𝗗𝗘𝗡𝗜𝗘𝗗</b>", parse_mode="HTML")
+        return
+
+    state = get_state(uid)
+    text = update.message.text.strip()
+
+    if text in ("🛑 𝗦𝗧𝗢𝗣 𝗧𝗥𝗔𝗗𝗘", "🛑 STOP TRADE"):
+        state["trade_running"] = False
+        await update.message.reply_text("<b>🛑 𝗧𝗿𝗮𝗱𝗲 𝘀𝘁𝗼𝗽𝗽𝗲𝗱.</b>", parse_mode="HTML")
+        return
+
+    if text in ("🚪 𝗟𝗢𝗚𝗢𝗨𝗧", "🚪 LOGOUT"):
+        state["trade_running"] = False
+        state["lottery_token"] = None
+        state["temp_phone"] = ""
+        state["temp_password"] = ""
+        state["accounts"] = []
+        state["balance"] = 0.0
+        state["session"] = requests.Session()
+        await update.message.reply_text(
+            "<b>🚪 𝗟𝗼𝗴𝗴𝗲𝗱 𝗼𝘂𝘁 𝘀𝘂𝗰𝗰𝗲𝘀𝘀𝗳𝘂𝗹𝗹𝘆.</b>\n<b>👇 𝗧𝘆𝗽𝗲 /start 𝘁𝗼 𝗯𝗲𝗴𝗶𝗻 𝗮𝗴𝗮𝗶𝗻.</b>",
+            parse_mode="HTML"
+        )
+        return
+
+    if text in ("🚀 𝗦𝗧𝗔𝗥𝗧 𝗬𝗢𝗨𝗥 𝗧𝗔𝗥𝗚𝗘𝗧", "🚀 START YOUR TARGET"):
+        if not state.get("lottery_token"):
+            await update.message.reply_text("<b>❌ Please login first. Type /start</b>", parse_mode="HTML")
+            return
+        state["awaiting"] = "target"
+        balance_val = float(state.get('balance', 0.00))
+        
+        target_msg = (
+            "<b>╔════════════════════════╗</b>\n"
+            "<b>║   🚀 𝗦𝗧𝗔𝗥𝗧 𝗬𝗢𝗨𝗥 𝗧𝗔𝗥𝗚𝗘𝗧 🚀  ║</b>\n"
+            "<b>╚════════════════════════╝</b>\n"
+            "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+            "<b>💰 𝗬𝗢𝗨𝗥 𝗕𝗔𝗟𝗔𝗡𝗖𝗘</b>\n"
+            f"<b>৳ {bnum(f'{balance_val:.2f}')}</b>\n"
+            "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+            "<b>🎯 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗧𝗔𝗥𝗚𝗘𝗧 𝗽𝗿𝗼𝗳𝗶𝘁 𝗮𝗺𝗼𝘂𝗻𝘁:</b>\n"
+            "<b>𝗛𝗼𝘄 𝗺𝘂𝗰𝗵 𝗱𝗼 𝘆𝗼𝘂 𝘄𝗮𝗻𝘁 𝘁𝗼 𝗲𝗮𝗿𝗻? (𝗶𝗻 ৳)</b>"
+        )
+        await update.message.reply_text(target_msg, parse_mode="HTML")
+        return
+
+    if state.get("awaiting") == "phone":
+        state["temp_phone"] = text
+        state["awaiting"] = "password"
+        await update.message.reply_text(
+            "<b>╔════════════════════════╗</b>\n"
+            "<b>║  🔐 𝗔𝗖𝗖𝗢𝗨𝗡𝗧 𝗟𝗢𝗚𝗜𝗡 🔐  ║</b>\n"
+            "<b>╚════════════════════════╝</b>\n"
+            f"<b>☎️ 𝗡𝘂𝗺𝗯𝗲𝗿 : {bnum(text)}</b>\n\n"
+            "<b>🔑 𝗡𝗼𝘄 𝗲𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗽𝗮𝘀𝘀𝘄𝗼𝗿𝗱:</b>\n"
+            "<b>𝗬𝗼𝘂𝗿 𝗺𝗲𝘀𝘀𝗮𝗴𝗲 𝘄𝗶𝗹𝗹 𝗯𝗲 𝗱𝗲𝗹𝗲𝘁𝗲𝗱 𝗶𝗺𝗺𝗲𝗱𝗶𝗮𝘁𝗲𝗹𝘆 𝗳𝗼𝗿 𝘀𝗲𝗰𝘂𝗿𝗶𝘁𝘆.</b>",
+            parse_mode="HTML"
+        )
+        return
+
+    if state.get("awaiting") == "password":
+        state["temp_password"] = text
+        state["awaiting"] = None
+        try: await update.message.delete()
+        except: pass
+
+        status_msg = await ctx.bot.send_message(chat_id=uid, text="<b>🔄 𝗖𝗢𝗡𝗡𝗘𝗖𝗧𝗜𝗡𝗚 𝗧𝗢 𝗦𝗜𝗧𝗘...\n[░░░░░░░░░░] 0%</b>", parse_mode="HTML")
+        
+        success, msg, real_token, expiry, real_uid, login_bal = await asyncio.to_thread(refresh_token, state["session"], state["temp_phone"], state["temp_password"])
+        
+        if success:
+            state["lottery_token"] = real_token
+            state["token_expiry_time"] = expiry
+            state["real_uid"] = real_uid
+            if state["temp_phone"] not in state["accounts"]:
+                state["accounts"].append(state["temp_phone"])
+            
+            balance = await asyncio.to_thread(fetch_game_balance, state["session"], real_token)
+            
+            if balance is None: 
+                balance = login_bal 
+                
+            state["balance"] = balance
+            
+            await status_msg.delete()
+            masked_phone = "****" + bnum(state["temp_phone"][-4:])
+            display_uid = fmt_uid(real_uid)
+            
+            dashboard_msg = (
+                "<b>╔═══════════════════════╗</b>\n"
+                "<b>║  🎉 𝗟𝗢𝗚𝗜𝗡 𝗦𝗨𝗖𝗖𝗘𝗦𝗦𝗙𝗨𝗟 ✅ ║</b>\n"
+                "<b>╚═══════════════════════╝</b>\n"
+                "\n"
+                "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+                "<b>☎️ 𝗣𝗵𝗼𝗻𝗲 𝗡𝘂𝗺𝗯𝗲𝗿</b>\n"
+                f"<b>{masked_phone}</b>\n"
+                "\n"
+                "<b>👤 𝗔𝗰𝗰𝗼𝘂𝗻𝘁 𝗨𝗜𝗗</b>\n"
+                f"<b>{bnum(display_uid)}</b>\n"
+                "\n"
+                "<b>💰 𝗔𝗰𝗰𝗼𝘂𝗻𝘁 𝗕𝗮𝗹𝗮𝗻𝗰𝗲</b>\n"
+                f"<b>৳ {bnum(f'{balance:.2f}')}</b>\n"
+                "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+                "\n"
+                "<b>🧠 𝗔𝗻𝗮𝗹𝘆𝘀𝗶𝘀 𝗘𝗻𝗴𝗶𝗻𝗲:  𝗥𝗘𝗔𝗗𝗬</b>\n"
+                "<b>🚀 𝗔𝘂𝘁𝗼𝗧𝗿𝗮𝗱𝗲 𝗦𝘆𝘀𝘁𝗲𝗺: 𝗥𝗘𝗔𝗗𝗬</b>\n"
+                "\n"
+                "<b>👇 𝗣𝗿𝗲𝘀𝘀 𝗦𝗧𝗔𝗥𝗧 𝗬𝗢𝗨𝗥 𝗧𝗔𝗥𝗚𝗘𝗧 𝘁𝗼 𝗯𝗲𝗴𝗶𝗻</b>"
+            )
+            
+            if balance == 0.0:
+                dashboard_msg += "\n\n<b>⚠️ 𝗡𝗼𝘁𝗲: 𝗕𝗮𝗹𝗮𝗻𝗰𝗲 ৳ 𝟬.𝟬𝟬 𝗱𝗲𝗸𝗵𝗮𝗰𝗰𝗵𝗲. 𝗔𝗽𝗻𝗮𝗿 𝗺𝗮𝗶𝗻 𝘄𝗮𝗹𝗹𝗲𝘁 𝘁𝗵𝗲𝗸𝗲 𝗴𝗮𝗺𝗲 𝘄𝗮𝗹𝗹𝗲𝘁𝗲 𝗯𝗮𝗹𝗮𝗻𝗰𝗲 𝘁𝗿𝗮𝗻𝘀𝗳𝗲𝗿 𝗸𝗼𝗿𝗲𝗻 𝗶𝗻𝗮 𝗻𝗶𝘀𝗰𝗵𝗶𝘁 𝗸𝗼𝗿𝘂𝗻.</b>"
+
+            reply_keyboard = [[KeyboardButton("🚀 𝗦𝗧𝗔𝗥𝗧 𝗬𝗢𝗨𝗥 𝗧𝗔𝗥𝗚𝗘𝗧")], [KeyboardButton("🛑 𝗦𝗧𝗢𝗣 𝗧𝗥𝗔𝗗𝗘"), KeyboardButton("🚪 𝗟𝗢𝗚𝗢𝗨𝗧")]]
+            await ctx.bot.send_message(chat_id=uid, text=dashboard_msg, reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True), parse_mode="HTML")
+        else:
+            await status_msg.delete()
+            await ctx.bot.send_message(chat_id=uid, text=f"<b>❌ 𝗟𝗢𝗚𝗜𝗡 𝗙𝗔𝗜𝗟𝗘𝗗\n𝗞𝗮𝗿𝗼𝗻: {msg}</b>", parse_mode="HTML")
+        return
+
+    if state.get("awaiting") == "target":
+        try:
+            target_amount = float(text)
+            if target_amount <= 0:
+                raise ValueError()
+            state["target"] = target_amount
+            balance = float(state.get('balance', 0.00))
+            stop_at = balance + target_amount
+            target_set_msg = (
+                "<b>╔════════════════════════╗</b>\n"
+                "<b>║   🎯 𝗧𝗔𝗥𝗚𝗘𝗧 𝗦𝗘𝗧 🎯    ║</b>\n"
+                "<b>╚════════════════════════╝</b>\n"
+                f"<b>💰 𝗕𝗮𝗹𝗮𝗻𝗰𝗲  : ৳ {bnum(f'{balance:.2f}')} </b>\n"
+                f"<b>🎯 𝗧𝗮𝗿𝗴𝗲𝘁   : ৳ {bnum(f'{target_amount:.2f}')} 𝗽𝗿𝗼𝗳𝗶𝘁 </b>\n"
+                f"<b>🏦 𝗦𝘁𝗼𝗽 𝗔𝘁  : ৳ {bnum(f'{stop_at:.2f}')}</b>\n"
+                "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+                "<b>🚀 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗦𝗧𝗘𝗣 𝗖𝗢𝗨𝗡𝗧: 𝗛𝗼𝘄 𝗺𝗮𝗻𝘆 𝘀𝘁𝗲𝗽𝘀? (𝗲.𝗴. 𝟱)</b>"
+            )
+            state["awaiting"] = "steps"
+            await update.message.reply_text(target_set_msg, parse_mode="HTML")
+        except ValueError:
+            await update.message.reply_text("<b>❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗮𝗺𝗼𝘂𝗻𝘁. 𝗣𝗹𝗲𝗮𝘀𝗲 𝗲𝗻𝘁𝗲𝗿 𝗮 𝗽𝗼𝘀𝗶𝘁𝗶𝘃𝗲 𝗻𝘂𝗺𝗯𝗲𝗿 (𝗶𝗻 ৳).</b>", parse_mode="HTML")
+        return
+
+    if state.get("awaiting") == "steps":
+        try:
+            steps_n = int(text)
+            if steps_n < 1 or steps_n > 20:
+                raise ValueError()
+            state["steps"] = steps_n
+            state["step_amounts"] = []
+            state["current_step"] = 0
+            state["awaiting"] = "step_amount"
+            await update.message.reply_text(build_step_amounts_msg(steps_n), parse_mode="HTML")
+        except ValueError:
+            await update.message.reply_text("<b>❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱. 𝗘𝗻𝘁𝗲𝗿 𝗮 𝗻𝘂𝗺𝗯𝗲𝗿 𝗯𝗲𝘁𝘄𝗲𝗲𝗻 𝟭-𝟮𝟬.</b>", parse_mode="HTML")
+        return
+
+    if state.get("awaiting") == "step_amount":
+        try:
+            amt = float(text)
+            if amt <= 0:
+                raise ValueError()
+            state["step_amounts"].append(amt)
+            state["current_step"] += 1
+
+            if state["current_step"] < state["steps"]:
+                await update.message.reply_text(build_single_step_prompt(state["current_step"] + 1), parse_mode="HTML")
+            else:
+                state["awaiting"] = None
+                issue, phase = await asyncio.to_thread(get_panel_data, state["session"], state["lottery_token"])
+                cfg_msg = build_config_msg(
+                    state["balance"], state["target"], state["balance"] + state["target"],
+                    state["steps"], state["step_amounts"], issue
+                )
+                kb = [
+                    [InlineKeyboardButton("🚀 𝗦𝗧𝗔𝗥𝗧 𝗧𝗥𝗔𝗗𝗘", callback_data="start_trade")],
+                    [InlineKeyboardButton("❌ 𝗖𝗔𝗡𝗖𝗘𝗟", callback_data="cancel_trade")]
+                ]
+                await update.message.reply_text(cfg_msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode="HTML")
+        except ValueError:
+            await update.message.reply_text("<b>❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗮𝗺𝗼𝘂𝗻𝘁. 𝗘𝗻𝘁𝗲𝗿 𝗮 𝗽𝗼𝘀𝗶𝘁𝗶𝘃𝗲 𝗻𝘂𝗺𝗯𝗲𝗿.</b>", parse_mode="HTML")
+        return
+
+async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    uid = query.from_user.id
+    if not is_authorized(uid):
+        return
+    state = get_state(uid)
+
+    if query.data == "start_login":
+        state["awaiting"] = "phone"
+        await query.message.reply_text(
+            "<b>╔═════════════════════════╗</b>\n"
+            "<b>║   🔐 𝗔𝗖𝗖𝗢𝗨𝗡𝗧 𝗟𝗢𝗚𝗜𝗡 🔐   ║</b>\n"
+            "<b>╚═════════════════════════╝</b>\n"
+            "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+            "<b>📱 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗗𝗞 𝗪𝗜𝗡 𝗽𝗵𝗼𝗻𝗲 𝗻𝘂𝗺𝗯𝗲𝗿:</b>\n"
+            "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
+            "<b>𝗘𝘃𝗲𝗿𝘆𝗼𝗻𝗲 𝘂𝘀𝗲𝘀 𝘁𝗵𝗲𝗶𝗿 𝗼𝘄𝗻 𝗮𝗰𝗰𝗼𝘂𝗻𝘁 —</b>\n"
+            "<b>𝘆𝗼𝘂𝗿 𝘀𝗲𝘀𝘀𝗶𝗼𝗻 𝗶𝘀 𝗽𝗿𝗶𝘃𝗮𝘁𝗲.</b>",
+            parse_mode="HTML"
+        )
+        return
+
+    if query.data == "start_trade":
+        if state.get("trade_running"):
+            await query.message.reply_text("<b>⚠️ 𝗧𝗿𝗮𝗱𝗲 𝗮𝗹𝗿𝗲𝗮𝗱𝘆 𝗿𝘂𝗻𝗻𝗶𝗻𝗴.</b>", parse_mode="HTML")
+            return
+        if not state.get("lottery_token") or not state.get("step_amounts"):
+            await query.message.reply_text("<b>❌ 𝗦𝗲𝘁𝘂𝗽 𝗶𝗻𝗰𝗼𝗺𝗽𝗹𝗲𝘁𝗲. 𝗣𝗹𝗲𝗮𝘀𝗲 /start 𝗮𝗴𝗮𝗶𝗻.</b>", parse_mode="HTML")
+            return
+        
+        state["trade_running"] = True
+        state["auto_trade_shown"] = False
+        state["prediction_shown"] = False
+        state["fail_retry_shown"] = False
+        state["last_betted_issue"] = None
+        
+        task = asyncio.create_task(trade_worker(ctx.bot, uid))
+        state["trade_task"] = task
+        
+        try:
+            await query.message.delete()
+        except:
+            pass
+        return
+
+    if query.data == "cancel_trade":
+        state["trade_running"] = False
+        state["step_amounts"] = []
+        state["awaiting"] = None
+        await query.message.edit_text("<b>❌ 𝗧𝗿𝗮𝗱𝗲 𝗰𝗮𝗻𝗰𝗲𝗹𝗲𝗱. 𝗬𝗼𝘂 𝗰𝗮𝗻 𝗿𝗲𝘀𝘁𝗮𝗿𝘁 𝘁𝗵𝗲 𝗽𝗿𝗼𝗰𝗲𝘀𝘀.</b>", parse_mode="HTML")
+        return
+
+# ───────────────────────────────────────
+# ৮. Render Keep-Alive
+# ───────────────────────────────────────
+app = Flask('')
+
+@app.route('/')
+def home():
+    return "Bot is running perfectly!"
+
+def run_flask():
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host='0.0.0.0', port=port)
+
+def keep_alive():
+    t = Thread(target=run_flask)
+    t.start()
+
+# ───────────────────────────────────────
+# ৯. Main
+# ───────────────────────────────────────
+def main():
+    keep_alive() 
+    
+    application = Application.builder().token(BOT_TOKEN).build()
+    application.add_handler(CommandHandler("start", cmd_start))
+    application.add_handler(CommandHandler("getid", cmd_getid))
+    application.add_handler(CallbackQueryHandler(callback_handler))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    
+    logger.info("🤖 Bot is starting...")
+    application.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+
+if __name__ == "__main__":
+    main()
