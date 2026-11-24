@@ -238,7 +238,7 @@ def get_panel_data(session, real_token):
         "accept": "application/json, text/plain, */*",
         "accept-language": "en-US,en;q=0.9",
         "authorization": f"Bearer {real_token}",
-        "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
+        "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/", # Updated to dkwin9
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
@@ -262,6 +262,10 @@ def get_panel_data(session, real_token):
     return None, None
 
 def fetch_game_balance(session, real_token):
+    if not real_token:
+        logger.error("Balance fetch failed: Token is empty")
+        return 0.0
+
     bal_rnd = random.randint(100000000000, 999999999999)
     bal_ts = int(time.time())
     bal_sig = generate_balance_sig(bal_rnd, bal_ts)
@@ -270,21 +274,38 @@ def fetch_game_balance(session, real_token):
     bal_headers = {
         "accept": "application/json, text/plain, */*",
         "authorization": f"Bearer {real_token}",
-        "origin": "https://dkwin8.com",
-        "referer": "https://dkwin8.com/",
+        "origin": "https://dkwin9.com",  # dkwin8 থেকে পরিবর্তন করে dkwin9 করা হলো
+        "referer": "https://dkwin9.com/", # dkwin8 থেকে পরিবর্তন করে dkwin9 করা হলো
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
+    
     try:
         bal_res = session.get(bal_url, headers=bal_headers, timeout=15)
-        bal_data = bal_res.json()
+        logger.info(f"Balance API Status Code: {bal_res.status_code}")
+        
+        try:
+            bal_data = bal_res.json()
+        except Exception as json_err:
+            logger.error(f"Balance API returned non-JSON: {bal_res.text}")
+            return 0.0
+            
         if bal_data.get("code") == 0:
-            return float(bal_data['data']['balance'])
+            try:
+                data_obj = bal_data.get('data')
+                if data_obj and 'balance' in data_obj:
+                    return float(data_obj['balance'])
+                else:
+                    logger.error(f"Balance key missing in data: {bal_data}")
+                    return 0.0
+            except Exception as e:
+                logger.error(f"Balance parsing error: {e}")
+                return 0.0
         else:
             logger.error(f"Balance Fetch API Error: {bal_data}")
-            return None 
+            return 0.0 
     except Exception as e:
         logger.error(f"Balance Fetch Exception: {e}")
-    return None
+        return 0.0
 
 def place_bet(session, real_token, issue_number, amount, choice):
     try:
@@ -304,8 +325,8 @@ def place_bet(session, real_token, issue_number, amount, choice):
             "accept-language": "en-US,en;q=0.9",
             "authorization": f"Bearer {real_token}",
             "content-type": "application/json",
-            "origin": "https://dkwin8.com",
-            "referer": "https://dkwin8.com/",
+            "origin": "https://dkwin9.com",
+            "referer": "https://dkwin9.com/",
             "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
             "sec-ch-ua-mobile": "?1",
             "sec-ch-ua-platform": '"Android"',
@@ -336,7 +357,7 @@ def fetch_win_loss(session, real_token, issue_number):
             "accept": "application/json, text/plain, */*",
             "accept-language": "en-US,en;q=0.9",
             "authorization": f"Bearer {real_token}",
-            "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
+            "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/",
             "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
         }
         res = session.get(url, headers=headers, timeout=15)
@@ -908,6 +929,10 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             state["lottery_token"] = real_token
             state["token_expiry_time"] = expiry
             state["real_uid"] = real_uid
+            
+            # 👇 লগইন সফল হওয়ার পর ১ সেকেন্ড অপেক্ষা করা হচ্ছে যাতে সার্ভার টোকেন প্রসেস করতে পারে
+            await asyncio.sleep(1) 
+            
             if state["temp_phone"] not in state["accounts"]:
                 state["accounts"].append(state["temp_phone"])
             
