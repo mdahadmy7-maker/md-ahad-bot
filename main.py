@@ -238,7 +238,7 @@ def get_panel_data(session, real_token):
         "accept": "application/json, text/plain, */*",
         "accept-language": "en-US,en;q=0.9",
         "authorization": f"Bearer {real_token}",
-        "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/", # Updated to dkwin9
+        "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     try:
@@ -264,7 +264,7 @@ def get_panel_data(session, real_token):
 def fetch_game_balance(session, real_token):
     if not real_token:
         logger.error("Balance fetch failed: Token is empty")
-        return 0.0
+        return None
 
     bal_rnd = random.randint(100000000000, 999999999999)
     bal_ts = int(time.time())
@@ -274,38 +274,30 @@ def fetch_game_balance(session, real_token):
     bal_headers = {
         "accept": "application/json, text/plain, */*",
         "authorization": f"Bearer {real_token}",
-        "origin": "https://dkwin9.com",  # dkwin8 থেকে পরিবর্তন করে dkwin9 করা হলো
-        "referer": "https://dkwin9.com/", # dkwin8 থেকে পরিবর্তন করে dkwin9 করা হলো
+        "origin": "https://dkwin8.com",  # স্ট্যান্ডঅ্যালোন স্ক্রিপ্টের মতো আগের অবস্থায় ফেরত
+        "referer": "https://dkwin8.com/",
         "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
     }
     
     try:
         bal_res = session.get(bal_url, headers=bal_headers, timeout=15)
-        logger.info(f"Balance API Status Code: {bal_res.status_code}")
+        # রেসপন্স টেক্সট প্রিন্ট করা হচ্ছে যাতে Render Logs-এ দেখা যায়
+        logger.info(f"Balance API Status: {bal_res.status_code} | Response: {bal_res.text[:200]}")
         
-        try:
-            bal_data = bal_res.json()
-        except Exception as json_err:
-            logger.error(f"Balance API returned non-JSON: {bal_res.text}")
-            return 0.0
-            
+        bal_data = bal_res.json()
         if bal_data.get("code") == 0:
-            try:
-                data_obj = bal_data.get('data')
-                if data_obj and 'balance' in data_obj:
-                    return float(data_obj['balance'])
-                else:
-                    logger.error(f"Balance key missing in data: {bal_data}")
-                    return 0.0
-            except Exception as e:
-                logger.error(f"Balance parsing error: {e}")
-                return 0.0
+            data_obj = bal_data.get('data')
+            if data_obj and 'balance' in data_obj:
+                return float(data_obj['balance'])
+            else:
+                logger.error(f"Balance key missing in data: {bal_data}")
+                return None
         else:
-            logger.error(f"Balance Fetch API Error: {bal_data}")
-            return 0.0 
+            logger.error(f"Balance Fetch API Error Code: {bal_data}")
+            return None 
     except Exception as e:
         logger.error(f"Balance Fetch Exception: {e}")
-        return 0.0
+        return None
 
 def place_bet(session, real_token, issue_number, amount, choice):
     try:
@@ -325,8 +317,8 @@ def place_bet(session, real_token, issue_number, amount, choice):
             "accept-language": "en-US,en;q=0.9",
             "authorization": f"Bearer {real_token}",
             "content-type": "application/json",
-            "origin": "https://dkwin9.com",
-            "referer": "https://dkwin9.com/",
+            "origin": "https://dkwin8.com",
+            "referer": "https://dkwin8.com/",
             "sec-ch-ua": '"Chromium";v="139", "Not;A=Brand";v="99"',
             "sec-ch-ua-mobile": "?1",
             "sec-ch-ua-platform": '"Android"',
@@ -357,7 +349,7 @@ def fetch_win_loss(session, real_token, issue_number):
             "accept": "application/json, text/plain, */*",
             "accept-language": "en-US,en;q=0.9",
             "authorization": f"Bearer {real_token}",
-            "origin": "https://dkwin9.com", "referer": "https://dkwin9.com/",
+            "origin": "https://dkwin8.com", "referer": "https://dkwin8.com/",
             "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
         }
         res = session.get(url, headers=headers, timeout=15)
@@ -801,6 +793,45 @@ async def cmd_getid(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         parse_mode="HTML"
     )
 
+# 👇 নতুন ডিবাগ কমান্ড যা দিয়ে সার্ভার রেসপন্স চেক করা যাবে
+async def cmd_checkbal(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
+    uid = update.effective_user.id
+    state = get_state(uid)
+    token = state.get("lottery_token")
+    
+    if not token:
+        await update.message.reply_text("❌ আপনি লগইন করেননি। আগে /start দিয়ে লগইন করুন।")
+        return
+        
+    await update.message.reply_text("🔄 চেক করা হচ্ছে... গেম সার্ভারে রিকোয়েস্ট পাঠানো হচ্ছে।")
+    
+    bal_rnd = random.randint(100000000000, 999999999999)
+    bal_ts = int(time.time())
+    bal_sig = generate_balance_sig(bal_rnd, bal_ts)
+    bal_url = f"https://api.ar-lottery01.com/api/Lottery/GetBalance?language=en&random={bal_rnd}&signature={bal_sig}&timestamp={bal_ts}"
+    
+    bal_headers = {
+        "accept": "application/json, text/plain, */*",
+        "authorization": f"Bearer {token}",
+        "origin": "https://dkwin8.com",
+        "referer": "https://dkwin8.com/",
+        "user-agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/139.0.0.0 Mobile Safari/537.36"
+    }
+    
+    try:
+        res = await asyncio.to_thread(state["session"].get, bal_url, headers=bal_headers, timeout=15)
+        if res.status_code == 200:
+            try:
+                res.json()
+                await update.message.reply_text(f"✅ স্ট্যাটাস: {res.status_code}\n\nরেসপন্স:\n`{res.text}`", parse_mode="Markdown")
+            except:
+                # যদি JSON না হয় (যেমন ক্লাউডফ্লেয়ার ব্লক), তবে টেক্সট দেখাবে
+                await update.message.reply_text(f"⚠️ স্ট্যাটাস: {res.status_code} (JSON নয়)\n\nরেসপন্স:\n`{res.text[:500]}`", parse_mode="Markdown")
+        else:
+            await update.message.reply_text(f"❌ স্ট্যাটাস: {res.status_code}\n\nরেসপন্স:\n`{res.text[:500]}`", parse_mode="Markdown")
+    except Exception as e:
+        await update.message.reply_text(f"🚨 এরর: {str(e)}")
+
 async def cmd_start(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     if not is_authorized(uid):
@@ -930,7 +961,6 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             state["token_expiry_time"] = expiry
             state["real_uid"] = real_uid
             
-            # 👇 লগইন সফল হওয়ার পর ১ সেকেন্ড অপেক্ষা করা হচ্ছে যাতে সার্ভার টোকেন প্রসেস করতে পারে
             await asyncio.sleep(1) 
             
             if state["temp_phone"] not in state["accounts"]:
@@ -1122,6 +1152,7 @@ def main():
     application = Application.builder().token(BOT_TOKEN).build()
     application.add_handler(CommandHandler("start", cmd_start))
     application.add_handler(CommandHandler("getid", cmd_getid))
+    application.add_handler(CommandHandler("checkbal", cmd_checkbal)) # 👈 নতুন ডিবাগ কমান্ড
     application.add_handler(CallbackQueryHandler(callback_handler))
     application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
     
