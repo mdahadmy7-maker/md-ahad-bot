@@ -196,7 +196,7 @@ def refresh_token(session, phone, password):
         res = session.post(LOGIN_URL, json=payload, headers=headers, timeout=15)
         data = res.json()
         if data.get("code") != 0:
-            return False, data.get("msg"), None, None, None
+            return False, data.get("msg"), None, None, None, 0.0
         
         token = data["data"]["token"]
         lottery_url = data["data"].get("lotteryLoginUrl", "")
@@ -206,12 +206,15 @@ def refresh_token(session, phone, password):
         real_uid = jwt_data.get("UserId", "Unknown")
         expiry = decode_jwt_expiry(token)
         
+        # Direct balance from login response if available
+        login_balance = float(data["data"].get("balance", 0.0))
+
         if expiry == 0:
             expiry = int(time.time()) + 7200
             
-        return True, "Success", lottery_token, expiry, real_uid
+        return True, "Success", lottery_token, expiry, real_uid, login_balance
     except Exception as e:
-        return False, str(e), None, None, None
+        return False, str(e), None, None, None, 0.0
 
 def get_panel_data(session, real_token):
     # Try GetPanel first
@@ -591,7 +594,7 @@ async def trade_worker(bot, uid):
             break
 
         if not token or int(time.time()) >= (state["token_expiry_time"] - 10):
-            success, msg, new_token, expiry, _ = await asyncio.to_thread(refresh_token, session, state["temp_phone"], state["temp_password"])
+            success, msg, new_token, expiry, _, _ = await asyncio.to_thread(refresh_token, session, state["temp_phone"], state["temp_password"])
             if success:
                 token = new_token
                 state["lottery_token"] = new_token
@@ -838,6 +841,8 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             return
         state["awaiting"] = "target"
         balance_val = float(state.get('balance', 0.00))
+        
+        # আপনার দেওয়া নতুন টার্গেট মেসেজ
         target_msg = (
             "<b>╔════════════════════════╗</b>\n"
             "<b>║   🚀 𝗦𝗧𝗔𝗥𝗧 𝗬𝗢𝗨𝗥 𝗧𝗔𝗥𝗚𝗘𝗧 🚀  ║</b>\n"
@@ -873,7 +878,9 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         except: pass
 
         status_msg = await ctx.bot.send_message(chat_id=uid, text="<b>🔄 𝗖𝗢𝗡𝗡𝗘𝗖𝗧𝗜𝗡𝗚 𝗧𝗢 𝗦𝗜𝗧𝗘...\n[░░░░░░░░░░] 0%</b>", parse_mode="HTML")
-        success, msg, real_token, expiry, real_uid = await asyncio.to_thread(refresh_token, state["session"], state["temp_phone"], state["temp_password"])
+        
+        # লগইন থেকে সরাসরি ব্যালেন্স নেওয়া হচ্ছে
+        success, msg, real_token, expiry, real_uid, login_bal = await asyncio.to_thread(refresh_token, state["session"], state["temp_phone"], state["temp_password"])
         
         if success:
             state["lottery_token"] = real_token
@@ -881,7 +888,14 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
             state["real_uid"] = real_uid
             if state["temp_phone"] not in state["accounts"]:
                 state["accounts"].append(state["temp_phone"])
+            
+            # API কল করে ব্যালেন্স চেক
             balance = await asyncio.to_thread(fetch_game_balance, state["session"], real_token)
+            
+            # যদি API থেকে 0 আসে, কিন্তু লগইন রেসপন্সে ব্যালেন্স থাকে, তবে সেটা নিবে
+            if balance == 0.0 and login_bal > 0.0:
+                balance = login_bal
+                
             state["balance"] = balance
             
             await status_msg.delete()
@@ -932,7 +946,7 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                 f"<b>🎯 𝗧𝗮𝗿𝗴𝗲𝘁   : ৳ {bnum(f'{target_amount:.2f}')} 𝗽𝗿𝗼𝗳𝗶𝘁 </b>\n"
                 f"<b>🏦 𝗦𝘁𝗼𝗽 𝗔𝘁  : ৳ {bnum(f'{stop_at:.2f}')}</b>\n"
                 "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
-                "<b>🚀 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗦𝗧𝗘𝗣 𝗖𝗢𝗨𝗡𝗧: 𝗛𝗼𝘄 𝗺𝗮𝗻𝘆 𝘀𝘁𝗲𝗽𝘀? (𝗲.𝗴. 𝟱, {𝟭,𝟮,𝟰} 𝟱𝟬)</b>"
+                "<b>🚀 𝗘𝗻𝘁𝗲𝗿 𝘆𝗼𝘂𝗿 𝗦𝗧𝗘𝗣 𝗖𝗢𝗨𝗡𝗧: 𝗛𝗼𝘄 𝗺𝗮𝗻𝘆 𝘀𝘁𝗲𝗽𝘀? (𝗲.𝗴. 𝟱)</b>"
             )
             state["awaiting"] = "steps"
             await update.message.reply_text(target_set_msg, parse_mode="HTML")
@@ -971,7 +985,11 @@ async def text_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
                     state["balance"], state["target"], state["balance"] + state["target"],
                     state["steps"], state["step_amounts"], issue
                 )
-                kb = [[InlineKeyboardButton("🚀 𝗦𝗧𝗔𝗥𝗧 𝗧𝗥𝗔𝗗𝗘", callback_data="start_trade")]]
+                # এখানে START TRADE এবং CANCEL বাটন দুটি দেওয়া হয়েছে (আপনার স্ক্রিনশটের মতো)
+                kb = [
+                    [InlineKeyboardButton("🚀 𝗦𝗧𝗔𝗥𝗧 𝗧𝗥𝗔𝗗𝗘", callback_data="start_trade")],
+                    [InlineKeyboardButton("❌ 𝗖𝗔𝗡𝗖𝗘𝗟", callback_data="cancel_trade")]
+                ]
                 await update.message.reply_text(cfg_msg, reply_markup=InlineKeyboardMarkup(kb), parse_mode="HTML")
         except ValueError:
             await update.message.reply_text("<b>❌ 𝗜𝗻𝘃𝗮𝗹𝗶𝗱 𝗮𝗺𝗼𝘂𝗻𝘁. 𝗘𝗻𝘁𝗲𝗿 𝗮 𝗽𝗼𝘀𝗶𝘁𝗶𝘃𝗲 𝗻𝘂𝗺𝗯𝗲𝗿.</b>", parse_mode="HTML")
@@ -1007,14 +1025,29 @@ async def callback_handler(update: Update, ctx: ContextTypes.DEFAULT_TYPE):
         if not state.get("lottery_token") or not state.get("step_amounts"):
             await query.message.reply_text("<b>❌ 𝗦𝗲𝘁𝘂𝗽 𝗶𝗻𝗰𝗼𝗺𝗽𝗹𝗲𝘁𝗲. 𝗣𝗹𝗲𝗮𝘀𝗲 /start 𝗮𝗴𝗮𝗶𝗻.</b>", parse_mode="HTML")
             return
+        
         state["trade_running"] = True
         state["auto_trade_shown"] = False
         state["prediction_shown"] = False
         state["fail_retry_shown"] = False
         state["last_betted_issue"] = None
+        
+        # "TRADE STARTED" মেসেজটি সরিয়ে দেওয়া হয়েছে, যাতে সরাসরি পরের মেসেজটি আসে
         task = asyncio.create_task(trade_worker(ctx.bot, uid))
         state["trade_task"] = task
-        await query.message.reply_text("<b>🚀 𝗧𝗥𝗔𝗗𝗘 𝗦𝗧𝗔𝗥𝗧𝗘𝗗! 🎬</b>", parse_mode="HTML")
+        
+        # মেসেজটি ডিলিট করে দেওয়া হচ্ছে
+        try:
+            await query.message.delete()
+        except:
+            pass
+        return
+
+    if query.data == "cancel_trade":
+        state["trade_running"] = False
+        state["step_amounts"] = []
+        state["awaiting"] = None
+        await query.message.edit_text("<b>❌ 𝗧𝗿𝗮𝗱𝗲 𝗰𝗮𝗻𝗰𝗲𝗹𝗲𝗱. 𝗬𝗼𝘂 𝗰𝗮𝗻 𝗿𝗲𝘀𝘁𝗮𝗿𝘁 𝘁𝗵𝗲 𝗽𝗿𝗼𝗰𝗲𝘀𝘀.</b>", parse_mode="HTML")
         return
 
 # ───────────────────────────────────────
