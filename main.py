@@ -21,21 +21,20 @@ from threading import Thread
 # ═══════════════════════════════════════════
 # ১. কনফিগারেশন এবং কঠোর সিকিউরিটি
 # ═══════════════════════════════════════════
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "9110020830:AAFlTCUeg2fePypQatZwuuV3BjS8BStckuE")
+BOT_TOKEN = os.environ.get("BOT_TOKEN", "11111111111111")
 
 if not BOT_TOKEN or BOT_TOKEN == "YOUR_BOT_TOKEN_HERE":
     raise ValueError("BOT_TOKEN is missing! Please set it in the code or Environment Variables.")
 
 ADMIN_ID = 7083673844
 NOTIFICATION_CHAT_ID = -1005939365148
-AUTHORIZED_PHONES = ["01745711676"]
+AUTHORIZED_PHONES = ["01745701676"]
 PENDING_PHONES = {}
 
 LOGIN_URL = "https://api.dkwinapi.com/api/webapi/Login"
 PANEL_URL = "https://api.ar-lottery01.com/api/Energy/GetPanel"
 BET_URL = "https://api.ar-lottery01.com/api/Lottery/WinGoBet"
 BALANCE_URL = "https://api.ar-lottery01.com/api/Lottery/GetBalance"
-HISTORY_URL = "https://draw.ar-lottery01.com/WinGo/WinGo_30S/GetHistoryIssuePage.json"
 WIN_LOSS_URL = "https://api.ar-lottery01.com/api/Lottery/GetWinLossResult"
 DEVICE_ID = "4aa593880f5c671907b460252b022635"
 
@@ -89,6 +88,7 @@ WAITING_MSG = (
     "<b>╚═════════════════╝</b>"
 )
 
+# 🎉 টানা ৬টি উইন হলে এই মেসেজ আসবে
 SUPER_WIN_MSG = (
     "<b>╔═══════════════╗</b>\n"
     "<b>║   🎉 𝟲 সুপার উইন 🎉 ║</b>\n"
@@ -402,49 +402,24 @@ def fetch_win_loss(session, real_token, issue_number):
 
             status_str = str(status_raw).lower().strip() if status_raw is not None else ""
 
-            # ═══ FIX: LOSS status আগে চেক — ভুল WIN ডিটেকশন রোধ ═══
-            if status_str in ("false", "0", "loss", "lose", "lost", "fail", "failed", "no"):
-                return False, 0.0
+            if win_amt_found and win_amt > 0:
+                return True, win_amt
 
             if status_str in ("true", "1", "win", "won", "success", "yes"):
-                return True, win_amt if win_amt_found else 0.0
+                return True, win_amt
+            if status_str in ("false", "0", "loss", "lose", "lost", "fail", "failed", "no"):
+                return False, 0.0
 
             if status_str in ("pending", "unsettled", "processing", "waiting"):
                 return None, 0.0
 
-            # status না থাকলে winAmount দেখি
             if win_amt_found:
-                if win_amt > 0:
-                    return True, win_amt
-                else:
-                    return False, 0.0
+                return False, 0.0
 
             return None, 0.0
     except Exception as e:
         logger.error(f"fetch_win_loss error: {e}")
     return None, 0.0
-
-def fetch_result(session, issue_number):
-    try:
-        res = session.get(HISTORY_URL, timeout=10)
-        data = res.json()
-        for item in data.get('data', {}).get('list', []):
-            if str(item.get('issueNumber')) == str(issue_number):
-                premium = str(item.get('premium', '')).upper()
-                if premium in ('B', 'BIG'):
-                    return "Big"
-                elif premium in ('S', 'SMALL'):
-                    return "Small"
-                if 'sum' in item:
-                    total = int(item['sum'])
-                    return "Big" if total >= 23 else "Small"
-                nums = item.get('number', '')
-                if nums:
-                    total = sum(int(x) for x in str(nums).split(','))
-                    return "Big" if total >= 23 else "Small"
-    except Exception as e:
-        logger.error(f"fetch_result error: {e}")
-    return None
 
 # ───────────────────────────────────────
 # ৫. মেসেজ বিল্ডার
@@ -541,6 +516,11 @@ def build_prediction_animation(percent=75):
 def build_new_trade_msg(period, choice, step_num, amount, balance):
     remaining = get_remaining_seconds(period)
     side_icon = "🔵" if str(choice).upper() == "BIG" else "🔴"
+    # ⏱️ Live progress bar — WinGo 30s round timer (elapsed based)
+    elapsed = 30 - remaining
+    pct = min(100, max(0, int(elapsed / 30 * 100)))
+    filled = min(10, max(0, int(10 * elapsed / 30)))
+    progress_bar = "█" * filled + "░" * (10 - filled)
     return (
         "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
         "<b>🤖 𝗡𝗘𝗪 𝗧𝗥𝗔𝗗𝗘 𝗣𝗟𝗔𝗖𝗘𝗗</b>\n"
@@ -557,7 +537,7 @@ def build_new_trade_msg(period, choice, step_num, amount, balance):
         "<b>╚══════════════════════════════════╝</b>\n"
         "<b>⚠️ 𝗢𝗻𝗹𝘆 10 𝗱𝗿𝗮𝘄𝘀 𝗮𝘃𝗮𝗶𝗹𝗮𝗯𝗹𝗲 (𝗻𝗲𝗲𝗱 40) — 𝗽𝗿𝗲𝗹𝗶𝗺𝗶𝗻𝗮𝗿𝘆 𝘀𝗶𝗴𝗻𝗮𝗹</b>\n"
         "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
-        "<b>📊 𝗖𝗼𝗻𝗳𝗶𝗱𝗲𝗻𝗰𝗲 : ████░░░░░░ 45%</b>\n"
+        f"<b>📊 𝗣𝗿𝗼𝗴𝗿𝗲𝘀𝘀 : {progress_bar} {bnum(pct)}%</b>\n"
         "<b>🎯 𝗖𝗼𝗻𝘀𝗲𝗻𝘀𝘂𝘀  :</b>\n"
         "<b>✅ 𝗚𝗮𝘁𝗲       : 🔴 𝗩𝗢𝗟𝗔𝗧𝗜𝗟𝗘 (25/100)</b>\n"
         "<b>✓ 𝗵𝗼𝘀𝘁𝗶𝗹𝗶𝘁𝘆 60/100 ✓ 𝗴𝘂𝘁 25/100</b>\n"
@@ -606,12 +586,13 @@ def build_result_msg(period, choice, step_num, amount, won, pl, balance, wins, l
         f"<b>{next_msg}</b>"
     )
 
+# 🎯 টার্গেট রিচ মেসেজ (আপনার দেওয়া ফরম্যাটে)
 def build_target_reached_msg(start_bal, final_bal, profit, total_trades, wins, losses):
     total = wins + losses
     win_rate = (wins / total * 100) if total > 0 else 0.0
     return (
         "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
-        "<b>🎯 𝗧𝗔𝗥𝗚𝗘𝗧 𝗥𝗘𝗔𝗖𝗛𝗘𝗗 🎉🎉🎉📣</b>\n"
+        "<b>🎯 𝗧𝗔𝗥𝗚𝗘𝗧 𝗥𝗘𝗔𝗖𝗛𝗘𝗗 🎉🎉🎉 📣</b>\n"
         "<b>━━━━━━━━━━━━━━━━━━━━━━━━━━</b>\n"
         "<b>╔══════════════════════════╗</b>\n"
         "<b>║ 💎 𝗦𝗘𝗦𝗦𝗜𝗢𝗡 𝗦𝗨𝗠𝗠𝗔𝗥𝗬 ║</b>\n"
@@ -632,7 +613,7 @@ def build_target_reached_msg(start_bal, final_bal, profit, total_trades, wins, l
     )
 
 # ───────────────────────────────────────
-# ৬. ট্রেড ওয়ার্কার — FIXED WIN/LOSS DETECTION
+# ৬. ট্রেড ওয়ার্কার (🔥 WIN/LOSS API only)
 # ───────────────────────────────────────
 async def trade_worker(bot, uid):
     try:
@@ -700,6 +681,7 @@ async def trade_worker(bot, uid):
             panel_fail_count = 0
             remaining = get_remaining_seconds(issue)
 
+            # 🔥 Only skip if truly too late (no time to place bet at all)
             if remaining < 3:
                 await asyncio.sleep(0.2)
                 continue
@@ -729,6 +711,7 @@ async def trade_worker(bot, uid):
             # 🔥 বেটের আগের ব্যালেন্স ধরে রাখো
             balance_before_bet = curr_bal
 
+            # 🔥 Double-bet ঠেকাতে আগেই mark করি, ব্যর্থ হলে unset করব
             state["last_betted_issue"] = issue
 
             status_code, res_text = await asyncio.to_thread(place_bet, session, token, issue, amount, predicted)
@@ -744,12 +727,13 @@ async def trade_worker(bot, uid):
                     pass
 
             if bet_failed:
+                # যথেষ্ট সময় থাকলে retry করার জন্য mark সরাই
                 if remaining > 5:
                     state["last_betted_issue"] = None
                 await asyncio.sleep(0.3)
                 continue
 
-            # বেট প্লেসের পর ব্যালেন্স (stake কাটা হয়ে যাবে)
+            # 🔥 বেট প্লেসের পর ব্যালেন্স (stake কাটা হয়ে যাবে)
             balance_after_bet = None
             for _ in range(4):
                 try:
@@ -766,47 +750,55 @@ async def trade_worker(bot, uid):
 
             curr_bal = balance_after_bet
 
-            await bot.send_message(chat_id=uid, text=build_new_trade_msg(issue, predicted, current_step + 1, amount, curr_bal), parse_mode="HTML", protect_content=True)
+            # 🔥 মেসেজটি এখানে সেভ করে রাখছি যাতে পরবর্তীতে লাইভ এডিট করা যায়
+            trade_msg = await bot.send_message(chat_id=uid, text=build_new_trade_msg(issue, predicted, current_step + 1, amount, curr_bal), parse_mode="HTML", protect_content=True)
 
-            settle_wait = max(2, remaining) + 3
-            for _ in range(settle_wait):
+            # ⏳ পিরিয়ড শেষ হওয়ার অপেক্ষা — WinGo 30s রাউন্ড শেষ + ৪s সেটেল বাফার
+            settle_wait = max(remaining, 3) + 4
+            for i in range(settle_wait):
                 if not state["trade_running"]:
                     break
                 await asyncio.sleep(1)
+                # 🔥 লাইভ প্রোগ্রেস বার এবং টাইমার আপডেট (৩০ সেকেন্ডের সাথে সিঙ্ক)
+                if i < settle_wait - 4:
+                    try:
+                        await trade_msg.edit_text(
+                            text=build_new_trade_msg(issue, predicted, current_step + 1, amount, curr_bal),
+                            parse_mode="HTML",
+                            protect_content=True
+                        )
+                    except Exception:
+                        pass
 
             if not state["trade_running"]:
                 break
 
             # ═══════════════════════════════════════════════════════════
-            # 🔥 FIXED WIN/LOSS DETECTION
-            #   Priority: History API (সবচেয়ে নির্ভরযোগ্য)
-            #          → Win/Loss API (backup)
-            #          → Balance check (শেষ, শুধু fallback)
+            # 🔥 FAST WIN/LOSS DETECTION — Win/Loss API based
             # ═══════════════════════════════════════════════════════════
             won = None
             win_amount = 0.0
             new_bal = balance_after_bet
 
-            # ─── ধাপ ১: History API (সবচেয়ে নির্ভরযোগ্য) ───
-            for _ in range(15):
+            # ধাপ ১: Balance check — WIN হলে সাথে সাথে ধরা পড়বে
+            for _ in range(5):
                 if not state["trade_running"]:
                     break
                 try:
-                    hist_res = await asyncio.to_thread(fetch_result, session, issue)
-                    if hist_res is not None:
-                        hist_result = hist_res.upper().strip()
-                        pred_upper = predicted.upper().strip()
-                        won = (hist_result == pred_upper)
-                        win_amount = amount * 0.96 if won else 0.0
-                        logger.info(f"History detect: issue={issue} result={hist_result} pred={pred_upper} won={won}")
-                        break
-                except Exception as e:
-                    logger.error(f"History err: {e}")
-                await asyncio.sleep(0.4)
+                    b = await asyncio.to_thread(fetch_game_balance, session, token, 1)
+                    if b is not None:
+                        new_bal = b
+                        if b > balance_after_bet + 0.01:
+                            won = True
+                            win_amount = amount * 0.96
+                            break
+                except:
+                    pass
+                await asyncio.sleep(0.5)
 
-            # ─── ধাপ ২: Win/Loss API (backup) ───
+            # ধাপ ২: Win/Loss API — প্রধান ফলাফল সোর্স
             if won is None:
-                for _ in range(10):
+                for _ in range(15):
                     if not state["trade_running"]:
                         break
                     try:
@@ -814,50 +806,34 @@ async def trade_worker(bot, uid):
                         if wl_won is not None:
                             won = wl_won
                             win_amount = amount * 0.96 if wl_won else 0.0
-                            logger.info(f"WinLoss detect: issue={issue} won={won}")
                             break
-                    except Exception as e:
-                        logger.error(f"WinLoss err: {e}")
+                    except:
+                        pass
                     await asyncio.sleep(0.5)
 
-            # ─── ধাপ ৩: Balance check (final fallback) ───
-            # balance_before_bet থেকে তুলনা করা হচ্ছে (balance_after_bet থেকে নয়)
+            # ধাপ ৩: Extended balance check
             if won is None:
-                for _ in range(8):
+                for _ in range(5):
                     if not state["trade_running"]:
                         break
                     try:
                         b = await asyncio.to_thread(fetch_game_balance, session, token, 1)
                         if b is not None:
                             new_bal = b
-                            # WIN হলে: before + 0.96*amount এর কাছাকাছি হবে
-                            # LOSS হলে: before - amount এর কাছাকাছি হবে
-                            expected_win = balance_before_bet + (amount * 0.96)
-                            expected_loss = balance_before_bet - amount
-                            diff_win = abs(b - expected_win)
-                            diff_loss = abs(b - expected_loss)
-                            if diff_win < diff_loss and b > balance_before_bet:
+                            if b > balance_after_bet + 0.01:
                                 won = True
                                 win_amount = amount * 0.96
-                            elif diff_loss < diff_win and b < balance_before_bet:
-                                won = False
-                                win_amount = 0.0
-                            else:
-                                won = b > balance_before_bet
-                                win_amount = amount * 0.96 if won else 0.0
-                            logger.info(f"Balance detect: before={balance_before_bet} after={b} won={won}")
-                            break
-                    except Exception as e:
-                        logger.error(f"Bal err: {e}")
+                                break
+                    except:
+                        pass
                     await asyncio.sleep(0.5)
 
-            # ─── ধাপ ৪: কিছুই পাওয়া না গেলে LOSS ধরে নাও ───
+            # ধাপ ৪: সব ফেইল করলে LOSS ধরে নাও
             if won is None:
                 won = False
                 win_amount = 0.0
-                logger.warning(f"All detection failed for issue={issue}, defaulting to LOSS")
 
-            # ডিসপ্লের জন্য ফাইনাল ব্যালেন্স
+            # ডিসপ্লের জন্য ফাইনাল ব্যালেন্স (দ্রুত)
             try:
                 final_fetch = await asyncio.to_thread(fetch_game_balance, session, token, 1)
                 if final_fetch is not None:
@@ -885,7 +861,7 @@ async def trade_worker(bot, uid):
 
             await bot.send_message(chat_id=uid, text=build_result_msg(issue, predicted, step_used, amount, won, pl, new_bal, wins, losses, next_step), parse_mode="HTML", protect_content=True)
 
-            # 🔥 টানা ৬টি সঠিক WIN হলে SUPER_WIN_MSG
+            # 🔥 টানা ৬টি উইন হলে SUPER_WIN_MSG পাঠাও
             if won:
                 consecutive_wins += 1
                 if consecutive_wins >= 6:
@@ -920,6 +896,8 @@ async def trade_worker(bot, uid):
                 state["temp_password"] = ""
                 state["session"] = get_resilient_session()
                 break
+
+            # 🔥 কোনো sleep নেই — সাথে সাথে পরের পিরিয়ডের BIG/SMALL বেট দিতে লুপে ফিরে যায়
 
         state["trade_running"] = False
         state["trade_task"] = None
